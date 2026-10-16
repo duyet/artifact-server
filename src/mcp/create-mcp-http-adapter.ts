@@ -24,6 +24,7 @@ import {
   principalCapabilities,
   principalKinds,
 } from "../core/identity.js";
+import type {AccessSetting} from "../core/model.js";
 import type {GitHistoryCapabilityReader} from
   "../git-history/git-history-capability.js";
 import {
@@ -60,6 +61,7 @@ export interface McpHttpAdapterDependencies {
   readonly applicationOrigin: string | null;
   readonly applicationRuntime: ApplicationRuntime;
   readonly contentDomain: string | null;
+  readonly defaultAccessSetting: AccessSetting;
   readonly gitHistory: GitHistoryCapabilityReader;
   readonly linkedArtifacts?: boolean;
   readonly mode: ArtifactMcpServerDependencies["mode"];
@@ -86,6 +88,7 @@ export function createMcpHttpAdapter(
           ?? requestOrigin(context.requestInfo),
         applicationRuntime: dependencies.applicationRuntime,
         contentDomain: dependencies.contentDomain,
+        defaultAccessSetting: dependencies.defaultAccessSetting,
         gitHistory: dependencies.gitHistory.read(),
         linkedArtifacts: dependencies.linkedArtifacts === true,
         mode: dependencies.mode,

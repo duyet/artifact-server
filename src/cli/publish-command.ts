@@ -157,14 +157,15 @@ function publicationCommand(
     }, options.entry);
   }
 
+  const access = options.public ? {accessSetting: "public_link" as const} : {};
   const target = options.name === undefined
     ? {
-      accessSetting: options.public ? "public_link" as const : "account_required" as const,
+      ...access,
       kind: "new_artifact" as const,
       tags: options.tag,
     }
     : {
-      accessSetting: options.public ? "public_link" as const : "account_required" as const,
+      ...access,
       kind: "new_artifact" as const,
       name: options.name,
       tags: options.tag,

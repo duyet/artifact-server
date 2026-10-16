@@ -225,7 +225,7 @@ export async function commitStagedUpload(
 
 const commitTargetSchema = z.discriminatedUnion("kind", [
   z.object({
-    accessSetting: z.enum(["account_required", "public_link"]),
+    accessSetting: z.enum(["account_required", "public_link"]).optional(),
     kind: z.literal("new_artifact"),
     name: z.string(),
     tags: z.array(z.string()).optional(),

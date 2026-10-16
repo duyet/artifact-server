@@ -50,6 +50,7 @@ import {
   commentClearScopes,
   commentThreadStates,
   dispatchedThreadFilters,
+  type AccessSetting,
   type AgentDispatchRecord,
   type AgentDispatchState,
   type ArtifactVersion,
@@ -378,6 +379,8 @@ export interface ArtifactMcpServerDependencies {
   readonly applicationOrigin: string;
   readonly applicationRuntime: ApplicationRuntime;
   readonly contentDomain: string | null;
+  /** The access setting `artifact_commit_upload` applies when the caller names none. */
+  readonly defaultAccessSetting: AccessSetting;
   /** Secret-free optional Git state exposed by capability discovery. */
   readonly gitHistory: GitHistoryCapability;
   /** Advertises the local linked-artifact capability in discovery. */
@@ -1257,7 +1260,7 @@ export function createArtifactMcpServer(
         target: z.discriminatedUnion("kind", [
           z.object({
             accessSetting: accessSettingSchema.default(
-              accessSettings.accountRequired,
+              dependencies.defaultAccessSetting,
             ),
             kind: z.literal("new_artifact"),
             name: z.string().min(1).max(200),

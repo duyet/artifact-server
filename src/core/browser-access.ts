@@ -1,3 +1,5 @@
+import {type AccessSetting, accessSettings} from "./model.js";
+
 /** Browser access modes selected by an Artifact Server deployment entrypoint. */
 export const browserAccessModes = {
   localOwner: "local_owner",
@@ -70,4 +72,11 @@ export function assertTeamLoginMatchesProvider(
       "A private-team server requires exactly one OIDC or WorkOS browser-login provider.",
     );
   }
+}
+
+/** The access setting a new artifact gets when its publisher names none. */
+export function defaultAccessSetting(browserAccess: BrowserAccess): AccessSetting {
+  return browserAccess.loginKind === browserLoginKinds.none
+    ? accessSettings.publicLink
+    : accessSettings.accountRequired;
 }

@@ -186,7 +186,8 @@ export type FilePublicationResult = typeof publishResponseSchema.Type;
 /** Target selected by a file-first publication caller. */
 export type FilePublicationTarget =
   | {
-    readonly accessSetting: "account_required" | "public_link";
+    /** Omitted, the server applies its own default for new artifacts. */
+    readonly accessSetting?: "account_required" | "public_link";
     readonly kind: "new_artifact";
     readonly name?: string;
     readonly tags: readonly string[];
@@ -260,7 +261,7 @@ interface CreateUploadRequestBody {
 
 type CommitPublicationTarget =
   | {
-    readonly accessSetting: "account_required" | "public_link";
+    readonly accessSetting?: "account_required" | "public_link";
     readonly kind: "new_artifact";
     readonly name: string;
     readonly tags: readonly string[];
@@ -385,14 +386,15 @@ function effectiveCommitTarget(
   target: FilePublicationTarget,
   defaultName: string,
 ): CommitPublicationTarget {
-  return target.kind === "new_artifact"
-    ? {
-      accessSetting: target.accessSetting,
-      kind: target.kind,
-      name: target.name ?? defaultName,
-      tags: target.tags,
-    }
-    : target;
+  if (target.kind === "new_version") return target;
+  const named = {
+    kind: target.kind,
+    name: target.name ?? defaultName,
+    tags: target.tags,
+  };
+  return target.accessSetting === undefined
+    ? named
+    : {...named, accessSetting: target.accessSetting};
 }
 
 /** Infer a deterministic browser media type from one file name. */

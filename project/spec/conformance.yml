@@ -4942,3 +4942,17 @@ requirements:
     proof_gap: Tests are not written yet; no deployed run exists.
     depends_on: [AUTH-025]
     evidence: []
+
+  - id: FRK-005
+    kind: behavior
+    behavior: When the browser login kind is none, new artifacts published over HTTP, MCP, or the CLI without an access setting default to public_link; with login on, the default stays account_required.
+    owner: publishing
+    source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
+    acceptance:
+      behavior: {id: FRK-005-B, description: "Publish without an access setting over HTTP, MCP, and the CLI against a no-login server and observe public_link."}
+      failure: {id: FRK-005-F, description: "The same publishes against a server with login on produce account_required, and an explicit setting always wins."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [AUTH-002, FRK-004]
+    evidence: []

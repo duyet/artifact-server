@@ -82,6 +82,7 @@ import type { IssuedApplicationSession } from "../core/installation-identity.js"
 import {
   browserAccessModes,
   browserLoginKinds,
+  defaultAccessSetting,
   type BrowserAccess,
 } from "../core/browser-access.js";
 import {
@@ -200,7 +201,7 @@ const createUploadSchema = z.object({
 const commitUploadSchema = z.object({
   target: z.discriminatedUnion("kind", [
     z.object({
-      accessSetting: accessSettingSchema.default(accessSettings.accountRequired),
+      accessSetting: accessSettingSchema.optional(),
       kind: z.literal("new_artifact"),
       name: z.string().min(1).max(200),
       tags: artifactTagsSchema,
@@ -564,6 +565,7 @@ export function createHttpApp(
     applicationOrigin: dependencies.trustedApplicationOrigin,
     applicationRuntime: dependencies.applicationRuntime,
     contentDomain: dependencies.contentDomain,
+    defaultAccessSetting: defaultAccessSetting(dependencies.browserAccess),
     gitHistory,
     linkedArtifacts: dependencies.linkedArtifacts === true,
     mode: dependencies.trustedApplicationOrigin === null ? "local" : "remote",
@@ -2282,6 +2284,13 @@ export function createHttpApp(
     boundedJsonBody,
     async (context) => {
       const body = commitUploadSchema.parse(await context.req.json());
+      const target = body.target.kind === "new_artifact"
+        ? {
+          ...body.target,
+          accessSetting: body.target.accessSetting
+            ?? defaultAccessSetting(dependencies.browserAccess),
+        }
+        : body.target;
       const result = await runHttpApplicationEffect(
         context,
         dependencies,
@@ -2292,7 +2301,7 @@ export function createHttpApp(
             ),
             principal: context.get("principal"),
             projectId: requestedProjectId(context),
-            target: body.target,
+            target,
             uploadId: context.req.param("uploadId"),
           })
         ),
