@@ -482,6 +482,99 @@ describe("Artifact Server lifecycle CLI", () => {
     }
   }, 30_000);
 
+  test("compact configuration without a content domain selects path mode and keeps the origin checks", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-path-mode-"));
+    const dataDirectory = path.join(parent, "data");
+    try {
+      const initialized = await runCli([
+        "init",
+        "--admin-email",
+        "admin@example.test",
+        "--data",
+        dataDirectory,
+      ]);
+      expect(initialized.exitCode).toBe(0);
+      const environment = compactEnvironment({
+        ARTIFACT_SERVER_CONTENT_DOMAIN: undefined,
+        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-configuration-client",
+        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
+      });
+      const checked = await runCli([
+        "config",
+        "check",
+        "--mode",
+        "compact",
+        "--data",
+        dataDirectory,
+      ], environment);
+      expect(checked.exitCode).toBe(0);
+      expect(JSON.parse(checked.output)).toMatchObject({
+        configuration: {contentDomain: null, status: "valid"},
+      });
+      const parsed = await Promise.all([undefined, ""].map((unset) =>
+        Effect.runPromise(parseCompactRuntimeConfiguration({
+          dataDirectory,
+          environment: {...environment, ARTIFACT_SERVER_CONTENT_DOMAIN: unset},
+          hostname: "127.0.0.1",
+          port: "8787",
+        }))));
+      expect(parsed.map(({contentDomain}) => contentDomain)).toEqual([null, null]);
+      await expect(Effect.runPromise(parseCompactRuntimeConfiguration({
+        dataDirectory,
+        environment: {
+          ...environment,
+          ARTIFACT_SERVER_ORIGIN: "http://artifacts.example.com",
+        },
+        hostname: "127.0.0.1",
+        port: "8787",
+      }))).rejects.toMatchObject({
+        field: "ARTIFACT_SERVER_ORIGIN",
+        reason: "invalid_origin",
+      });
+      await expect(Effect.runPromise(parseCompactRuntimeConfiguration({
+        dataDirectory,
+        environment: {
+          ...environment,
+          ARTIFACT_SERVER_CONTENT_DOMAIN: "not a hostname",
+        },
+        hostname: "127.0.0.1",
+        port: "8787",
+      }))).rejects.toMatchObject({
+        field: "ARTIFACT_SERVER_CONTENT_DOMAIN",
+        reason: "invalid_value",
+      });
+    } finally {
+      await rm(parent, {force: true, recursive: true});
+    }
+  }, 30_000);
+
+  test("external-storage configuration without a content domain selects path mode and keeps the origin checks", async () => {
+    const withoutContentDomain = {
+      ...externalConfigurationEnvironment(),
+      ARTIFACT_SERVER_CONTENT_DOMAIN: undefined,
+    };
+    const parsed = await Effect.runPromise(
+      parseExternalStorageRuntimeConfiguration({
+        environment: withoutContentDomain,
+        hostname: "127.0.0.1",
+        port: "8787",
+      }),
+    );
+    expect(parsed.contentDomain).toBeNull();
+    expect(summarizeRuntimeConfiguration(parsed).contentDomain).toBeNull();
+    await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
+      environment: {
+        ...withoutContentDomain,
+        ARTIFACT_SERVER_ORIGIN: "http://artifacts.example.com",
+      },
+      hostname: "127.0.0.1",
+      port: "8787",
+    }))).rejects.toMatchObject({
+      field: "ARTIFACT_SERVER_ORIGIN",
+      reason: "invalid_origin",
+    });
+  });
+
   test("foundation: compact serving withdraws readiness and integrity scans real committed bytes", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-drain-"));
     const dataDirectory = path.join(parent, "data");

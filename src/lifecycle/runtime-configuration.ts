@@ -86,7 +86,7 @@ export interface CompactRuntimeConfiguration {
   readonly applicationOrigin: string;
   readonly bootstrapAdministratorEmail: string;
   readonly completedRequestLogSampleRate: number;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   readonly dataDirectory: string;
   readonly deploymentMode: "compact";
   readonly hostname: string;
@@ -106,7 +106,7 @@ export interface ExternalStorageRuntimeConfiguration {
   readonly applicationOrigin: string;
   readonly bootstrapAdministratorEmail: string;
   readonly completedRequestLogSampleRate: number;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   readonly credentialSources: Readonly<Record<
     "apiToken" | "database" | "objectStorageAccessKey" | "objectStorageSecret",
     CredentialSource
@@ -134,7 +134,7 @@ export interface ExternalMigrationConfiguration {
 /** Public, credential-free summary emitted by `config check`. */
 export interface RuntimeConfigurationSummary {
   readonly applicationOrigin: string;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   readonly credentialSources: Readonly<Record<string, CredentialSource>>;
   readonly dataDirectory: string | null;
   readonly deploymentMode: DeploymentMode;
@@ -227,11 +227,7 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     input.environment["ARTIFACT_SERVER_ORIGIN"],
     urlStringSchema,
   );
-  const contentDomain = yield* parseRequiredEnvironment(
-    "ARTIFACT_SERVER_CONTENT_DOMAIN",
-    input.environment["ARTIFACT_SERVER_CONTENT_DOMAIN"],
-    hostnameSchema,
-  );
+  const contentDomain = yield* parseContentDomain(input.environment);
   yield* assertBrowserIsolation(applicationOrigin, contentDomain);
   yield* ensureWritableDirectory(layout.dataDirectory);
   return {
@@ -279,11 +275,7 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
     environment["ARTIFACT_SERVER_ORIGIN"],
     urlStringSchema,
   );
-  const contentDomain = yield* parseRequiredEnvironment(
-    "ARTIFACT_SERVER_CONTENT_DOMAIN",
-    environment["ARTIFACT_SERVER_CONTENT_DOMAIN"],
-    hostnameSchema,
-  );
+  const contentDomain = yield* parseContentDomain(environment);
   yield* assertBrowserIsolation(applicationOrigin, contentDomain);
   yield* assertLinkedFilesAreLocalOnly(yield* parseLinkedFilesMode(environment));
   const configuredObjectStorage = yield* parseObjectStorage(environment);
@@ -664,6 +656,19 @@ function parseRequiredEnvironment<T>(
   );
 }
 
+function parseContentDomain(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<string | null, RuntimeConfigurationError> {
+  const value = environment["ARTIFACT_SERVER_CONTENT_DOMAIN"];
+  return value === undefined || value === ""
+    ? Effect.succeed(null)
+    : parseRequiredEnvironment(
+      "ARTIFACT_SERVER_CONTENT_DOMAIN",
+      value,
+      hostnameSchema,
+    );
+}
+
 function parseSampleRate(
   environment: NodeJS.ProcessEnv,
 ): Effect.Effect<number, RuntimeConfigurationError> {
@@ -834,7 +839,7 @@ function assertHttpsServiceUrl(
 
 function assertBrowserIsolation(
   applicationOrigin: string,
-  contentDomain: string,
+  contentDomain: string | null,
 ): Effect.Effect<void, RuntimeConfigurationError> {
   let origin: URL;
   try {
@@ -863,6 +868,7 @@ function assertBrowserIsolation(
       "invalid_origin",
     );
   }
+  if (contentDomain === null) return Effect.void;
   const applicationDomain = getDomain(origin.hostname, {allowPrivateDomains: true});
   const publishedDomain = getDomain(contentDomain, {allowPrivateDomains: true});
   if (

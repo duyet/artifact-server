@@ -831,6 +831,46 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     expect(guessed.status).toBe(404);
   });
 
+  test("an external-storage process without a content domain serves published bytes from the application origin", async () => {
+    expect.hasAssertions();
+    const sameHostApiToken = managedTestKey("same-host-installation");
+    const server = await startExternalStorageProcess(environment, {
+      apiToken: sameHostApiToken,
+      installationId: "same-host-external-storage-installation",
+      sameHost: true,
+    });
+    const content = "<h1>same-host external-storage proof</h1>";
+    const published = await publishNew(server.baseUrl, sameHostApiToken, {
+      content,
+      idempotencyKey: `same-host-create-${randomUUID()}`,
+      name: "Same-host proof",
+    });
+    expect(published.response.status).toBe(201);
+
+    const applicationOrigin = new URL(server.baseUrl).origin;
+    const versionLink = new URL(published.body.links.version);
+    expect(versionLink.origin).toBe(applicationOrigin);
+    expect(versionLink.pathname).toMatch(/^\/v\/[^/]+\/$/u);
+    const version = await fetchContentThroughServer(
+      server.baseUrl,
+      published.body.links.version,
+    );
+    expect(version.status).toBe(200);
+    expect(await version.text()).toBe(content);
+
+    const artifactLink = new URL(published.body.links.artifact);
+    expect(artifactLink.origin).toBe(applicationOrigin);
+    expect(artifactLink.pathname).toBe(
+      `/same-host-proof-${published.body.artifact.id.replace(/^art_/u, "")}/`,
+    );
+    const folder = await fetchContentThroughServer(
+      server.baseUrl,
+      published.body.links.artifact,
+    );
+    expect(folder.status).toBe(200);
+    expect(await folder.text()).toBe(content);
+  });
+
   test("foundation: independent external-storage processes expose the same stateless MCP installation", async () => {
     expect.hasAssertions();
     const identity = {
@@ -2571,6 +2611,7 @@ function startExternalStorageProcess(
   identity: {
     readonly apiToken: string;
     readonly installationId: string;
+    readonly sameHost?: boolean;
     readonly storageBucket?: string;
   },
 ): Promise<ExternalStorageProcess> {
@@ -2583,7 +2624,9 @@ function startExternalStorageProcess(
         ...process.env,
         ARTIFACT_SERVER_API_TOKEN: identity.apiToken,
         ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL: oidcAdministratorEmail,
-        ARTIFACT_SERVER_CONTENT_DOMAIN: "content.example.net",
+        ARTIFACT_SERVER_CONTENT_DOMAIN: identity.sameHost === true
+          ? undefined
+          : "content.example.net",
         ARTIFACT_SERVER_DATABASE_URL: environment.databaseUrl,
         ARTIFACT_SERVER_INSTALLATION_ID: identity.installationId,
         ARTIFACT_SERVER_OIDC_CLIENT_ID: "external-storage-integration",
