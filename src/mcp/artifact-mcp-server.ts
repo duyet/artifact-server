@@ -894,7 +894,11 @@ export function createArtifactMcpServer(
       return {
         artifacts: page.items.map((artifact) => ({
           accessSetting: artifact.accessSetting,
-          browserUrl: artifactBrowserUrl(applicationUrl, artifact.id),
+          browserUrl: artifactBrowserUrl(
+            applicationUrl,
+            dependencies.contentDomain,
+            artifact,
+          ),
           createdAt: artifact.createdAt,
           currentVersionId: artifact.currentVersionId,
           id: artifact.id,
@@ -952,7 +956,11 @@ export function createArtifactMcpServer(
           details.current,
         ),
         links: {
-          artifact: artifactBrowserUrl(applicationUrl, details.artifact.id),
+          artifact: artifactBrowserUrl(
+            applicationUrl,
+            dependencies.contentDomain,
+            details.artifact,
+          ),
         },
       };
     }),
@@ -1315,7 +1323,11 @@ export function createArtifactMcpServer(
       return {
         artifact: state.artifact,
         links: {
-          artifact: artifactBrowserUrl(applicationUrl, state.artifact.id),
+          artifact: artifactBrowserUrl(
+            applicationUrl,
+            dependencies.contentDomain,
+            state.artifact,
+          ),
           version: versionBrowserUrl(
             applicationUrl,
             dependencies.contentDomain,
@@ -2429,7 +2441,11 @@ function publishedVersionProjection(
   return {
     artifact: published.artifact,
     links: {
-      artifact: artifactBrowserUrl(applicationUrl, published.artifact.id),
+      artifact: artifactBrowserUrl(
+        applicationUrl,
+        contentDomain,
+        published.artifact,
+      ),
       review: artifactReviewUrl(
         applicationUrl,
         published.version.projectId,
@@ -2638,7 +2654,11 @@ async function authorizedBrowserUrl(
         dependencies.contentDomain,
         saved.version.contentToken,
       )
-      : artifactBrowserUrl(applicationUrl, artifactId);
+      : artifactBrowserUrl(
+        applicationUrl,
+        dependencies.contentDomain,
+        details.artifact,
+      );
   }
   const issued = await runMcpApplicationEffect(
     dependencies,

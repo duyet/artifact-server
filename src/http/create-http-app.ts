@@ -1162,6 +1162,7 @@ export function createHttpApp(
     );
     return context.json(publicLinkInventoryPageResponse(
       responseApplicationUrl(context, dependencies),
+      dependencies.contentDomain,
       page,
     ));
   });
@@ -1595,6 +1596,7 @@ export function createHttpApp(
     );
     return context.json(artifactPageResponse(
       responseApplicationUrl(context, dependencies),
+      dependencies.contentDomain,
       page,
     ));
   });
@@ -2820,7 +2822,11 @@ function publishResponse(
   contentDomain: string,
   published: PublishedVersion,
 ): PublishResponse {
-  const artifactUrl = artifactBrowserUrl(requestUrl, published.artifact.id);
+  const artifactUrl = artifactBrowserUrl(
+    requestUrl,
+    contentDomain,
+    published.artifact,
+  );
   const reviewUrl = artifactReviewUrl(
     requestUrl,
     published.artifact.projectId,
@@ -2912,7 +2918,11 @@ function artifactDetailsResponse(
     artifact: details.artifact,
     current: artifactVersionResponse(requestUrl, contentDomain, details.current),
     links: {
-      artifact: artifactBrowserUrl(requestUrl, details.artifact.id),
+      artifact: artifactBrowserUrl(
+        requestUrl,
+        contentDomain,
+        details.artifact,
+      ),
       management: new URL(
         `/api/v1/artifacts/${details.artifact.id}`,
         requestUrl,
@@ -2923,6 +2933,7 @@ function artifactDetailsResponse(
 
 function artifactPageResponse(
   requestUrl: URL,
+  contentDomain: string,
   page: ArtifactPage,
 ) {
   return {
@@ -2930,7 +2941,7 @@ function artifactPageResponse(
       artifact,
       commentCount,
       links: {
-        artifact: artifactBrowserUrl(requestUrl, artifact.id),
+        artifact: artifactBrowserUrl(requestUrl, contentDomain, artifact),
         management: new URL(
           `/api/v1/artifacts/${artifact.id}`,
           requestUrl,
@@ -2944,6 +2955,7 @@ function artifactPageResponse(
 
 function publicLinkInventoryPageResponse(
   requestUrl: URL,
+  contentDomain: string,
   page: PublicLinkInventoryPage,
 ) {
   return {
@@ -2952,7 +2964,7 @@ function publicLinkInventoryPageResponse(
       artifact: item.artifact,
       currentVersion: item.currentVersion,
       links: {
-        public: artifactBrowserUrl(requestUrl, item.artifact.id),
+        public: artifactBrowserUrl(requestUrl, contentDomain, item.artifact),
       },
       project: item.project,
     })),
@@ -3294,7 +3306,7 @@ function artifactStateResponse(
   return {
     artifact: state.artifact,
     links: {
-      artifact: artifactBrowserUrl(requestUrl, state.artifact.id),
+      artifact: artifactBrowserUrl(requestUrl, contentDomain, state.artifact),
       version: versionBrowserUrl(
         requestUrl,
         contentDomain,
