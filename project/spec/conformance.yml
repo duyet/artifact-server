@@ -4871,3 +4871,18 @@ requirements:
         result: pass
         run: project/evidence/browser.json
         recorded_at: "2026-08-24T03:47:04.897Z"
+
+  # Fork requirements for the same-host external-storage deployment (docs/fork/DESIGN.md).
+  - id: FRK-000
+    kind: deployment
+    behavior: The S3 object-storage adapter stores, reads, ranges, and removes objects with their metadata on a Versity S3 gateway 1.4.1 posix backend under the SDK default checksums.
+    owner: blob-storage
+    source: {file: ../../docs/fork/DESIGN.md, anchor: storage-on-versity}
+    acceptance:
+      behavior: {id: FRK-000-B, description: "Write a small single-PUT blob, then read a byte range and its metadata back through the adapter."}
+      failure: {id: FRK-000-F, description: "A range outside the stored object fails with a typed error and leaves the object readable."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: No run against Versity exists yet; the fork CI container run and one run against the real gateway are pending.
+    depends_on: [DEP-011]
+    evidence: []

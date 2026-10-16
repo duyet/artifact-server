@@ -16,6 +16,7 @@ export default defineConfig({
     },
     fileParallelism: false,
     include: [
+      "tests/integration/frk-000-versity-s3.test.ts",
       "tests/integration/observability.test.ts",
       "tests/integration/s3-object-storage.test.ts",
       "tests/tooling/object-storage-boundary.test.ts",
