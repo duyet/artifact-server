@@ -320,7 +320,7 @@ function configureExternalStorageStart(
         ? privateTeamBrowserAccess(browserLoginKinds.workOs)
         : oidc !== null
         ? privateTeamBrowserAccess(browserLoginKinds.oidc)
-        : missingPrivateTeamIdentityProvider();
+        : privateTeamBrowserAccess(browserLoginKinds.none);
       let serverConfig: ExternalStorageServerConfig = {
         apiToken: parsed.apiToken,
         applicationOrigin: parsed.applicationOrigin,
@@ -391,7 +391,7 @@ async function startCompactServer(
     ? privateTeamBrowserAccess(browserLoginKinds.workOs)
     : oidc !== null
     ? privateTeamBrowserAccess(browserLoginKinds.oidc)
-    : missingPrivateTeamIdentityProvider();
+    : privateTeamBrowserAccess(browserLoginKinds.none);
   let serverConfig: LocalServerConfig = {
     apiToken: Redacted.value(configuration.apiToken),
     applicationOrigin: configuration.applicationOrigin,
@@ -502,12 +502,6 @@ function externalMaintenanceConfig(
   };
 }
 
-function missingPrivateTeamIdentityProvider(): never {
-  throw new Error(
-    "A private-team server requires exactly one OIDC or WorkOS browser-login provider.",
-  );
-}
-
 function parseCleanupLimit(value: string): number {
   const limit = Number(value);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
@@ -532,10 +526,9 @@ async function summarizeConfiguration(
       configuration.bootstrapAdministratorEmail,
     ARTIFACT_SERVER_ORIGIN: configuration.applicationOrigin,
   });
-  if (workOs === null && oidc === null) missingPrivateTeamIdentityProvider();
   return summarizeRuntimeConfiguration(
     configuration,
-    workOs === null ? "oidc" : "workos",
+    workOs !== null ? "workos" : oidc !== null ? "oidc" : "none",
   );
 }
 

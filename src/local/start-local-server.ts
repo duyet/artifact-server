@@ -10,7 +10,10 @@ import {createGracefulHttpShutdown} from
 import {withNodeResponseCompression} from
   "../http/node-response-compression.js";
 import {createRuntimeLifecycle} from "../lifecycle/runtime-readiness.js";
-import {browserAccessModes} from "../core/browser-access.js";
+import {
+  assertTeamLoginMatchesProvider,
+  browserAccessModes,
+} from "../core/browser-access.js";
 
 const loopbackHostname = "127.0.0.1";
 const serverAddressSchema = z.object({
@@ -35,14 +38,10 @@ export interface RunningLocalServer {
 export async function startLocalServer(
   config: LocalServerConfig,
 ): Promise<RunningLocalServer> {
-  if (
-    config.browserAccess.mode === browserAccessModes.privateTeam
-    && config.interactiveIdentityProvider === undefined
-  ) {
-    throw new Error(
-      "A private-team server requires exactly one OIDC or WorkOS browser-login provider.",
-    );
-  }
+  assertTeamLoginMatchesProvider(
+    config.browserAccess,
+    config.interactiveIdentityProvider !== undefined,
+  );
   if (
     config.browserAccess.mode === browserAccessModes.localOwner
     && config.interactiveIdentityProvider !== undefined

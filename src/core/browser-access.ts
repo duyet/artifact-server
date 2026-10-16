@@ -7,6 +7,7 @@ export const browserAccessModes = {
 /** Interactive login mechanisms disclosed to the management application. */
 export const browserLoginKinds = {
   localOwner: "local_owner",
+  none: "none",
   oidc: "oidc",
   workOs: "workos",
 } as const;
@@ -25,6 +26,7 @@ export type BrowserAccess =
   }
   | {
     readonly loginKind:
+      | typeof browserLoginKinds.none
       | typeof browserLoginKinds.oidc
       | typeof browserLoginKinds.workOs;
     readonly mode: typeof browserAccessModes.privateTeam;
@@ -39,8 +41,33 @@ export const localOwnerBrowserAccess: BrowserAccess = {
 /** Create the browser access policy for a remotely deployed private team. */
 export function privateTeamBrowserAccess(
   loginKind:
+    | typeof browserLoginKinds.none
     | typeof browserLoginKinds.oidc
     | typeof browserLoginKinds.workOs,
 ): Extract<BrowserAccess, {readonly mode: "private_team"}> {
   return {loginKind, mode: browserAccessModes.privateTeam};
+}
+
+/**
+ * Refuse a team server whose login kind and identity provider disagree: oidc
+ * and workos need an interactive provider, and none must not have one.
+ */
+export function assertTeamLoginMatchesProvider(
+  browserAccess: BrowserAccess,
+  hasInteractiveIdentityProvider: boolean,
+): void {
+  if (browserAccess.mode !== browserAccessModes.privateTeam) return;
+  if (browserAccess.loginKind === browserLoginKinds.none) {
+    if (hasInteractiveIdentityProvider) {
+      throw new Error(
+        "A private-team server with browser login kind none cannot configure a browser-login provider.",
+      );
+    }
+    return;
+  }
+  if (!hasInteractiveIdentityProvider) {
+    throw new Error(
+      "A private-team server requires exactly one OIDC or WorkOS browser-login provider.",
+    );
+  }
 }

@@ -99,7 +99,7 @@ describe("Artifact Server lifecycle CLI", () => {
         providers: {status: "ready"},
       });
       expect(checked.output).not.toContain(apiToken);
-      const missingIdentityProvider = await runCli([
+      const noIdentityProvider = await runCli([
         "config",
         "check",
         "--mode",
@@ -107,10 +107,10 @@ describe("Artifact Server lifecycle CLI", () => {
         "--data",
         dataDirectory,
       ], compactEnvironment());
-      expect(missingIdentityProvider.exitCode).not.toBe(0);
-      expect(missingIdentityProvider.output).toContain(
-        "requires exactly one OIDC or WorkOS",
-      );
+      expect(noIdentityProvider.exitCode).toBe(0);
+      expect(JSON.parse(noIdentityProvider.output)).toMatchObject({
+        configuration: {interactiveIdentityProvider: "none", status: "valid"},
+      });
       const incompleteWorkOs = await runCli([
         "config",
         "check",

@@ -4928,3 +4928,17 @@ requirements:
     proof_gap: Tests are not written yet; no deployed run exists.
     depends_on: [FRK-001, AUTH-004]
     evidence: []
+
+  - id: FRK-004
+    kind: behavior
+    behavior: Compact and external-storage servers start without a browser login provider, report login kind none, and accept API-key publishing while browser login stays unavailable.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
+    acceptance:
+      behavior: {id: FRK-004-B, description: "Start with no provider, read login kind none from /auth/context, publish with the API key, and follow a Review link to the artifact folder."}
+      failure: {id: FRK-004-F, description: "Browser login returns InteractiveLoginUnavailable, and a partial OIDC or WorkOS configuration still fails startup."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [AUTH-025]
+    evidence: []

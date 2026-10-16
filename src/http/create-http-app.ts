@@ -81,6 +81,7 @@ import {
 import type { IssuedApplicationSession } from "../core/installation-identity.js";
 import {
   browserAccessModes,
+  browserLoginKinds,
   type BrowserAccess,
 } from "../core/browser-access.js";
 import {
@@ -172,6 +173,7 @@ const accessSettingSchema = z.enum([
 ]);
 const artifactTagsSchema = z.array(z.string()).default([]);
 const projectIdSchema = z.string().trim().min(1).max(200);
+const artifactIdSchema = z.string().min(1).max(200);
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
 }).strict();
@@ -792,12 +794,27 @@ export function createHttpApp(
       serveWebAsset(context, dependencies, "/review-frame.html", "review-frame"),
   );
 
-  app.on(
-    ["GET", "HEAD"],
-    ["/review", "/review/*"],
-    (context) =>
-      serveWebAsset(context, dependencies, "/review.html", "application-shell"),
-  );
+  app.on(["GET", "HEAD"], ["/review", "/review/*"], async (context) => {
+    // Agents hand out Review URLs; with no browser login those would end at a
+    // dead sign-in gate, so they resolve to the artifact itself.
+    if (dependencies.browserAccess.loginKind === browserLoginKinds.none) {
+      const artifact = artifactIdSchema.safeParse(
+        new URL(context.req.url).searchParams.get("artifact"),
+      );
+      if (artifact.success) {
+        return context.redirect(
+          `/artifacts/${encodeURIComponent(artifact.data)}`,
+          302,
+        );
+      }
+    }
+    return serveWebAsset(
+      context,
+      dependencies,
+      "/review.html",
+      "application-shell",
+    );
+  });
 
   app.on(["GET", "HEAD"], "/workbench", (context) => {
     const requestUrl = new URL(context.req.url);

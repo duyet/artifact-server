@@ -362,6 +362,9 @@ export function ReviewApp() {
     setDraftPrincipal(session?.principal.id ?? null);
   }, [session]);
   const accessContextRef = useRef<AccessContext | null>(null);
+  const [loginKind, setLoginKind] = useState<
+    AccessContext["login"]["kind"] | null
+  >(null);
   const bootstrapInFlightRef = useRef(false);
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [sessionState, setSessionState] = useState<
@@ -384,6 +387,7 @@ export function ReviewApp() {
         ),
       ]);
       accessContextRef.current = loadedAccessContext;
+      setLoginKind(loadedAccessContext.login.kind);
       let loadedSession: Session;
       if (initialSession.kind === "authenticated") {
         loadedSession = initialSession.value;
@@ -454,6 +458,14 @@ export function ReviewApp() {
 
   if (sessionState === "loading") {
     return <ReviewGate description="Opening the local artifact catalog." title="Loading Artifact Server" />;
+  }
+  if (sessionState === "unauthenticated" && loginKind === "none") {
+    return (
+      <ReviewGate
+        description="This server has no browser sign-in. Open artifacts from the links you were given."
+        title="Browser sign-in is off"
+      />
+    );
   }
   if (sessionState === "unauthenticated") {
     const returnTo = `${window.location.pathname}${window.location.search}`;
