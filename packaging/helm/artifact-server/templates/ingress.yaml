@@ -19,9 +19,11 @@ spec:
     - hosts:
         - {{ $origin.host | quote }}
       secretName: {{ .Values.ingress.applicationTlsSecretName | quote }}
+    {{- if .Values.configuration.contentDomain }}
     - hosts:
         - {{ printf "*.%s" .Values.configuration.contentDomain | quote }}
       secretName: {{ .Values.ingress.contentTlsSecretName | quote }}
+    {{- end }}
   rules:
     - host: {{ $origin.host | quote }}
       http:
@@ -33,6 +35,7 @@ spec:
                 name: {{ include "artifact-server.fullname" . }}
                 port:
                   name: http
+    {{- if .Values.configuration.contentDomain }}
     - host: {{ printf "*.%s" .Values.configuration.contentDomain | quote }}
       http:
         paths:
@@ -43,4 +46,5 @@ spec:
                 name: {{ include "artifact-server.fullname" . }}
                 port:
                   name: http
+    {{- end }}
 {{- end }}

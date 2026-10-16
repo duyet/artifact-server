@@ -77,9 +77,6 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if and $hasOidcIssuer $hasWorkosIssuer -}}
 {{- fail "one installation has one browser-login provider: configure the identity.workos values or the identity.oidc values, not both" -}}
 {{- end -}}
-{{- if and (not $hasOidcIssuer) (not $hasWorkosIssuer) -}}
-{{- fail "private-team deployments require exactly one browser-login provider: configure identity.oidc or identity.workos" -}}
-{{- end -}}
 {{- $drainMilliseconds := add .Values.configuration.readinessWithdrawalMilliseconds .Values.configuration.shutdownDeadlineMilliseconds -}}
 {{- if le (mul .Values.terminationGracePeriodSeconds 1000) $drainMilliseconds -}}
 {{- fail "terminationGracePeriodSeconds must be longer than readinessWithdrawalMilliseconds plus shutdownDeadlineMilliseconds" -}}
@@ -108,7 +105,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- fail "ingress requires an application origin with no path or explicit port" -}}
 {{- end -}}
 {{- $_ := required "ingress.applicationTlsSecretName is required when ingress is enabled" .Values.ingress.applicationTlsSecretName -}}
-{{- $_ := required "ingress.contentTlsSecretName is required when ingress is enabled" .Values.ingress.contentTlsSecretName -}}
+{{- if .Values.configuration.contentDomain -}}
+{{- $_ := required "ingress.contentTlsSecretName is required when ingress is enabled and configuration.contentDomain is set" .Values.ingress.contentTlsSecretName -}}
+{{- end -}}
 {{- end -}}
 {{- $_ := include "artifact-server.image" . -}}
 {{- end -}}
@@ -143,8 +142,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   value: /run/secrets/artifact-server/api-token
 - name: ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL
   value: {{ .Values.configuration.bootstrapAdministratorEmail | quote }}
+{{- if .Values.configuration.contentDomain }}
 - name: ARTIFACT_SERVER_CONTENT_DOMAIN
   value: {{ .Values.configuration.contentDomain | quote }}
+{{- end }}
 - name: ARTIFACT_SERVER_DATABASE_URL_FILE
   value: /run/secrets/artifact-server/database-url
 - name: ARTIFACT_SERVER_INSTALLATION_ID

@@ -21,7 +21,7 @@ artifactserver_values=(
 
 helm lint "$artifactserver_chart" --strict "${artifactserver_values[@]}"
 
-for artifactserver_kubernetes_version in 1.34.0 1.35.0 1.36.0; do
+for artifactserver_kubernetes_version in 1.33.0 1.34.0 1.35.0 1.36.0; do
   helm template artifact-server "$artifactserver_chart" \
     --kube-version "$artifactserver_kubernetes_version" \
     "${artifactserver_values[@]}" >/dev/null
@@ -34,6 +34,47 @@ helm template artifact-server "$artifactserver_chart" \
   --set ingress.className=nginx \
   --set ingress.applicationTlsSecretName=artifact-server-application-tls \
   --set ingress.contentTlsSecretName=artifact-server-content-tls >/dev/null
+
+# One host, no identity provider, a non-AWS S3 server over plain HTTP.
+artifactserver_same_host_values=(
+  "${artifactserver_values[@]}"
+  --set configuration.contentDomain=
+  --set identity.oidcClientId=
+  --set identity.oidcIssuer=
+  --set configuration.s3.endpoint=http://s3.example.test:7070
+  --set configuration.s3.forcePathStyle=true
+  --set ingress.enabled=true
+  --set ingress.className=nginx
+  --set ingress.applicationTlsSecretName=artifact-server-application-tls
+)
+
+render_same_host() {
+  helm template artifact-server "$artifactserver_chart" \
+    --kube-version 1.33.0 "${artifactserver_same_host_values[@]}" "$@"
+}
+
+expect_rendered_count() {
+  local artifactserver_expected=$1
+  local artifactserver_pattern=$2
+  local artifactserver_rendered=$3
+  local artifactserver_actual
+  artifactserver_actual=$(grep -Ec -- "$artifactserver_pattern" <<<"$artifactserver_rendered" || true)
+  if [[ "$artifactserver_actual" != "$artifactserver_expected" ]]; then
+    echo "Expected $artifactserver_expected rendered lines matching '$artifactserver_pattern', found $artifactserver_actual." >&2
+    exit 1
+  fi
+}
+
+artifactserver_same_host_chart=$(render_same_host)
+artifactserver_same_host_deployment=$(render_same_host --show-only templates/deployment.yaml)
+artifactserver_same_host_ingress=$(render_same_host --show-only templates/ingress.yaml)
+artifactserver_same_host_cleanup=$(render_same_host --show-only templates/cleanup-cronjob.yaml)
+
+expect_rendered_count 1 '^    - host: ' "$artifactserver_same_host_ingress"
+expect_rendered_count 1 '^      secretName: ' "$artifactserver_same_host_ingress"
+expect_rendered_count 0 'ARTIFACT_SERVER_CONTENT_DOMAIN' "$artifactserver_same_host_chart"
+expect_rendered_count 1 'name: ARTIFACT_SERVER_S3_ENDPOINT$' "$artifactserver_same_host_deployment"
+expect_rendered_count 1 '^          enableServiceLinks: false$' "$artifactserver_same_host_cleanup"
 
 expect_render_failure() {
   local artifactserver_expected=$1
@@ -80,11 +121,6 @@ expect_render_failure "one installation has one browser-login provider" \
   --set identity.workosClientId=client_workos \
   --set identity.workosIssuer=https://auth.example.test \
   --set secret.keys.workosApiKey=workos-api-key
-
-expect_render_failure "private-team deployments require exactly one browser-login provider" \
-  "${artifactserver_values[@]}" \
-  --set identity.oidcClientId= \
-  --set identity.oidcIssuer=
 
 expect_render_failure "terminationGracePeriodSeconds must be longer" \
   "${artifactserver_values[@]}" \

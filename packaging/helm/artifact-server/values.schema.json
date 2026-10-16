@@ -72,7 +72,10 @@
         "installationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
         "bootstrapAdministratorEmail": {"type": "string", "format": "email"},
         "applicationOrigin": {"type": "string", "pattern": "^https://[^/\\s]+$"},
-        "contentDomain": {"type": "string", "pattern": "^[A-Za-z0-9.-]+$"},
+        "contentDomain": {
+          "type": "string",
+          "oneOf": [{"const": ""}, {"pattern": "^[A-Za-z0-9.-]+$"}]
+        },
         "postgresConnectionBudget": {"type": "integer", "minimum": 1, "maximum": 100000},
         "postgresPoolSize": {"type": "integer", "minimum": 1, "maximum": 100},
         "requestLogSampleRate": {"type": "number", "minimum": 0, "maximum": 1},

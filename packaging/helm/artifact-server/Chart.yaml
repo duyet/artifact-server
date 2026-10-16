@@ -4,7 +4,7 @@ description: Deploy stateless Artifact Server replicas against existing Postgres
 type: application
 version: 0.1.2
 appVersion: "0.1.2"
-kubeVersion: ">=1.34.0-0 <1.37.0-0"
+kubeVersion: ">=1.33.0-0 <1.37.0-0"
 home: https://artifactserver.com
 sources:
   - https://github.com/plannotator/artifact-server
