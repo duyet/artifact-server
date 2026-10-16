@@ -31,28 +31,75 @@ export function sameHostVersionPath(
 export interface SameHostVersionRequest {
   /** The unvalidated second path segment; empty when the request names none. */
   readonly contentToken: string;
+  readonly kind: "version";
   /** The canonical location when the slash after the token is missing. */
   readonly redirectTo: string | null;
   /** The request URL with its pathname relative to the version root. */
   readonly versionUrl: URL;
 }
 
-/** Split a request into its `/v/` parts, or null when it is not a content path. */
+/** One `/<folder>/<path>` request for the current version of a public artifact. */
+export interface SameHostFolderRequest {
+  readonly artifactId: string;
+  readonly folder: string;
+  readonly kind: "folder";
+  readonly slashMissing: boolean;
+  /** The request URL with its pathname relative to the folder. */
+  readonly versionUrl: URL;
+}
+
+export type SameHostContentRequest =
+  | SameHostFolderRequest
+  | SameHostVersionRequest;
+
+/**
+ * Tell a content request from an application request by its first path
+ * segment. Both the isolation middleware and the content router use this one
+ * predicate, so no content form can reach a response without the headers.
+ */
 export function parseSameHostContentRequest(
   requestUrl: URL,
-): SameHostVersionRequest | null {
+): SameHostContentRequest | null {
   const segments = requestUrl.pathname.split("/");
-  if (segments[1] !== versionPathSegment) return null;
-  const contentToken = segments[2] ?? "";
+  const first = segments[1] ?? "";
+  if (first === versionPathSegment) {
+    const contentToken = segments[2] ?? "";
+    const versionUrl = new URL(requestUrl);
+    versionUrl.pathname = `/${segments.slice(3).join("/")}`;
+    return {
+      contentToken,
+      kind: "version",
+      redirectTo: segments.length === 3 && contentToken !== ""
+        ? `${sameHostVersionPath(contentToken)}${requestUrl.search}`
+        : null,
+      versionUrl,
+    };
+  }
+  const folder = parseArtifactFolder(first);
+  if (folder === null) return null;
   const versionUrl = new URL(requestUrl);
-  versionUrl.pathname = `/${segments.slice(3).join("/")}`;
+  versionUrl.pathname = `/${segments.slice(2).join("/")}`;
   return {
-    contentToken,
-    redirectTo: segments.length === 3 && contentToken !== ""
-      ? `${sameHostVersionPath(contentToken)}${requestUrl.search}`
-      : null,
+    ...folder,
+    kind: "folder",
+    slashMissing: segments.length === 2,
     versionUrl,
   };
+}
+
+/**
+ * Where a folder request must go to reach its canonical form, or null when it
+ * already is. A stale name part and a missing trailing slash both redirect, so
+ * relative URLs resolve inside the folder.
+ */
+export function canonicalFolderLocation(
+  request: SameHostFolderRequest,
+  artifact: {readonly id: string; readonly name: string},
+): string | null {
+  const canonical = artifactFolder(artifact);
+  if (canonical === null) return null;
+  if (canonical === request.folder && !request.slashMissing) return null;
+  return `/${canonical}${request.versionUrl.pathname}${request.versionUrl.search}`;
 }
 
 const sandboxPolicy =

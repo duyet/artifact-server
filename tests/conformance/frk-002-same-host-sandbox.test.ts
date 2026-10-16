@@ -46,7 +46,7 @@ describe("same-host content sandbox", () => {
     await removeTestInstallation(installation);
   });
 
-  test("FRK-002-B: every same-host content response carries the sandbox policy and Access-Control-Allow-Origin", async () => {
+  test("FRK-002-B: every same-host content response, in both path forms, carries the sandbox policy and Access-Control-Allow-Origin", async () => {
     const pub = await publishSite(server, installation, {
       accessSetting: "public_link",
       name: "Sandbox public",
@@ -119,6 +119,34 @@ describe("same-host content sandbox", () => {
       },
       {name: "404 malformed token", status: 404, url: `${server.baseUrl}/v/short/`},
       {name: "200 Review lease", status: 200, url: lease.baseUrl},
+      {name: "200 folder entry", status: 200, url: pub.links.artifact},
+      {
+        name: "308 folder stale name",
+        status: 308,
+        url: `${server.baseUrl}/stale-name-${pub.artifact.id.slice("art_".length)}/`,
+      },
+      {
+        name: "308 folder missing slash",
+        status: 308,
+        url: pub.links.artifact.slice(0, -1),
+      },
+      {name: "401 private folder", status: 401, url: priv.links.artifact},
+      {
+        name: "404 folder missing file",
+        status: 404,
+        url: `${pub.links.artifact}missing.html`,
+      },
+      {
+        name: "404 unknown folder artifact",
+        status: 404,
+        url: `${server.baseUrl}/folder-3fa85f64-5717-4562-b3fc-2c963f66afa6/`,
+      },
+      {
+        headers: navigation,
+        name: "200 folder SPA fallback",
+        status: 200,
+        url: `${spa.links.artifact}settings/profile`,
+      },
     ];
     const observed = await Promise.all(requests.map(async (request) => {
       const response = await fetchVersion(

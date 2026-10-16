@@ -145,10 +145,13 @@ import {
   versionFileBrowserUrl,
 } from "./artifact-http-links.js";
 import {
+  artifactFolder,
   assertCookieSessionsAvailable,
+  canonicalFolderLocation,
   isolateSameHostResponse,
   parseSameHostContentRequest,
   sameHostContentSource,
+  type SameHostFolderRequest,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {attachmentContentDisposition} from "./content-disposition.js";
@@ -713,6 +716,14 @@ export function createHttpApp(
     if (dependencies.contentDomain === null) {
       const sameHost = parseSameHostContentRequest(requestUrl);
       if (sameHost === null) return next();
+      if (sameHost.kind === "folder") {
+        return serveArtifactFolder(
+          context,
+          sameHost,
+          context.req.header("cookie"),
+          dependencies,
+        );
+      }
       const validToken = contentTokenSchema.safeParse(sameHost.contentToken);
       if (!validToken.success) return versionNotFoundResponse();
       if (sameHost.redirectTo !== null) {
@@ -2475,12 +2486,20 @@ export function createHttpApp(
         contentAccess.resolvePublicArtifact(context.req.param("artifactId"))
       ),
     );
-    const versionUrl = versionBrowserUrl(
-      responseApplicationUrl(context, dependencies),
-      dependencies.contentDomain,
-      current.version.contentToken,
+    const requestUrl = responseApplicationUrl(context, dependencies);
+    // An id that has no folder keeps this route as its link, so it must not
+    // redirect to itself.
+    return context.redirect(
+      dependencies.contentDomain === null &&
+        artifactFolder(current.artifact) !== null
+        ? artifactBrowserUrl(requestUrl, null, current.artifact)
+        : versionBrowserUrl(
+          requestUrl,
+          dependencies.contentDomain,
+          current.version.contentToken,
+        ),
+      302,
     );
-    return context.redirect(versionUrl, 302);
   });
 
   app.notFound((context) =>
@@ -3507,6 +3526,30 @@ async function serveVersionContent(
     content,
     publiclyCacheable,
     false,
+    dependencies,
+  );
+}
+
+async function serveArtifactFolder(
+  context: Context<HttpEnvironment>,
+  request: SameHostFolderRequest,
+  cookieHeader: string | undefined,
+  dependencies: HttpAppDependencies,
+): Promise<Response> {
+  const current = await runHttpApplicationEffect(
+    context,
+    dependencies,
+    ContentAccessService.use((contentAccess) =>
+      contentAccess.resolvePublicArtifact(request.artifactId)
+    ),
+  );
+  const canonical = canonicalFolderLocation(request, current.artifact);
+  if (canonical !== null) return context.redirect(canonical, 308);
+  return serveVersionContent(
+    context,
+    request.versionUrl,
+    current.version.contentToken,
+    cookieHeader,
     dependencies,
   );
 }

@@ -4914,3 +4914,17 @@ requirements:
     proof_gap: Tests are not written yet; the browser probe runs only in Chromium.
     depends_on: [FRK-001, CMT-014]
     evidence: []
+
+  - id: FRK-003
+    kind: behavior
+    behavior: Without a content domain, the current version of a public-link artifact is served at the readable folder /<name-slug>-<uuid>/, and the artifact link points there.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: folder-name}
+    acceptance:
+      behavior: {id: FRK-003-B, description: "Publish, open the folder link, publish a new version, and observe that the same folder serves the new version."}
+      failure: {id: FRK-003-F, description: "A private artifact folder is refused, a wrong name part or a missing trailing slash redirects to the canonical folder, and no application route can match a content path."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [FRK-001, AUTH-004]
+    evidence: []
