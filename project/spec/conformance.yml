@@ -4886,3 +4886,17 @@ requirements:
     proof_gap: No run against Versity exists yet; the fork CI container run and one run against the real gateway are pending.
     depends_on: [DEP-011]
     evidence: []
+
+  - id: FRK-001
+    kind: behavior
+    behavior: Without a content domain, every immutable version is served on the application origin under /v/<token>/ with upstream content-host semantics, and cookie-based content sessions are unavailable.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: same-host-url-shape}
+    acceptance:
+      behavior: {id: FRK-001-B, description: "Publish a public multi-file artifact and read its entry, nested files, SPA fallback, and Review lease under /v/ on the application origin."}
+      failure: {id: FRK-001-F, description: "Unknown tokens return 404, private versions without a credential are refused, bootstrap and content-session requests return CapabilityUnavailable, and application routes are unchanged."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [CNT-001]
+    evidence: []

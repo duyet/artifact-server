@@ -4,6 +4,8 @@
  * prefix or the artifact folder shape lives here so upstream files only call in.
  */
 
+import {CapabilityUnavailable} from "../core/errors.js";
+
 const versionPathSegment = "v";
 const artifactIdPrefix = "art_";
 const uuidSource =
@@ -23,6 +25,53 @@ export function sameHostVersionPath(
   return manifestPath === undefined
     ? prefix
     : `${prefix}${manifestPath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** One `/v/<token>/<path>` request, split into the token and the in-version URL. */
+export interface SameHostVersionRequest {
+  /** The unvalidated second path segment; empty when the request names none. */
+  readonly contentToken: string;
+  /** The canonical location when the slash after the token is missing. */
+  readonly redirectTo: string | null;
+  /** The request URL with its pathname relative to the version root. */
+  readonly versionUrl: URL;
+}
+
+/** Split a request into its `/v/` parts, or null when it is not a content path. */
+export function parseSameHostContentRequest(
+  requestUrl: URL,
+): SameHostVersionRequest | null {
+  const segments = requestUrl.pathname.split("/");
+  if (segments[1] !== versionPathSegment) return null;
+  const contentToken = segments[2] ?? "";
+  const versionUrl = new URL(requestUrl);
+  versionUrl.pathname = `/${segments.slice(3).join("/")}`;
+  return {
+    contentToken,
+    redirectTo: segments.length === 3 && contentToken !== ""
+      ? `${sameHostVersionPath(contentToken)}${requestUrl.search}`
+      : null,
+    versionUrl,
+  };
+}
+
+/** The one CSP source that covers every `/v/` response of an application origin. */
+export function sameHostContentSource(applicationOrigin: string): string {
+  return `${applicationOrigin}/${versionPathSegment}/`;
+}
+
+/**
+ * Content sessions are cookies, and an artifact opened at top level in path
+ * mode runs in an opaque origin whose subresource requests never carry them.
+ */
+export function assertCookieSessionsAvailable(
+  contentDomain: string | null,
+): asserts contentDomain is string {
+  if (contentDomain === null) {
+    throw new CapabilityUnavailable({
+      message: "Private artifact content opens in Review on this deployment.",
+    });
+  }
 }
 
 function folderSlug(name: string): string {

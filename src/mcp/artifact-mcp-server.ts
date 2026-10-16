@@ -93,6 +93,7 @@ import {
   versionBrowserUrl,
   versionFileBrowserUrl,
 } from "../http/artifact-http-links.js";
+import {assertCookieSessionsAvailable} from "../http/same-host-content.js";
 import {artifactServerFailureResponse} from "../http/artifact-http-failure.js";
 import {
   renderBundleMessage,
@@ -376,7 +377,7 @@ const manifestResource = new ResourceTemplate(
 export interface ArtifactMcpServerDependencies {
   readonly applicationOrigin: string;
   readonly applicationRuntime: ApplicationRuntime;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   /** Secret-free optional Git state exposed by capability discovery. */
   readonly gitHistory: GitHistoryCapability;
   /** Advertises the local linked-artifact capability in discovery. */
@@ -2435,7 +2436,7 @@ function projectProjection(project: ProjectRecord) {
 
 function publishedVersionProjection(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   published: PublishedVersion,
 ) {
   return {
@@ -2473,7 +2474,7 @@ function sourceBindingProjection(binding: SourceBindingRecord) {
 
 function linkedPublicationProjection(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   linked: LinkedPublication,
 ) {
   const published = publishedVersionProjection(
@@ -2572,7 +2573,7 @@ function derivedIdempotencyKey(parts: readonly string[]): string {
 
 function versionProjection(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   artifactId: string,
   saved: ArtifactVersion,
 ) {
@@ -2660,6 +2661,7 @@ async function authorizedBrowserUrl(
         details.artifact,
       );
   }
+  assertCookieSessionsAvailable(dependencies.contentDomain);
   const issued = await runMcpApplicationEffect(
     dependencies,
     ContentAccessService.use((access) =>

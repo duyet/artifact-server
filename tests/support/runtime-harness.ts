@@ -85,7 +85,7 @@ export async function startTestServer(
     readonly applicationOrigin?: string;
     readonly bootstrapAdministratorEmail?: string;
     readonly browserAccess?: BrowserAccess;
-    readonly contentDomain?: string;
+    readonly contentDomain?: string | null;
     readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
     readonly clock?: Clock;
     readonly completedRequestLogSampleRate?: number;
@@ -111,7 +111,9 @@ export async function startTestServer(
     browserAccess: options.browserAccess ?? localOwnerBrowserAccess,
     bootstrapAdministratorEmail: options.bootstrapAdministratorEmail ??
       "administrator@example.test",
-    contentDomain: options.contentDomain ?? "localhost",
+    contentDomain: options.contentDomain === undefined
+      ? "localhost"
+      : options.contentDomain,
     completedRequestLogSampleRate:
       options.completedRequestLogSampleRate ??
         defaultCompletedRequestLogSampleRate,

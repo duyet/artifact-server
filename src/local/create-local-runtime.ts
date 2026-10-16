@@ -86,7 +86,7 @@ export interface LocalRuntimeConfig {
   readonly browserAccess: BrowserAccess;
   readonly clock?: Clock;
   readonly completedRequestLogSampleRate?: number;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   readonly dataDirectory: string;
   /** Server-only credential shared with a co-launched development proxy. */
   readonly developmentProxyCredential?: string;

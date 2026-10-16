@@ -59,7 +59,7 @@ export interface McpHttpAdapterDependencies {
   readonly allowedOriginHostnames: readonly string[];
   readonly applicationOrigin: string | null;
   readonly applicationRuntime: ApplicationRuntime;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   readonly gitHistory: GitHistoryCapabilityReader;
   readonly linkedArtifacts?: boolean;
   readonly mode: ArtifactMcpServerDependencies["mode"];

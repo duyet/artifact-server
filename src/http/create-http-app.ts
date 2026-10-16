@@ -144,6 +144,11 @@ import {
   versionBrowserUrl,
   versionFileBrowserUrl,
 } from "./artifact-http-links.js";
+import {
+  assertCookieSessionsAvailable,
+  parseSameHostContentRequest,
+  sameHostContentSource,
+} from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {attachmentContentDisposition} from "./content-disposition.js";
 import {observeHttpRequest} from "../observability/application-observability.js";
@@ -475,7 +480,7 @@ export interface HttpAppDependencies {
   /** Browser authentication policy fixed by the deployment entrypoint. */
   readonly browserAccess: BrowserAccess;
   readonly completedRequestLogSampleRate: number;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
   /** Secret-free optional Git state exposed through authenticated discovery. */
@@ -691,11 +696,24 @@ export function createHttpApp(
   });
 
   app.use("*", async (context, next) => {
-    const requestUrl = new URL(context.req.url);
-    const contentToken = tokenFromContentHost(
-      requestUrl.hostname,
-      dependencies.contentDomain,
-    );
+    let requestUrl = new URL(context.req.url);
+    let contentToken: string | null;
+    if (dependencies.contentDomain === null) {
+      const sameHost = parseSameHostContentRequest(requestUrl);
+      if (sameHost === null) return next();
+      const validToken = contentTokenSchema.safeParse(sameHost.contentToken);
+      if (!validToken.success) return versionNotFoundResponse();
+      if (sameHost.redirectTo !== null) {
+        return context.redirect(sameHost.redirectTo, 308);
+      }
+      contentToken = validToken.data;
+      requestUrl = sameHost.versionUrl;
+    } else {
+      contentToken = tokenFromContentHost(
+        requestUrl.hostname,
+        dependencies.contentDomain,
+      );
+    }
     if (contentToken !== null) {
       if (isPreviewLeaseToken(contentToken)) {
         return servePreviewLeaseContent(
@@ -2251,6 +2269,7 @@ export function createHttpApp(
   );
 
   app.post("/api/v1/artifacts/:artifactId/content-sessions", async (context) => {
+    assertCookieSessionsAvailable(dependencies.contentDomain);
     const destinationPath = requestedContentPath(context);
     const issued = await runHttpApplicationEffect(
       context,
@@ -2280,6 +2299,7 @@ export function createHttpApp(
   app.post(
     "/api/v1/artifacts/:artifactId/versions/:versionId/content-sessions",
     async (context) => {
+      assertCookieSessionsAvailable(dependencies.contentDomain);
       const destinationPath = requestedContentPath(context);
       const issued = await runHttpApplicationEffect(
         context,
@@ -2411,6 +2431,7 @@ export function createHttpApp(
   });
 
   app.post("/api/v1/artifacts/:artifactId/live-sessions", async (context) => {
+    assertCookieSessionsAvailable(dependencies.contentDomain);
     requireLinkedRequest(context, dependencies);
     const issued = await runHttpApplicationEffect(
       context,
@@ -2819,7 +2840,7 @@ function logAdapterFailure(
 
 function publishResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   published: PublishedVersion,
 ): PublishResponse {
   const artifactUrl = artifactBrowserUrl(
@@ -2911,7 +2932,7 @@ function linkedPublicationResponse(
 
 function artifactDetailsResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   details: ArtifactDetails,
 ) {
   return {
@@ -2933,7 +2954,7 @@ function artifactDetailsResponse(
 
 function artifactPageResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   page: ArtifactPage,
 ) {
   return {
@@ -2955,7 +2976,7 @@ function artifactPageResponse(
 
 function publicLinkInventoryPageResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   page: PublicLinkInventoryPage,
 ) {
   return {
@@ -3261,7 +3282,7 @@ function invalidPageCursor(): never {
 
 function artifactVersionResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   saved: ArtifactVersion,
 ) {
   return {
@@ -3277,7 +3298,7 @@ function artifactVersionResponse(
 
 function versionResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   version: VersionRecord,
 ) {
   return {
@@ -3300,7 +3321,7 @@ function versionResponse(
 
 function artifactStateResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   state: ArtifactState,
 ) {
   return {
@@ -3320,7 +3341,7 @@ function artifactStateResponse(
 
 function comparisonResponse(
   requestUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   comparison: ArtifactComparison,
 ) {
   return {
@@ -3878,6 +3899,7 @@ async function exchangeContentBootstrap(
   contentToken: string,
   dependencies: HttpAppDependencies,
 ): Promise<Response> {
+  assertCookieSessionsAvailable(dependencies.contentDomain);
   const method = context.req.method;
   if (method !== "GET") {
     return Response.json(
@@ -4019,11 +4041,16 @@ function isContentBootstrapRequest(requestUrl: URL): boolean {
  * `srcdoc` sandbox. Relative resources resolve through an exact-version content
  * host, so the inherited policy permits network access only to configured
  * content hosts. The frame still cannot reach the trusted application origin.
+ * Without a content domain the one source is the application's `/v/` prefix,
+ * so the frame reaches leased content but no application route.
  */
-function reviewFrameContentSecurityPolicy(contentDomain: string): string {
-  const httpContent = `http://*.${contentDomain}:*`;
-  const httpsContent = `https://*.${contentDomain}`;
-  const contentSources = `${httpContent} ${httpsContent}`;
+function reviewFrameContentSecurityPolicy(
+  contentDomain: string | null,
+  applicationOrigin: string,
+): string {
+  const contentSources = contentDomain === null
+    ? sameHostContentSource(applicationOrigin)
+    : `http://*.${contentDomain}:* https://*.${contentDomain}`;
   return [
     "default-src 'none'",
     `script-src 'self' 'unsafe-inline' ${contentSources}`,
@@ -4057,7 +4084,10 @@ async function serveWebAsset(
       ? "public, max-age=31536000, immutable"
       : "no-cache, must-revalidate",
     "Content-Security-Policy": kind === "review-frame"
-      ? reviewFrameContentSecurityPolicy(dependencies.contentDomain)
+      ? reviewFrameContentSecurityPolicy(
+        dependencies.contentDomain,
+        responseApplicationUrl(context, dependencies).origin,
+      )
       : "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",

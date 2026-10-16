@@ -73,7 +73,7 @@ export interface ExternalStorageRuntimeConfig {
   readonly browserAccess: Extract<BrowserAccess, {readonly mode: "private_team"}>;
   readonly clock?: Clock;
   readonly completedRequestLogSampleRate?: number;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
   readonly databaseUrl: Redacted.Redacted;
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
