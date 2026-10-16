@@ -205,7 +205,7 @@ Review renders artifact HTML in an opaque `srcdoc` iframe with `sandbox="allow-s
 | Canvas readback of same-folder images without `crossorigin` | The image is cross-origin to the opaque document, so the canvas is tainted. | Rarely. |
 | Workers from a script URL | An opaque origin cannot create one. A `blob:` worker is untested. | Rarely. |
 | A private (`account_required`) version opened in its own tab | An opaque document's subresource requests never carry the content-session cookie, so the bootstrap flow cannot work. Path mode answers it with `CapabilityUnavailable`. Review still shows private versions, because lease URLs carry the credential. | Only with OIDC. |
-| A page loaded during a publish | The folder serves the current version. A publish between the HTML load and a subresource load can mix two versions. Upstream redirects to an immutable origin instead. | A reload fixes it. |
+| A page loaded during a publish | The folder serves the current version. A publish between the HTML load and a subresource load can mix two versions. A publish between resolving the folder and serving it can answer 401 once. Upstream redirects to an immutable origin instead. | A reload fixes it. |
 
 ### Residual risk
 
@@ -255,7 +255,7 @@ Both the content domain and the identity provider become optional. Values that s
 | --- | --- |
 | `Chart.yaml:7` | `kubeVersion` becomes `">=1.33.0-0 <1.37.0-0"`. The templates use only `apps/v1`, `batch/v1`, `networking.k8s.io/v1`, `policy/v1`, and `v1`, which 1.33 serves. |
 | `values.schema.json:75` | `configuration.contentDomain` accepts `""`, in the same `oneOf` form that `s3.endpoint` uses (`:88`). |
-| `values.schema.json:234` | `ingress.contentTlsSecretName` may be `""`. |
+| `values.schema.json:234` | No change. `ingress.contentTlsSecretName` is already a plain string that accepts `""`. |
 | `templates/_helpers.tpl:80` | Delete the rule that requires exactly one browser-login provider. The partial-configuration rules for OIDC and WorkOS (`:63` to `:79`) stay. |
 | `templates/_helpers.tpl:111` | Require `ingress.contentTlsSecretName` only when `configuration.contentDomain` is set. |
 | `templates/_helpers.tpl:146` | Emit `ARTIFACT_SERVER_CONTENT_DOMAIN` only when it is set. The runtime treats an empty value as missing (`src/lifecycle/runtime-configuration.ts:655`). |
@@ -336,6 +336,8 @@ Branch `feat/k8s-compact-same-host`. Each commit passes its check before the nex
 | 12 | `feat(helm): install on Kubernetes 1.33 without a content domain or login` | `pnpm verify:helm-static` with 1.33 and the new no-domain, no-provider case. The upstream kind test (`pnpm test:helm`, CI) still passes with its content domain and OIDC values. |
 | 13 | `ci(fork): publish the image and chart on fork tags` | `zizmor` and `actionlint` on the workflow, then the first tag `v0.1.2-fork.1`: both digests in the summary, and `helm template` of the pulled chart shows the image digest. |
 | 14 | `docs(fork): add the operator runbook` | It holds the operator steps below and the values of section 6. Every command matches the chart. |
+
+As built, three things differ from this table. Commit 3 was not needed, because the Versity contract test passed in CI. The Review frame CSP of commit 8 landed in commit 5, because widening the content domain type forces it. The Versity commit landed after commit 4 in history.
 
 The fork deviates from these ledger entries in path mode: CNT-004 and CNT-005 (per-version origins), DEP-014-F and DEP-016-B (path-only content as the isolation boundary), and AUTH-025 (start without a provider). The ledger entries for commits 5 to 12 say so. DEP-006 (stateless Kubernetes replicas) holds again.
 
