@@ -146,6 +146,7 @@ import {
 } from "./artifact-http-links.js";
 import {
   assertCookieSessionsAvailable,
+  isolateSameHostResponse,
   parseSameHostContentRequest,
   sameHostContentSource,
 } from "./same-host-content.js";
@@ -694,6 +695,17 @@ export function createHttpApp(
       }
     }
   });
+
+  if (dependencies.contentDomain === null) {
+    // One outer wrapper, so no content branch or error path can skip the headers.
+    app.use("*", async (context, next) => {
+      if (parseSameHostContentRequest(new URL(context.req.url)) === null) {
+        return next();
+      }
+      await next();
+      context.res = isolateSameHostResponse(context.res);
+    });
+  }
 
   app.use("*", async (context, next) => {
     let requestUrl = new URL(context.req.url);

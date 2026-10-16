@@ -10,13 +10,6 @@ import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
 import {
-  commitStagedUpload,
-  createStagedUpload,
-  uploadEveryStagedFile,
-  type PublishResponse,
-  type TestSiteFile,
-} from "../support/publishing.js";
-import {
   createTestInstallation,
   fetchVersion,
   removeTestInstallation,
@@ -24,13 +17,16 @@ import {
   type RunningTestServer,
   type TestInstallation,
 } from "../support/runtime-harness.js";
+import {
+  apiPost,
+  indexHtml,
+  nestedHtml,
+  publishSite,
+  spaShell,
+  stylesheet,
+} from "../support/same-host-site.js";
 
 const mcpProtocolVersion = "2026-07-28";
-const indexHtml =
-  '<!doctype html><link rel="stylesheet" href="./assets/a.css"><title>Same-host site</title>';
-const stylesheet = "body { color: rebeccapurple; }";
-const nestedHtml = "<!doctype html><title>Nested page</title>";
-const spaShell = "<!doctype html><title>SPA shell</title>";
 
 const previewLeaseSchema = z.object({
   baseUrl: z.url(),
@@ -43,67 +39,6 @@ const errorBodySchema = z.object({
 const artifactDetailsSchema = z.object({
   current: z.object({links: z.object({version: z.url()})}),
 });
-
-function utf8(text: string): Uint8Array {
-  return new TextEncoder().encode(text);
-}
-
-function siteFiles(entry: string): readonly TestSiteFile[] {
-  return [
-    {bytes: utf8(entry), mediaType: "text/html; charset=utf-8", path: "index.html"},
-    {
-      bytes: utf8(stylesheet),
-      mediaType: "text/css; charset=utf-8",
-      path: "assets/a.css",
-    },
-    {
-      bytes: utf8(nestedHtml),
-      mediaType: "text/html; charset=utf-8",
-      path: "docs/nested/page.html",
-    },
-  ];
-}
-
-async function publishSite(
-  server: RunningTestServer,
-  installation: TestInstallation,
-  input: {
-    readonly accessSetting: "account_required" | "public_link";
-    readonly entry?: string;
-    readonly name: string;
-    readonly routingMode?: "spa" | "static";
-  },
-): Promise<PublishResponse> {
-  const files = siteFiles(input.entry ?? indexHtml);
-  const planned = await createStagedUpload(
-    server,
-    installation,
-    "index.html",
-    files,
-    undefined,
-    input.routingMode,
-  );
-  const uploads = await uploadEveryStagedFile(installation, planned.body, files);
-  expect(uploads.map((upload) => upload.status)).toEqual([200, 200, 200]);
-  const published = await commitStagedUpload(
-    installation,
-    planned.body,
-    `frk-001-${input.name}`,
-    {accessSetting: input.accessSetting, kind: "new_artifact", name: input.name},
-  );
-  expect(published.response.status).toBe(201);
-  return published.body;
-}
-
-function apiPost(
-  installation: TestInstallation,
-  url: string,
-): Promise<Response> {
-  return fetch(url, {
-    headers: {Authorization: `Bearer ${installation.apiToken}`},
-    method: "POST",
-  });
-}
 
 describe("same-host content in path mode", () => {
   let installation: TestInstallation;

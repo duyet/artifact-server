@@ -4900,3 +4900,17 @@ requirements:
     proof_gap: Tests are not written yet; no deployed run exists.
     depends_on: [CNT-001]
     evidence: []
+
+  - id: FRK-002
+    kind: security
+    behavior: Every response from the same-host content router carries a CSP sandbox without allow-same-origin, so artifact code runs in an opaque origin that cannot use application cookies, storage, or credentialed API requests.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: isolation-on-one-origin}
+    acceptance:
+      behavior: {id: FRK-002-B, description: "Every same-host content response, including 206, 304, 404, 401, HEAD, redirects, and the SPA fallback, carries the sandbox policy and Access-Control-Allow-Origin."}
+      failure: {id: FRK-002-F, description: "Hostile artifact JavaScript opened at top level cannot read cookies or storage, make a credentialed API read, submit a credentialed mutation, or register a service worker."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; the browser probe runs only in Chromium.
+    depends_on: [FRK-001, CMT-014]
+    evidence: []

@@ -18,11 +18,18 @@ export interface BrowserFixture {
 
 export async function startBrowserFixture(
   browser: Browser,
-  options: {readonly timezoneId?: string} = {},
+  options: {
+    readonly contentDomain?: string | null;
+    readonly timezoneId?: string;
+  } = {},
 ): Promise<BrowserFixture> {
+  const {contentDomain, ...contextOptions} = options;
   const installation = await createTestInstallation();
-  const server = await startTestServer(installation);
-  const context = await browser.newContext(options);
+  const server = await startTestServer(
+    installation,
+    contentDomain === undefined ? {} : {contentDomain},
+  );
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   return {context, installation, page, server};
 }

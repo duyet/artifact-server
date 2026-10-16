@@ -55,6 +55,26 @@ export function parseSameHostContentRequest(
   };
 }
 
+const sandboxPolicy =
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+
+/**
+ * Copy a content response with the isolation headers. The sandbox gives the
+ * document an opaque origin, which makes its own-folder subresource requests
+ * cross-origin, so they need `Access-Control-Allow-Origin`. The copy is
+ * needed because fetch and redirect responses have immutable headers.
+ */
+export function isolateSameHostResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("Content-Security-Policy", sandboxPolicy);
+  headers.set("Access-Control-Allow-Origin", "*");
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
 /** The one CSP source that covers every `/v/` response of an application origin. */
 export function sameHostContentSource(applicationOrigin: string): string {
   return `${applicationOrigin}/${versionPathSegment}/`;
