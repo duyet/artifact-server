@@ -1,0 +1,173 @@
+name: Fork Release
+
+on:
+  push:
+    tags:
+      - "v*-fork.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build and push OCI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Derive the version from the tag
+        id: version
+        env:
+          ARTIFACTSERVER_REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=${ARTIFACTSERVER_REF_NAME#v}
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-fork\.[0-9]+$ ]]; then
+            printf 'Tag %s is not v<major>.<minor>.<patch>-fork.<n>.\n' \
+              "$ARTIFACTSERVER_REF_NAME" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Set up BuildKit
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - name: Sign in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: packaging/oci/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/duyet/artifact-server:${{ steps.version.outputs.version }}
+          build-args: |
+            IMAGE_REVISION=${{ github.sha }}
+            IMAGE_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            IMAGE_SOURCE_TREE_CLEAN=true
+            IMAGE_VERSION=${{ steps.version.outputs.version }}
+          provenance: mode=max
+          sbom: generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68
+
+  chart:
+    name: Package and push Helm chart
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install verified Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm_path=$(scripts/with-kubernetes-test-tools.sh bash -c 'command -v helm' | tail -n 1)
+          dirname -- "$helm_path" >> "$GITHUB_PATH"
+          "$helm_path" version --short
+      - name: Point the chart at the pushed image and the fork
+        env:
+          ARTIFACTSERVER_IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+          ARTIFACTSERVER_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARTIFACTSERVER_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf 'The image job did not return a sha256 digest: %s\n' \
+              "$ARTIFACTSERVER_IMAGE_DIGEST" >&2
+            exit 1
+          fi
+          # helm push labels the package with sources[0], and GHCR links the
+          # package to that repository, so it must name the fork.
+          chart=packaging/helm/artifact-server/Chart.yaml
+          sed -i -E "s|^  - https://github.com/plannotator/artifact-server$|  - $ARTIFACTSERVER_SOURCE|" "$chart"
+          grep -Fx -- "  - $ARTIFACTSERVER_SOURCE" "$chart"
+          values=packaging/helm/artifact-server/values.yaml
+          sed -i -E \
+            -e 's|^  repository: .*$|  repository: ghcr.io/duyet/artifact-server|' \
+            -e 's|^  digest: ""$|  digest: "'"$ARTIFACTSERVER_IMAGE_DIGEST"'"|' \
+            "$values"
+          grep -Fx -- '  repository: ghcr.io/duyet/artifact-server' "$values"
+          grep -Fx -- "  digest: \"$ARTIFACTSERVER_IMAGE_DIGEST\"" "$values"
+          git diff --no-color -- "$values"
+      - name: Lint the chart without a content domain or login provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm lint packaging/helm/artifact-server --strict \
+            --set configuration.installationId=release-lint \
+            --set configuration.bootstrapAdministratorEmail=admin@artifacts.example.internal \
+            --set configuration.applicationOrigin=https://artifacts.example.internal \
+            --set configuration.s3.bucket=artifact-server \
+            --set configuration.s3.region=us-east-1 \
+            --set secret.name=artifact-server-runtime
+      - name: Package the chart
+        env:
+          ARTIFACTSERVER_VERSION: ${{ needs.image.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p -- "$RUNNER_TEMP/chart"
+          helm package packaging/helm/artifact-server \
+            --version "$ARTIFACTSERVER_VERSION" \
+            --destination "$RUNNER_TEMP/chart"
+          test -f "$RUNNER_TEMP/chart/artifact-server-$ARTIFACTSERVER_VERSION.tgz"
+      - name: Sign in to GHCR for Helm
+        env:
+          ARTIFACTSERVER_GITHUB_ACTOR: ${{ github.actor }}
+          ARTIFACTSERVER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: >-
+          helm registry login ghcr.io
+          --username "$ARTIFACTSERVER_GITHUB_ACTOR"
+          --password-stdin
+          <<< "$ARTIFACTSERVER_GITHUB_TOKEN"
+      - name: Push the chart and record both references
+        env:
+          ARTIFACTSERVER_IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+          ARTIFACTSERVER_VERSION: ${{ needs.image.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/chart/artifact-server-$ARTIFACTSERVER_VERSION.tgz"
+          if ! push_output=$(helm push "$archive" oci://ghcr.io/duyet/charts 2>&1); then
+            printf '%s\n' "$push_output" >&2
+            exit 1
+          fi
+          printf '%s\n' "$push_output"
+          chart_digest=$(awk '$1 == "Digest:" { print $2 }' <<< "$push_output")
+          if [[ ! "$chart_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf 'Could not read the chart digest from the helm push output.\n' >&2
+            exit 1
+          fi
+          {
+            echo '### Fork release'
+            echo
+            echo "- Version: \`$ARTIFACTSERVER_VERSION\`"
+            echo "- Image: \`ghcr.io/duyet/artifact-server@$ARTIFACTSERVER_IMAGE_DIGEST\`"
+            echo "- Chart: \`oci://ghcr.io/duyet/charts/artifact-server@$chart_digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
