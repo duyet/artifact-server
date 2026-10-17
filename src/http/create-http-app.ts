@@ -3622,11 +3622,13 @@ async function serveVersionContent(
   if (
     dependencies.artifactViews !== undefined &&
     context.req.method === "GET" &&
-    (requestedPath === "" || requestedPath === content.entryPath)
+    content.entry.path === content.entryPath
   ) {
     // A `Map` increment behind a buffer: the content response never waits for
-    // a counter to reach storage. An asset, a HEAD probe, and a 404 all miss
-    // this branch, because none of them carries the entry document.
+    // a counter to reach storage. One view is one GET whose response IS the
+    // entry document, so the folder URL, the entry path, and an SPA fallback
+    // all land here, while an asset, a HEAD probe, and a 404 all miss this
+    // branch because none of them carries the entry document.
     dependencies.artifactViews.record(content.artifactId);
   }
   const publiclyCacheable = content.accessSetting === accessSettings.publicLink &&

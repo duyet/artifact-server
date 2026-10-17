@@ -2353,7 +2353,7 @@ export function createD1ArtifactRepository(
     findArtifactByPath: () => Promise.resolve(null),
     listPublicArtifacts: async (limit) => {
       const result = await database.prepare(`
-        SELECT artifacts.id, artifacts.name, artifacts.path,
+        SELECT artifacts.id, artifacts.name, NULL AS path,
           artifacts.access_setting AS accessSetting,
           versions.created_at AS currentVersionCreatedAt
         FROM artifacts

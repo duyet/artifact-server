@@ -12,7 +12,16 @@ import {
 } from "../../src/application/artifact-view-recorder.js";
 import {SqliteArtifactRepository} from
   "../../src/storage/sqlite-artifact-repository.js";
+import {ArtifactRepositoryFailure} from "../../src/core/errors.js";
+import type {ArtifactViewDelta} from "../../src/core/ports.js";
 import {defaultProjectId} from "../../src/core/model.js";
+import {
+  createTestInstallation,
+  removeTestInstallation,
+  startTestServer,
+  type TestInstallation,
+} from "../support/runtime-harness.js";
+import {publishSite} from "../support/same-host-site.js";
 
 const storedRowSchema = z.object({
   artifact_id: z.string(),
@@ -168,5 +177,131 @@ describe("buffered artifact view recorder", () => {
       {artifact_id: "art_one", count: 1, day: "2026-10-17"},
       {artifact_id: "art_two", count: 1, day: "2026-10-17"},
     ]);
+  });
+
+  test("a chunk the repository rejects is dropped once, never retried", async () => {
+    const clock = movableClock(new Date("2026-10-17T08:00:00.000Z"));
+    // A repository that rejects the first write and serves the real one
+    // afterwards, so a retry would be visible as a duplicate row.
+    let remainingRejections = 1;
+    const failingOnceRepository = {
+      recordArtifactViews: (deltas: readonly ArtifactViewDelta[]) => {
+        if (remainingRejections > 0) {
+          remainingRejections -= 1;
+          return Promise.reject(new ArtifactRepositoryFailure({
+            cause: new Error("SQLite is briefly unavailable"),
+            operation: "recordArtifactViews",
+          }));
+        }
+        return repository.recordArtifactViews(deltas);
+      },
+    };
+    const recorder = createArtifactViewRecorder({
+      chunkSize: defaultArtifactViewDrainChunkSize,
+      clock,
+      repository: failingOnceRepository,
+    });
+    seedArtifact("art_one", "2026-10-17T00:00:00.000Z");
+    seedArtifact("art_two", "2026-10-17T00:00:00.000Z");
+    recorder.record("art_one");
+
+    expect(recorder.pending()).toBe(1);
+    expect(await recorder.flush()).toEqual({
+      failedChunks: 1,
+      writtenRows: 0,
+    });
+    // The failed drain emptied the buffer: the counts are lost on purpose,
+    // not parked for a later drain that might never succeed.
+    expect(recorder.pending()).toBe(0);
+    expect(storedRows(["art_one"])).toEqual([]);
+
+    // A later flush carries only fresh views, and the dropped chunk's day
+    // row never reaches the repository that now succeeds.
+    recorder.record("art_two");
+    expect(await recorder.flush()).toEqual({failedChunks: 0, writtenRows: 1});
+    expect(storedRows(["art_one", "art_two"])).toEqual([
+      {artifact_id: "art_two", count: 1, day: "2026-10-17"},
+    ]);
+  });
+
+  test("every rejected chunk is reported, and an empty later drain writes nothing", async () => {
+    const clock = movableClock(new Date("2026-10-17T08:00:00.000Z"));
+    const recorder = createArtifactViewRecorder({
+      chunkSize: 2,
+      clock,
+      repository: {
+        recordArtifactViews: () =>
+          Promise.reject(new ArtifactRepositoryFailure({
+            cause: new Error("SQLite is unavailable"),
+            operation: "recordArtifactViews",
+          })),
+      },
+    });
+    // Three deltas at a chunk size of two span two chunks, both hopeless.
+    for (const artifactId of ["art_a", "art_b", "art_c"]) {
+      recorder.record(artifactId);
+    }
+
+    expect(await recorder.flush()).toEqual({failedChunks: 2, writtenRows: 0});
+    expect(recorder.pending()).toBe(0);
+    expect(await recorder.flush()).toEqual({
+      failedChunks: 0,
+      writtenRows: 0,
+    });
+  });
+});
+
+describe("view counts survive a clean shutdown", () => {
+  const today = "2026-10-17";
+  const todayInstant = new Date(`${today}T09:00:00.000Z`);
+
+  /** A clock whose day the assertion can name. */
+  function fixedClock() {
+    return {now: () => todayInstant};
+  }
+
+  /** Stored rows, read from the installation's database after the server is gone. */
+  function storedViewRows(installation: TestInstallation, artifactId: string) {
+    const reader = new DatabaseSync(
+      path.join(installation.dataDirectory, "artifact-server.db"),
+      {allowExtension: false, readOnly: true},
+    );
+    try {
+      return z.array(storedRowSchema).parse(reader.prepare(
+        `SELECT artifact_id, day, count FROM artifact_views
+         WHERE artifact_id = ? ORDER BY day`,
+      ).all(artifactId));
+    } finally {
+      reader.close();
+    }
+  }
+
+  test("stopping the server without a manual flush drains the buffered views", async () => {
+    const installation = await createTestInstallation();
+    // One hour between drains, so only the shutdown close hook could have
+    // written the row the assertion below reads.
+    const server = await startTestServer(installation, {
+      artifactViewCollectionPolicy: {intervalMilliseconds: 3_600_000},
+      clock: fixedClock(),
+      contentDomain: null,
+    });
+    try {
+      const site = await publishSite(server, installation, {
+        accessSetting: "public_link",
+        name: "Agent console",
+        path: "2026/10/agent-console",
+      });
+      const entryPathUrl = `${server.baseUrl}/2026/10/agent-console/`;
+      expect((await fetch(entryPathUrl)).status).toBe(200);
+      expect((await fetch(entryPathUrl)).status).toBe(200);
+
+      // No flush here: the normal shutdown is the drain under test.
+      await server.stop();
+      expect(storedViewRows(installation, site.artifact.id)).toEqual([
+        {artifact_id: site.artifact.id, count: 2, day: today},
+      ]);
+    } finally {
+      await removeTestInstallation(installation);
+    }
   });
 });

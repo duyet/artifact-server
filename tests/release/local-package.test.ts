@@ -98,6 +98,13 @@ describe("direct local release package", () => {
         "utf8",
       );
       expect(packagedShell).toContain('id="review-root"');
+      // The home page is part of the product, so the package ships its shell
+      // and the launcher serves it anonymously at /.
+      const packagedHome = await readFile(
+        path.join(firstInstallation, "artifactserver/dist/web/index.html"),
+        "utf8",
+      );
+      expect(packagedHome).toContain('id="home-root"');
       expect(await readdir(
         path.join(firstInstallation, "artifactserver/dist/web/assets"),
       )).toEqual(expect.arrayContaining([
@@ -133,7 +140,6 @@ describe("direct local release package", () => {
 
       await expectMissing(path.join(firstInstallation, "artifactserver/src"));
       await expectMissing(path.join(firstInstallation, "artifactserver/tests"));
-      await expectMissing(path.join(firstInstallation, "artifactserver/dist/web/index.html"));
       await expectMissing(path.join(firstInstallation, "artifactserver/node_modules/typescript"));
       await expectMissing(path.join(firstInstallation, "artifactserver/node_modules/tsx"));
       await expectMissing(path.join(firstInstallation, "artifactserver/node_modules/vitest"));
@@ -218,7 +224,6 @@ describe("direct local release package", () => {
       server = startPackagedServer(executableA, dataDirectory, port, workspace);
       const startupOutput = await waitForReady(server, port);
       const redirects = [
-        ["/?source=legacy", "/review?source=legacy"],
         ["/workbench?project=prj_default&view=focus", "/review?project=prj_default&view=focus"],
         ["/projects?source=legacy", "/review/settings/projects?source=legacy"],
         ["/administration/members?source=legacy", "/review/settings/members?source=legacy"],
@@ -246,6 +251,17 @@ describe("direct local release package", () => {
         "frame-ancestors 'none'",
       );
       expect(await management.text()).toContain('id="review-root"');
+
+      // / is the public home shell now, so a legacy query marker gets the home
+      // page instead of a redirect into the secret-keepers' Review app, and
+      // the other legacy locations keep their 308s above.
+      const home = await fetchPackagedManagement(port, "/?source=legacy");
+      expect(home.status).toBe(200);
+      expect(home.headers.get("content-type")).toContain("text/html");
+      expect(home.headers.get("content-security-policy")).toContain(
+        "frame-ancestors 'none'",
+      );
+      expect(await home.text()).toContain('id="home-root"');
 
       const publicationResult = await runCommand(
         executableA,
