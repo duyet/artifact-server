@@ -608,7 +608,8 @@ test.describe("Artifact Server frontend MVP", () => {
       await reviewHomeLink.click();
       const homeOverlay = fixture.page.getByRole("dialog", {name: "Artifact Server home"});
       await expect(homeOverlay).toBeVisible();
-      const homeAnimation = homeOverlay.locator("img");
+      // The dialog also shows the agent logos; the animation is the product mark.
+      const homeAnimation = homeOverlay.locator('img[src*="artifact-server"]');
       await expect(homeAnimation).toBeVisible();
       const homeAnimationGeometry = await homeAnimation.evaluate((node) => ({
         height: node.getBoundingClientRect().height,

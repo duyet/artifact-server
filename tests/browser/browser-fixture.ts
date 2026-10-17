@@ -137,6 +137,8 @@ export async function openArtifactFromGallery(page: Page, name: string): Promise
 export async function chooseAccountMenuItem(page: Page, name: string): Promise<void> {
   await page.getByRole("button", {name: /^Account:/u}).click();
   await page.getByRole("menuitem", {exact: true, name}).click();
+  // The menu animates out before it unmounts; callers inspect the settled page.
+  await expect(page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(0);
 }
 
 function escapeRegularExpression(text: string): string {
