@@ -29,3 +29,12 @@ body {
 [data-comment-popover] button[aria-label="Attachments"] {
   display: none;
 }
+
+/*
+ * HtmlViewer rings the whole document in the primary color while Annotate is
+ * on. The host's pressed Annotate toggle already shows the mode, so the ring
+ * only reads as a stuck focus outline around the preview.
+ */
+[data-annotate-armed-ring] {
+  display: none;
+}
