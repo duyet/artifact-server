@@ -47,7 +47,7 @@ export function DetailsInspector({
     : sourceDriftDescription(details.sourceBinding.status, "captured");
   return (
     <InspectorStack>
-      <InspectorSection count={6} title="Artifact">
+      <InspectorSection title="Artifact">
         <InspectorRow label="name" title={details.artifact.name} value={details.artifact.name} />
         <InspectorRow
           label="owner"
@@ -62,7 +62,7 @@ export function DetailsInspector({
         <InspectorRow label="artifact id" mono title={details.artifact.id} value={details.artifact.id} />
         <InspectorRow label="project id" mono title={details.artifact.projectId} value={details.artifact.projectId} />
       </InspectorSection>
-      <InspectorSection count={6} title="Version">
+      <InspectorSection title="Version">
         <InspectorRow label="number" title={String(version.version.number)} value={String(version.version.number)} />
         <InspectorRow
           label="publisher"
@@ -83,7 +83,7 @@ export function DetailsInspector({
         onChange={onTagsChange}
       />
       {details.sourceBinding === undefined ? null : (
-        <InspectorSection count={2} title="Linked source">
+        <InspectorSection title="Linked source">
           <InspectorRow label="state" value={sourceFreshnessLabel(details.sourceBinding.status)} />
           <InspectorRow label="path" mono value={details.sourceBinding.path} />
           {linkedDriftDescription === null ? null : (
@@ -104,7 +104,7 @@ export function DetailsInspector({
         </InspectorSection>
       )}
       {canManage ? (
-        <InspectorSection count={0} title="Danger zone">
+        <InspectorSection title="Danger zone">
           <TombstoneArtifactControl artifact={details.artifact} onConfirm={onTombstone} />
         </InspectorSection>
       ) : null}

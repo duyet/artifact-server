@@ -29,14 +29,15 @@ export function InspectorSection({
 }: {
   readonly action?: React.ReactNode;
   readonly children: React.ReactNode;
-  readonly count: number;
+  /** How many items the section lists; omitted when it is a fixed set of fields. */
+  readonly count?: number;
   readonly title: string;
 }) {
   return (
     <section className="flex flex-col gap-2">
       <header className="flex min-h-7 items-center gap-2">
         <h2 className="text-sm font-medium">{title}</h2>
-        <Badge variant="secondary">{count}</Badge>
+        {count === undefined ? null : <Badge variant="secondary">{count}</Badge>}
         {action === undefined || action === null ? null : <div className="ml-auto">{action}</div>}
       </header>
       <div className="flex flex-col gap-2">{children}</div>

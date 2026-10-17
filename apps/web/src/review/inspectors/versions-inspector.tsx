@@ -59,7 +59,7 @@ export function VersionsInspector({
   return (
     <InspectorStack>
       {versions.length < 2 ? null : (
-        <InspectorSection count={2} title="Compare versions">
+        <InspectorSection title="Compare versions">
           <form
             onSubmit={(event) => {
               event.preventDefault();

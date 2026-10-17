@@ -117,7 +117,7 @@ export function ComparisonInspector({
   const changed = changedFiles(comparison);
   return (
     <InspectorStack>
-      <InspectorSection count={2} title={`Version ${comparison.from.number} → ${comparison.to.number}`}>
+      <InspectorSection title={`Version ${comparison.from.number} → ${comparison.to.number}`}>
         <div className="flex flex-wrap gap-1.5">
           <Badge variant="secondary">{comparison.added.length} added</Badge>
           <Badge variant="secondary">{comparison.changed.length} changed</Badge>
