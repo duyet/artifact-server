@@ -178,6 +178,30 @@ A publish fails with `ARTIFACT_PATH_TAKEN` when another live artifact holds the 
 
 A path is guessable, so anyone who can reach the host can read a report at its path.
 
+## The home page
+
+`https://artifacts.example.internal/` lists every public artifact as a folder tree built from those paths, newest first, with the view count each artifact has collected. Anyone who can reach the host sees it. No credential, no cookie, no sign-in.
+
+Read it directly when you want to check what a viewer sees:
+
+```sh
+curl -sS https://artifacts.example.internal/api/v1/public/tree | jq '.artifacts[] | {name, path, views}'
+```
+
+What the page needs from an operator:
+
+- **Nothing, for public artifacts.** Artifacts with `accessSetting` other than `public_link` are absent from the tree and unreachable at it, which is the intended behaviour, not a missing page.
+- **One grant for private artifacts.** Issue 4 adds browser sign-in with the API key. After it merges, a signed-in operator sees the private artifacts too.
+- **The drain interval, if you ever need it changed.** Counts are buffered in memory and written every five seconds. A pod that is killed without draining loses at most five seconds of counts. Nothing else is configurable, and nothing needs to be.
+
+Nothing about a viewer is stored. The counter table is three columns, `artifact_id`, `day`, and `count`, and it holds no address, session, referrer, or user agent. To read the totals straight from the database:
+
+```sh
+kubectl --namespace artifact-server exec statefulset/artifact-server -- \
+  psql "$ARTIFACT_SERVER_DATABASE_URL" -c \
+  'SELECT day, SUM(count) FROM artifact_views GROUP BY day ORDER BY day DESC LIMIT 30'
+```
+
 ## Backup and restore
 
 Treat the database and the bucket prefix as one backup unit.
