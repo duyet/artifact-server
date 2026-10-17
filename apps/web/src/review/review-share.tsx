@@ -1,6 +1,17 @@
-import { IconCheck, IconChevronLeft, IconChevronRight, IconCopy, IconFile, IconLock, IconShare, IconWorld, IconX } from "@tabler/icons-react";
-import { Popover } from "@base-ui/react/popover";
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconCopy,
+  IconFile,
+  IconInfoCircle,
+  IconShare,
+  IconX,
+} from "@tabler/icons-react";
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import {
   api,
@@ -8,55 +19,97 @@ import {
   type ArtifactDetails,
   type ArtifactVersion,
 } from "@/api/client";
-import claudeLogoUrl from "./assets/agents/claude.svg";
-import codexDarkLogoUrl from "./assets/agents/codex-dark.svg";
-import codexLightLogoUrl from "./assets/agents/codex-light.svg";
-import copilotDarkLogoUrl from "./assets/agents/copilot-dark.svg";
-import copilotLightLogoUrl from "./assets/agents/copilot-light.svg";
-import cursorDarkLogoUrl from "./assets/agents/cursor-dark.svg";
-import cursorLightLogoUrl from "./assets/agents/cursor-light.svg";
-import opencodeDarkLogoUrl from "./assets/agents/opencode-dark.svg";
-import opencodeLightLogoUrl from "./assets/agents/opencode-light.svg";
-import piLogoUrl from "./assets/agents/pi.svg";
-import piLightLogoUrl from "./assets/agents/pi-light.svg";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AccessBadge } from "./access-badge.tsx";
+import { AgentLogos } from "./share/agent-logos.tsx";
+import { CopyField } from "./share/copy-field.tsx";
+import { buildAgentReviewPrompt, exactReviewLink } from "./share/review-links.ts";
+
+export { AgentLogos };
 
 type ShareScreen = "access" | "agents" | "overview";
-type CopiedTarget =
-  | "agent-prompt"
-  | "latest-link"
-  | "local-command"
-  | "mcp-address"
-  | "raw-link"
-  | "review-link";
+// Only these two copy actions show inline "Copied" state; the rest use a toast.
+type InlineCopiedTarget = "agent-prompt" | "review-link";
+type CopyFeedback =
+  | { readonly kind: "inline"; readonly target: InlineCopiedTarget }
+  | { readonly kind: "toast"; readonly message: string };
 
 const copiedResetMilliseconds = 1_600;
 
 interface ReviewShareControlProps {
   readonly details: ArtifactDetails | null;
   readonly onArtifactChanged: (artifact: ArtifactDetails["artifact"]) => void;
+  /** Controlled open state, so a menu elsewhere can open Share. */
+  readonly onOpenChange?: (open: boolean) => void;
+  readonly open?: boolean;
   readonly selectedPath: string | null;
   readonly selectedVersion: ArtifactVersion | null;
-  readonly triggerClassName: string;
+  readonly triggerSize?: "default" | "sm";
+  readonly triggerVariant?: "default" | "ghost" | "outline" | "secondary";
 }
 
 /** Share one artifact from either the standard viewer header or focus controls. */
 export function ReviewShareControl({
   details,
   onArtifactChanged,
+  onOpenChange,
+  open: openProp,
   selectedPath,
   selectedVersion,
-  triggerClassName,
+  triggerSize = "sm",
+  triggerVariant = "outline",
 }: ReviewShareControlProps) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
   const [screen, setScreen] = useState<ShareScreen>("overview");
   const [selectedAccess, setSelectedAccess] = useState<AccessSetting>(
     details?.artifact.accessSetting ?? "account_required",
   );
   const [pending, setPending] = useState(false);
-  const [copiedTarget, setCopiedTarget] = useState<CopiedTarget | null>(null);
+  const [copiedTarget, setCopiedTarget] = useState<InlineCopiedTarget | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const copiedResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset on every open, including opens driven by the `open` prop, which
+  // never pass through updateOpen.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setScreen("overview");
+      setCopiedTarget(null);
+      setFailure(null);
+    }
+  }
 
   useEffect(() => () => {
     if (copiedResetTimer.current !== null) clearTimeout(copiedResetTimer.current);
@@ -64,18 +117,14 @@ export function ReviewShareControl({
 
   const updateOpen = (next: boolean): void => {
     if (pending && !next) return;
-    setOpen(next);
-    if (next) {
-      setScreen("overview");
-      setCopiedTarget(null);
-      setFailure(null);
-    }
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
   };
 
   const copyText = async (
     text: string,
-    target: CopiedTarget,
     failureMessage: string,
+    feedback: CopyFeedback,
   ): Promise<void> => {
     setFailure(null);
     try {
@@ -83,7 +132,11 @@ export function ReviewShareControl({
         throw new Error("Clipboard access is unavailable in this browser.");
       }
       await navigator.clipboard.writeText(text);
-      setCopiedTarget(target);
+      if (feedback.kind === "toast") {
+        toast.success(feedback.message);
+        return;
+      }
+      setCopiedTarget(feedback.target);
       if (copiedResetTimer.current !== null) clearTimeout(copiedResetTimer.current);
       copiedResetTimer.current = setTimeout(
         () => setCopiedTarget(null),
@@ -105,8 +158,8 @@ export function ReviewShareControl({
     if (reviewLink === null) return;
     await copyText(
       reviewLink,
-      "review-link",
       "The exact Review link could not be copied.",
+      { kind: "inline", target: "review-link" },
     );
   };
 
@@ -114,8 +167,8 @@ export function ReviewShareControl({
     if (details === null || selectedVersion === null || reviewLink === null) return;
     await copyText(
       buildAgentReviewPrompt(details, selectedVersion, reviewLink),
-      "agent-prompt",
       "The agent review prompt could not be copied.",
+      { kind: "inline", target: "agent-prompt" },
     );
   };
 
@@ -165,491 +218,401 @@ export function ReviewShareControl({
   const publicArtifact = details?.artifact.accessSetting === "public_link";
   const serverOrigin = details === null ? "" : new URL(details.links.artifact).origin;
   const mcpAddress = `${serverOrigin}/mcp`;
+  const versionLabel = selectedVersion?.version.number ?? "—";
 
   return (
-    <Popover.Root open={open} onOpenChange={updateOpen}>
-      <Popover.Trigger
+    <Popover open={open} onOpenChange={updateOpen}>
+      <PopoverTrigger
         render={(
-          <button
-            aria-label="Share"
-            className={triggerClassName}
+          <Button
             disabled={details === null || selectedVersion === null}
-            type="button"
+            size={triggerSize}
+            variant={triggerVariant}
           />
         )}
       >
-        <IconShare aria-hidden="true" stroke={1.8} />
-        <span className="as-button__label">Share</span>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Backdrop className="as-share-backdrop" />
-        <Popover.Positioner align="end" className="as-share-positioner" sideOffset={8}>
-          <Popover.Popup aria-label="Share artifact" className="as-share-popover">
-            {screen === "overview" ? (
-              <header className="as-share-popover__header as-share-popover__header--artifact">
-                <span aria-hidden="true" className="as-share-destination__icon">
-                  <IconFile stroke={1.8} />
+        <IconShare data-icon="inline-start" />
+        Share
+      </PopoverTrigger>
+      {/* Base UI cannot see clicks inside the artifact iframe; the backdrop makes outside-press work over it. */}
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Backdrop className="fixed inset-0 isolate z-50 bg-black/10 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+      </PopoverPrimitive.Portal>
+      <PopoverContent
+        align="end"
+        aria-label="Share artifact"
+        className="max-h-[min(44rem,calc(100dvh-1.5rem))] w-[22rem] scheme-light dark:scheme-dark gap-3 overflow-y-auto p-3"
+        sideOffset={8}
+      >
+        <div className="flex items-start gap-2">
+          {screen === "overview" ? (
+            <IconFile aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ShareIconButton
+              disabled={pending}
+              label="Back to Share"
+              onClick={() => setScreen("overview")}
+            >
+              <IconChevronLeft />
+            </ShareIconButton>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h2 className="truncate text-sm font-medium">
+              {screen === "overview"
+                ? details?.artifact.name ?? "Artifact"
+                : screen === "access" ? "Artifact access" : "Connect MCP"}
+            </h2>
+            <p className="truncate text-xs text-muted-foreground">
+              {screen === "overview"
+                ? `Exact version · Version ${versionLabel}`
+                : details?.artifact.name ?? "No artifact selected"}
+            </p>
+          </div>
+          <ShareIconButton
+            disabled={pending}
+            label="Close Share"
+            onClick={() => updateOpen(false)}
+          >
+            <IconX />
+          </ShareIconButton>
+        </div>
+
+        {screen === "overview" ? (
+          <>
+            <Field>
+              <FieldLabel htmlFor="review-share-link">Review and comment</FieldLabel>
+              <CopyField
+                copied={copiedTarget === "review-link"}
+                copiedLabel="Copied"
+                copyLabel="Copy Review link"
+                disabled={reviewLink === null}
+                id="review-share-link"
+                onCopy={() => void copyReviewLink()}
+                showText
+                value={reviewLink ?? ""}
+              />
+            </Field>
+
+            <Item size="xs" variant="muted">
+              <ItemContent>
+                <ItemTitle>
+                  <AccessBadge access={publicArtifact ? "public_link" : "account_required"} />
+                </ItemTitle>
+                <ItemDescription className="line-clamp-none">
+                  People with access to this Artifact Server can review this exact version.
+                  {publicArtifact ? " The latest raw artifact is public." : ""}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  disabled={details === null}
+                  onClick={openAccess}
+                  size="sm"
+                  variant="outline"
+                >
+                  Manage access
+                </Button>
+              </ItemActions>
+            </Item>
+
+            <Separator />
+
+            <FieldGroup className="gap-3">
+              <h3 className="text-xs font-medium text-muted-foreground">Other links</h3>
+              <Field>
+                <FieldContent>
+                  <FieldLabel htmlFor="review-share-latest">Latest</FieldLabel>
+                  <FieldDescription>Moves when a new version is published</FieldDescription>
+                </FieldContent>
+                <CopyField
+                  copyLabel="Copy latest link"
+                  disabled={details === null}
+                  id="review-share-latest"
+                  onCopy={() => {
+                    if (details !== null) {
+                      void copyText(
+                        details.links.artifact,
+                        "The latest artifact link could not be copied.",
+                        { kind: "toast", message: "Link copied" },
+                      );
+                    }
+                  }}
+                  value={details?.links.artifact ?? ""}
+                />
+              </Field>
+              <Field>
+                <FieldContent>
+                  <FieldLabel htmlFor="review-share-raw">Raw</FieldLabel>
+                  <FieldDescription>Exact version without Review controls</FieldDescription>
+                </FieldContent>
+                <CopyField
+                  copyLabel="Copy raw link"
+                  disabled={selectedVersion === null}
+                  id="review-share-raw"
+                  onCopy={() => {
+                    if (selectedVersion !== null) {
+                      void copyText(
+                        selectedVersion.links.version,
+                        "The raw version link could not be copied.",
+                        { kind: "toast", message: "Link copied" },
+                      );
+                    }
+                  }}
+                  value={selectedVersion?.links.version ?? ""}
+                />
+              </Field>
+            </FieldGroup>
+
+            <Separator />
+
+            <section aria-labelledby="review-share-agent-heading" className="flex flex-col gap-2">
+              <div className="flex flex-col gap-0.5">
+                <h3 className="text-sm font-medium" id="review-share-agent-heading">
+                  Review with an AI agent
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Copy one complete prompt into Claude, Codex, Cursor, GitHub Copilot, Pi, or OpenCode.
+                </p>
+              </div>
+              <Button
+                className="w-full justify-start"
+                disabled={details === null || selectedVersion === null}
+                onClick={() => void copyAgentPrompt()}
+                variant="outline"
+              >
+                <AgentLogos />
+                <span className="flex-1 text-left">
+                  {copiedTarget === "agent-prompt" ? "Prompt copied" : "Copy review prompt"}
                 </span>
-                <div>
-                  <h2>{details?.artifact.name ?? "Artifact"}</h2>
-                  <p>Exact version · Version {selectedVersion?.version.number ?? "—"}</p>
-                </div>
-                <button
-                  aria-label="Close Share"
-                  className="as-icon-button"
-                  disabled={pending}
-                  onClick={() => updateOpen(false)}
-                  type="button"
-                >
-                  <IconX aria-hidden="true" stroke={1.8} />
-                </button>
-              </header>
-            ) : (
-              <header className="as-share-popover__header">
-                <button
-                  aria-label="Back to Share"
-                  className="as-icon-button"
-                  disabled={pending}
-                  onClick={() => setScreen("overview")}
-                  type="button"
-                >
-                  <IconChevronLeft aria-hidden="true" stroke={1.8} />
-                </button>
-                <div>
-                  <h2>{screen === "access" ? "Artifact access" : "Connect MCP"}</h2>
-                  <p>{details?.artifact.name ?? "No artifact selected"}</p>
-                </div>
-                <button
-                  aria-label="Close Share"
-                  className="as-icon-button"
-                  disabled={pending}
-                  onClick={() => updateOpen(false)}
-                  type="button"
-                >
-                  <IconX aria-hidden="true" stroke={1.8} />
-                </button>
-              </header>
+                {copiedTarget === "agent-prompt"
+                  ? <IconCheck data-icon="inline-end" />
+                  : <IconCopy data-icon="inline-end" />}
+              </Button>
+              <Button
+                className="w-full justify-between"
+                disabled={details === null}
+                onClick={() => {
+                  setFailure(null);
+                  setScreen("agents");
+                }}
+                variant="ghost"
+              >
+                Connect MCP
+                <IconChevronRight data-icon="inline-end" />
+              </Button>
+            </section>
+
+            {failure === null ? null : <ShareFailure message={failure} />}
+            {notice === null ? null : (
+              <Alert role="status">
+                <IconInfoCircle />
+                <AlertDescription>{notice}</AlertDescription>
+              </Alert>
             )}
 
-            {screen === "overview" ? (
-              <div className="as-share-overview">
-                <section aria-labelledby="as-share-link-heading" className="as-share-link">
-                  <h3 id="as-share-link-heading">Review and comment</h3>
-                  <div>
-                    <code title={reviewLink ?? undefined}>{reviewLink ?? ""}</code>
-                    <button
-                      className="as-button as-button--primary"
-                      disabled={reviewLink === null}
-                      onClick={() => void copyReviewLink()}
-                      type="button"
-                    >
-                      {copiedTarget === "review-link" ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
-                      {copiedTarget === "review-link" ? "Copied" : "Copy Review link"}
-                    </button>
-                  </div>
-                </section>
-
-                <div className="as-share-access-summary">
-                  {publicArtifact ? <IconWorld aria-hidden="true" stroke={1.8} /> : <IconLock aria-hidden="true" stroke={1.8} />}
-                  <p>
-                    People with access to this Artifact Server can review this exact version.
-                    {publicArtifact ? " The latest raw artifact is public." : ""}
-                  </p>
-                  <button
-                    className="as-button"
-                    disabled={details === null}
-                    onClick={openAccess}
-                    type="button"
-                  >
-                    Manage access
-                  </button>
-                </div>
-
-                <section aria-labelledby="as-share-secondary-heading" className="as-share-secondary">
-                  <h3 id="as-share-secondary-heading">Other links</h3>
-                  <ShareSecondaryLink
-                    copied={copiedTarget === "latest-link"}
-                    description="Moves when a new version is published"
-                    label="Latest"
-                    onCopy={() => {
-                      if (details !== null) {
-                        void copyText(
-                          details.links.artifact,
-                          "latest-link",
-                          "The latest artifact link could not be copied.",
-                        );
-                      }
-                    }}
-                    value={details?.links.artifact ?? ""}
-                  />
-                  <ShareSecondaryLink
-                    copied={copiedTarget === "raw-link"}
-                    description="Exact version without Review controls"
-                    label="Raw"
-                    onCopy={() => {
-                      if (selectedVersion !== null) {
-                        void copyText(
-                          selectedVersion.links.version,
-                          "raw-link",
-                          "The raw version link could not be copied.",
-                        );
-                      }
-                    }}
-                    value={selectedVersion?.links.version ?? ""}
-                  />
-                </section>
-
-                <section aria-labelledby="as-share-agent-heading" className="as-share-agent">
-                  <h3 id="as-share-agent-heading">Review with an AI agent</h3>
-                  <p>Copy one complete prompt into Claude, Codex, Cursor, GitHub Copilot, Pi, or OpenCode.</p>
-                  <div className="as-share-agent__actions">
-                    <button
-                      className="as-share-agent__prompt"
-                      disabled={details === null || selectedVersion === null}
-                      onClick={() => void copyAgentPrompt()}
-                      type="button"
-                    >
-                      <AgentLogos />
-                      <span>
-                        {copiedTarget === "agent-prompt" ? "Prompt copied" : "Copy review prompt"}
-                      </span>
-                      {copiedTarget === "agent-prompt" ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
-                    </button>
-                    <button
-                      className="as-share-agent__setup"
-                      disabled={details === null}
-                      onClick={() => {
-                        setFailure(null);
-                        setScreen("agents");
-                      }}
-                      type="button"
-                    >
-                      Connect MCP
-                      <IconChevronRight aria-hidden="true" stroke={1.8} />
-                    </button>
-                  </div>
-                </section>
-
-                {failure === null ? null : (
-                  <p className="as-share-message" data-tone="error" role="alert">{failure}</p>
-                )}
-                {notice === null ? null : (
-                  <p className="as-share-message" data-tone="notice" role="status">{notice}</p>
-                )}
-              </div>
-            ) : screen === "agents" ? (
-              <div className="as-share-agent-setup">
-                <p>Choose the connection that matches where Artifact Server is running.</p>
-
-                <section>
-                  <header>
-                    <strong>On this computer</strong>
-                    <span>Recommended for local use</span>
-                  </header>
-                  <p>Detect a supported client, install its private MCP connection, and verify it without copying a token.</p>
-                  <CopyableAgentValue
-                    copied={copiedTarget === "local-command"}
-                    label="Copy local connection command"
+            <p className="text-xs text-muted-foreground">
+              This Review link stays pinned to Version {versionLabel}
+              {selectedPath === null ? "." : ` and ${selectedPath}.`}
+            </p>
+          </>
+        ) : screen === "agents" ? (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Choose the connection that matches where Artifact Server is running.
+            </p>
+            <ItemGroup className="gap-2">
+              <Item variant="outline">
+                <ItemContent>
+                  <ItemTitle>
+                    <span>On this computer</span>
+                    <Badge variant="secondary">Recommended for local use</Badge>
+                  </ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    Detect a supported client, install its private MCP connection, and verify it without copying a token.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemFooter>
+                  <CopyField
+                    copyLabel="Copy local connection command"
+                    inputLabel="Local connection command"
                     onCopy={() => void copyText(
                       "artifactserver connect",
-                      "local-command",
                       "The local connection command could not be copied.",
+                      { kind: "toast", message: "Command copied" },
                     )}
                     value="artifactserver connect"
                   />
-                </section>
+                </ItemFooter>
+              </Item>
 
-                <section>
-                  <header>
-                    <strong>Team or remote server</strong>
-                    <span>MCP</span>
-                  </header>
-                  <p>Add this server address to the agent. Compatible deployments open browser sign-in; other self-hosted deployments use an administrator-issued scoped key.</p>
-                  <CopyableAgentValue
-                    copied={copiedTarget === "mcp-address"}
-                    label="Copy MCP server address"
+              <Item variant="outline">
+                <ItemContent>
+                  <ItemTitle>
+                    <span>Team or remote server</span>
+                    <Badge variant="secondary">MCP</Badge>
+                  </ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    Add this server address to the agent. Compatible deployments open browser sign-in; other self-hosted deployments use an administrator-issued scoped key.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemFooter>
+                  <CopyField
+                    copyLabel="Copy MCP server address"
+                    inputLabel="MCP server address"
                     onCopy={() => void copyText(
                       mcpAddress,
-                      "mcp-address",
                       "The MCP server address could not be copied.",
+                      { kind: "toast", message: "Address copied" },
                     )}
                     value={mcpAddress}
                   />
-                </section>
+                </ItemFooter>
+              </Item>
 
-                <section>
-                  <header>
-                    <strong>Without MCP</strong>
-                    <span>HTTP API</span>
-                  </header>
-                  <p>The review prompt includes an exact authenticated API request for this version. Use a scoped API key from an administrator and never paste it into chat.</p>
-                </section>
+              <Item variant="outline">
+                <ItemContent>
+                  <ItemTitle>
+                    <span>Without MCP</span>
+                    <Badge variant="secondary">HTTP API</Badge>
+                  </ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    The review prompt includes an exact authenticated API request for this version. Use a scoped API key from an administrator and never paste it into chat.
+                  </ItemDescription>
+                </ItemContent>
+                </Item>
+            </ItemGroup>
 
-                {failure === null ? null : (
-                  <p className="as-share-message" data-tone="error" role="alert">{failure}</p>
-                )}
-              </div>
-            ) : (
-              <div className="as-share-access-editor">
-                <p>Choose who can open the current version from the stable artifact link.</p>
-                <fieldset>
-                  <legend className="as-visually-hidden">Who can open this artifact</legend>
-                  <ShareAccessOption
-                    checked={selectedAccess === "account_required"}
-                    description="An admitted installation account is required."
-                    disabled={pending}
-                    label="Private"
-                    onChange={() => setSelectedAccess("account_required")}
-                    value="account_required"
-                  />
-                  <ShareAccessOption
-                    checked={selectedAccess === "public_link"}
-                    description="No sign-in. Anyone who can reach this server and has the link can open the current version."
-                    disabled={pending}
-                    label="Public link"
-                    onChange={() => setSelectedAccess("public_link")}
-                    value="public_link"
-                  />
-                </fieldset>
-                <p className="as-share-network-note">
-                  Public access does not create a tunnel, open a firewall, or make an unreachable server reachable.
-                </p>
-                {selectedAccess !== details?.artifact.accessSetting ? (
-                  <p className="as-share-access-warning">
-                    {selectedAccess === "public_link"
-                      ? "The link can be redistributed. Earlier versions and history stay account-required."
-                      : "Downloaded or externally cached copies cannot be recalled."}
-                  </p>
-                ) : null}
-                {failure === null ? null : (
-                  <p className="as-share-message" data-tone="error" role="alert">{failure}</p>
-                )}
-                <div className="as-share-access-editor__actions">
-                  <button
-                    className="as-button"
-                    disabled={pending}
-                    onClick={() => setScreen("overview")}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="as-button as-button--primary"
-                    disabled={
-                      details === null
-                      || pending
-                      || selectedAccess === details.artifact.accessSetting
-                    }
-                    onClick={() => void saveAccess()}
-                    type="button"
-                  >
-                    {pending ? "Saving…" : "Save"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {screen === "overview" ? (
-              <footer className="as-share-popover__footer">
-                This Review link stays pinned to Version {selectedVersion?.version.number ?? "—"}
-                {selectedPath === null ? "." : ` and ${selectedPath}.`}
-              </footer>
+            {failure === null ? null : <ShareFailure message={failure} />}
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Choose who can open the current version from the stable artifact link.
+            </p>
+            <RadioGroup
+              aria-label="Who can open this artifact"
+              disabled={pending}
+              onValueChange={(value) => {
+                if (value === "account_required" || value === "public_link") {
+                  setSelectedAccess(value);
+                }
+              }}
+              value={selectedAccess}
+            >
+              <ShareAccessOption
+                description="An admitted installation account is required."
+                label="Private"
+                value="account_required"
+              />
+              <ShareAccessOption
+                description="No sign-in. Anyone who can reach this server and has the link can open the current version."
+                label="Public link"
+                value="public_link"
+              />
+            </RadioGroup>
+            <Alert role="note">
+              <IconInfoCircle />
+              <AlertDescription>
+                Public access does not create a tunnel, open a firewall, or make an unreachable server reachable.
+              </AlertDescription>
+            </Alert>
+            {selectedAccess !== details?.artifact.accessSetting ? (
+              <Alert role="note">
+                <IconAlertTriangle />
+                <AlertDescription>
+                  {selectedAccess === "public_link"
+                    ? "The link can be redistributed. Earlier versions and history stay account-required."
+                    : "Downloaded or externally cached copies cannot be recalled."}
+                </AlertDescription>
+              </Alert>
             ) : null}
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+            {failure === null ? null : <ShareFailure message={failure} />}
+            <div className="flex justify-end gap-2">
+              <Button
+                disabled={pending}
+                onClick={() => setScreen("overview")}
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  details === null
+                  || pending
+                  || selectedAccess === details.artifact.accessSetting
+                }
+                onClick={() => void saveAccess()}
+              >
+                {pending ? <Spinner data-icon="inline-start" /> : null}
+                {pending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
-export function AgentLogos() {
-  return (
-    <span
-      aria-label="Claude, Codex, Cursor, GitHub Copilot, Pi, and OpenCode"
-      className="as-agent-logos"
-      role="img"
-    >
-      <span aria-hidden="true" className="as-agent-logo">
-        <img alt="" src={claudeLogoUrl} />
-      </span>
-      <ThemedAgentLogo
-        darkUrl={codexDarkLogoUrl}
-        lightUrl={codexLightLogoUrl}
-      />
-      <ThemedAgentLogo
-        darkUrl={cursorDarkLogoUrl}
-        lightUrl={cursorLightLogoUrl}
-      />
-      <ThemedAgentLogo
-        darkUrl={copilotDarkLogoUrl}
-        lightUrl={copilotLightLogoUrl}
-      />
-      <ThemedAgentLogo darkUrl={piLogoUrl} lightUrl={piLightLogoUrl} />
-      <ThemedAgentLogo
-        darkUrl={opencodeDarkLogoUrl}
-        lightUrl={opencodeLightLogoUrl}
-      />
-    </span>
-  );
-}
-
-function ThemedAgentLogo({
-  darkUrl,
-  lightUrl,
-}: {
-  readonly darkUrl: string;
-  readonly lightUrl: string;
-}) {
-  return (
-    <span aria-hidden="true" className="as-agent-logo">
-      <img alt="" data-agent-theme="dark" src={darkUrl} />
-      <img alt="" data-agent-theme="light" src={lightUrl} />
-    </span>
-  );
-}
-
-function CopyableAgentValue({
-  copied,
+function ShareIconButton({
+  children,
+  disabled,
   label,
-  onCopy,
-  value,
+  onClick,
 }: {
-  readonly copied: boolean;
+  readonly children: React.ReactNode;
+  readonly disabled: boolean;
   readonly label: string;
-  readonly onCopy: () => void;
-  readonly value: string;
+  readonly onClick: () => void;
 }) {
   return (
-    <div className="as-share-agent-value">
-      <code title={value}>{value}</code>
-      <button aria-label={label} onClick={onCopy} type="button">
-        {copied ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
-      </button>
-    </div>
-  );
-}
-
-function ShareSecondaryLink({
-  copied,
-  description,
-  label,
-  onCopy,
-  value,
-}: {
-  readonly copied: boolean;
-  readonly description: string;
-  readonly label: string;
-  readonly onCopy: () => void;
-  readonly value: string;
-}) {
-  return (
-    <div className="as-share-secondary__row">
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-      <code title={value}>{value}</code>
-      <button
-        aria-label={`Copy ${label.toLocaleLowerCase("en-US")} link`}
-        className="as-icon-button"
-        disabled={value === ""}
-        onClick={onCopy}
-        type="button"
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            aria-label={label}
+            disabled={disabled}
+            onClick={onClick}
+            size="icon-sm"
+            variant="ghost"
+          />
+        )}
       >
-        {copied ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
-      </button>
-    </div>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
-function exactReviewLink(
-  selectedVersion: ArtifactVersion,
-  selectedPath: string | null,
-): string {
-  const reviewUrl = new URL(selectedVersion.links.review);
-  reviewUrl.searchParams.set("view", "focus");
-  if (
-    selectedPath !== null
-    && selectedVersion.manifest.entries.some((entry) => entry.path === selectedPath)
-  ) {
-    reviewUrl.searchParams.set("path", selectedPath);
-  } else {
-    reviewUrl.searchParams.delete("path");
-  }
-  return reviewUrl.toString();
-}
-
-function buildAgentReviewPrompt(
-  details: ArtifactDetails,
-  selectedVersion: ArtifactVersion,
-  reviewLink: string,
-): string {
-  const serverOrigin = new URL(details.links.artifact).origin;
-  const apiUrl = new URL(
-    `/api/v1/artifacts/${encodeURIComponent(details.artifact.id)}/versions/${encodeURIComponent(selectedVersion.version.id)}`,
-    serverOrigin,
+function ShareFailure({ message }: { readonly message: string }) {
+  return (
+    <Alert variant="destructive">
+      <IconAlertTriangle />
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
   );
-  apiUrl.searchParams.set("projectId", details.artifact.projectId);
-  const manifestResource = `artifact://projects/${details.artifact.projectId}/artifacts/${details.artifact.id}/versions/${selectedVersion.version.id}/manifest`;
-
-  return `Review this Artifact Server artifact. Inspect the exact saved version below and do not silently substitute a newer version.
-
-Artifact: ${details.artifact.name}
-Project ID: ${details.artifact.projectId}
-Artifact ID: ${details.artifact.id}
-Version: ${selectedVersion.version.number}
-Version ID: ${selectedVersion.version.id}
-Access: ${details.artifact.accessSetting === "public_link" ? "public link" : "private"}
-Review and comment: ${reviewLink}
-Raw exact version: ${selectedVersion.links.version}
-Moving latest link: ${details.links.artifact}
-
-Preferred path — Artifact Server MCP:
-1. Call artifact_get with projectId "${details.artifact.projectId}" and artifactId "${details.artifact.id}".
-2. Keep versionId "${selectedVersion.version.id}" pinned. If artifact_get reports a different current version, use artifact_version_list and review the pinned version instead.
-3. Read the exact manifest resource when available: ${manifestResource}
-4. Use artifact_open.reviewUrl for the full-screen Review experience. Use artifact_open.browserUrl only when you need the raw rendered artifact.
-5. Review the artifact and report findings in priority order. When comment tools are available, use comment_create against this exact version for precise, actionable findings.
-
-If Artifact Server MCP is not connected:
-- Local setup: run artifactserver connect, then retry with MCP.
-- Remote or team setup: add ${serverOrigin}/mcp to the agent and complete browser sign-in, or use an administrator-issued scoped key when OAuth is unavailable.
-- Direct HTTP fallback: GET ${apiUrl.toString()} with an admitted session or scoped API key.
-- curl example: curl --fail-with-body --header "Authorization: Bearer $ARTIFACT_SERVER_API_KEY" '${apiUrl.toString()}'
-
-Never paste credentials into chat, source files, or the review. If access fails, state which connection or permission is missing.`;
 }
 
 function ShareAccessOption({
-  checked,
   description,
-  disabled,
   label,
-  onChange,
   value,
 }: {
-  readonly checked: boolean;
   readonly description: string;
-  readonly disabled: boolean;
   readonly label: string;
-  readonly onChange: () => void;
   readonly value: AccessSetting;
 }) {
+  const id = `review-share-access-${value}`;
   return (
-    <label className="as-share-access-option" data-checked={checked}>
-      <input
-        checked={checked}
-        disabled={disabled}
-        name="review-artifact-access"
-        onChange={onChange}
-        type="radio"
-        value={value}
-      />
-      <span aria-hidden="true" className="as-share-access-option__indicator" />
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-    </label>
+    <FieldLabel htmlFor={id}>
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldTitle>{label}</FieldTitle>
+          <FieldDescription>{description}</FieldDescription>
+        </FieldContent>
+        <RadioGroupItem id={id} value={value} />
+      </Field>
+    </FieldLabel>
   );
 }

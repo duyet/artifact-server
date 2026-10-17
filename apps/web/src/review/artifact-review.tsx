@@ -1224,7 +1224,7 @@ export function ArtifactReview({
                     onArtifactChanged={updateArtifact}
                     selectedPath={selectedPath}
                     selectedVersion={selectedVersion}
-                    triggerClassName="as-button as-focus-controls__button"
+                    triggerVariant="ghost"
                   />
                   <ReviewDownloadControl
                     className="as-button as-focus-controls__button"
@@ -1344,7 +1344,7 @@ export function ArtifactReview({
                 onArtifactChanged={updateArtifact}
                 selectedPath={selectedPath}
                 selectedVersion={selectedVersion}
-                triggerClassName="as-button as-button--secondary"
+                triggerVariant="secondary"
               />
               <ReviewDownloadControl
                 className="as-button as-button--secondary"
