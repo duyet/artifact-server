@@ -220,6 +220,9 @@ function TreeFolder({
     <Collapsible defaultOpen>
       <h2 id={id}>
         <CollapsibleTrigger
+          // One name for the whole path: a visually hidden prefix element
+          // would be read as a separate word ("2026/ 10").
+          aria-label={prefix + name}
           render={
             <Button
               className="w-full justify-start font-normal aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
@@ -230,7 +233,6 @@ function TreeFolder({
         >
           <IconChevronRight className="transition-transform group-data-panel-open/button:rotate-90" />
           <IconFolder />
-          <span className="sr-only">{prefix}</span>
           {name}
         </CollapsibleTrigger>
       </h2>
