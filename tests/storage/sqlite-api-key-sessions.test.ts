@@ -101,7 +101,7 @@ describe("SQLite API-key browser sessions", () => {
     )).toBeNull();
   });
 
-  test("AUTH-030-F: revoking, rotating, or expiring the key ends every session it signed in", async () => {
+  test("foundation: revoking, rotating, or expiring the key ends every session it signed in", async () => {
     await repository.createApiKey(storedKey("key_revoked"));
     await repository.createApiKey(storedKey("key_rotated"));
     await repository.createApiKey(
@@ -144,7 +144,7 @@ describe("SQLite API-key browser sessions", () => {
     }
   });
 
-  test("AUTH-030-F: a session for a key that does not exist is refused", async () => {
+  test("foundation: a session for a key that does not exist is refused", async () => {
     await expect(repository.createApplicationSession(
       keySession("key_missing", "token-missing"),
     )).rejects.toThrow("FOREIGN KEY constraint failed");
