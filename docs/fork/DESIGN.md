@@ -243,6 +243,18 @@ Issuing, rotating, or revoking keys needs a human administrator (`src/applicatio
 
 `ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL` stays required in external storage (`src/lifecycle/runtime-configuration.ts:304`), even without login.
 
+### API-key sign-in
+
+With login kind `none`, Review shows a form that posts `{"apiKey": "..."}` to `POST /auth/api-key`. The route exists only for login kind `none` and answers 404 otherwise.
+
+- A session has one subject, a member or an API key (`ApplicationSessionSubject` in `src/core/installation-identity.ts`). Key sessions live in their own table, `api_key_sessions`, in SQLite (schema 14) and Postgres (migration 13). D1 has no such table, because the Worker always requires OIDC or WorkOS.
+- The key is checked exactly as a bearer key is. The session principal comes from the same `apiKeyPrincipal` function, so it equals the bearer principal. The session ends at the earlier of the normal session lifetime and the key's expiry.
+- A key session is valid only while both the session and its key are live. Revoking or rotating the key revokes its sessions in the same transaction and clears the in-process caches.
+- The request needs `Origin` equal to the application origin and `Sec-Fetch-Site: same-origin`. No CSRF token exists before sign-in.
+- Five failed attempts per client address in 60 seconds return 429 `RATE_LIMITED` with `Retry-After`, checked before the key. The count lives in one process. Behind an ingress all clients share one address, which is acceptable for one pod.
+- Sign-out is the existing `POST /api/v1/session/logout`.
+- A key session is a cookie on the application origin, so artifact code is the risk. Same-host content keeps the CSP sandbox without `allow-same-origin` (section 4), so artifact script runs in an opaque origin and its requests carry neither the right `Origin` nor the CSRF token.
+
 ## 6. Helm chart
 
 ### Patch the upstream chart
