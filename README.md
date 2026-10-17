@@ -69,10 +69,9 @@ Artifact Server gives teams a self-hosted place to organize and collaborate on t
 
 Artifact Server includes a built-in MCP server and a portable Agent Skill. Agents publish and update versioned artifacts. Teams review, comment on, and share the same work.
 
-Connect the agent and install the skill:
+Start the server with `artifactserver start`, connect the agent to `http://localhost:8787/mcp` with an API key from Settings › API keys (the [MCP guide](./docs/mcp.md) has the client commands), then install the skill:
 
 ```sh
-artifactserver connect
 npx skills add plannotator/artifact-server
 ```
 

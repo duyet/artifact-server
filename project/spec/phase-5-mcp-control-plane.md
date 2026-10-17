@@ -2,7 +2,7 @@
 
 Status: core local protocol behavior verified; complete cross-interface authorization proof and hosted release qualification remain open
 
-> Superseded in part (2026-10-18): OIDC, WorkOS, and MCP OAuth were removed. MCP and the HTTP API accept managed API keys only.
+> Superseded in part (2026-10-18): OIDC, WorkOS, and MCP OAuth were removed. MCP and the HTTP API accept managed API keys only. The `artifactserver mcp` stdio bridge and `artifactserver connect` were removed too; agents connect to `/mcp` over HTTP.
 
 ## Outcome
 

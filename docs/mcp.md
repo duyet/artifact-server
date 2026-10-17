@@ -2,33 +2,19 @@
 
 Artifact Server exposes one MCP endpoint at `POST /mcp`. MCP uses the same product operations and permissions as the CLI and HTTP API.
 
-## Connect a local client
+## Connect a client
 
-Run the automatic connection command:
+Start a local server with `artifactserver start`, which listens on `http://localhost:8787`, or use a team server. `artifactserver open` also starts one and prints its address. Create an API key under Settings › API keys. Every client connects to the server's `/mcp` address and sends the key as a bearer token.
 
-```sh
-artifactserver connect
-```
-
-If more than one supported client is installed, select one client:
+Claude Code:
 
 ```sh
-artifactserver connect codex
-artifactserver connect claude
-artifactserver connect cursor
-artifactserver connect vscode
+claude mcp add --transport http artifact-server http://localhost:8787/mcp --header "Authorization: Bearer <key>"
 ```
 
-Inspect or remove a managed connection:
+Codex, Cursor, and VS Code: add the `/mcp` address as a remote HTTP MCP server with the header `Authorization: Bearer <key>`.
 
-```sh
-artifactserver doctor codex
-artifactserver disconnect codex
-```
-
-The command registers a local stdio bridge. The bridge starts or locates the local service and handles its private credential.
-
-The credential does not appear in client configuration, command output, or startup logs.
+Keep the key in the client's configuration or secret store. Do not paste it into chat.
 
 ## Connect to a team server
 

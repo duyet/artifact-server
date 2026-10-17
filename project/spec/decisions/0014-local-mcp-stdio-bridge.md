@@ -1,5 +1,7 @@
 # ADR 0014: local MCP uses a stdio-to-loopback bridge
 
+> Superseded (2026-10-18): `artifactserver connect`, `disconnect`, `doctor`, and the `artifactserver mcp` stdio bridge were removed. Agents connect to `/mcp` over HTTP with an API key.
+
 Status: accepted
 
 ## Context

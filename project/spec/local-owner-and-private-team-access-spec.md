@@ -96,7 +96,7 @@ headers, or storage type.
 | Entry point | Access mode | Storage |
 | --- | --- | --- |
 | `artifactserver start` | `local_owner` | SQLite and host filesystem |
-| Managed service started by `artifactserver open` or `artifactserver connect` | `local_owner` | SQLite and host filesystem |
+| Managed service started by `artifactserver open` | `local_owner` | SQLite and host filesystem |
 | `pnpm dev` backend | `local_owner` | SQLite and host filesystem |
 | `artifactserver start-compact` | `private_team` | SQLite and attached filesystem |
 | `artifactserver start-external-storage` | `private_team` | Postgres and configured object storage |

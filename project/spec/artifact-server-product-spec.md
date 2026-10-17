@@ -331,18 +331,19 @@ The detailed MCP wire and authorization contract is in [Artifact Server MCP base
 
 | Condition | What the person does |
 | --- | --- |
-| Local, single user | Install Artifact Server and run `artifactserver connect`. There is no browser sign-in, visible token, copied key, Docker requirement, or startup-log step. |
-| Team or self-hosted server | An administrator creates a scoped API key in the administration interface or administrator CLI. The developer enters it once through the AI client's secret input. Keys never come from startup logs. |
+| Local, single user | Run `artifactserver start` (default `http://localhost:8787/mcp`) or `artifactserver open` (a managed local service on a random port; it prints the address). The local owner, who is an administrator, creates an API key under Settings › API keys and adds it to the AI client with `Authorization: Bearer <key>`. |
+| Team or self-hosted server | An administrator creates a scoped API key in the administration interface or administrator CLI. The developer enters it once through the AI client's secret input and points the client at `<origin>/mcp`. Keys never come from startup logs. |
 | CI, scripts, or unattended agents | An administrator creates a scoped service API key and stores it in the deployment's secret manager. No browser is involved. |
 
-`artifactserver connect` registers the local `artifactserver mcp` stdio bridge
-through the selected client's normal configuration and verifies it with a real
-discovery call. The bridge reaches the existing authenticated loopback `/mcp`
-endpoint. Its private local credential remains in a user-only file and is never
-shown to the user, stored in client configuration, or passed as a process
-argument. `artifactserver disconnect` removes the client registration, and
-`artifactserver doctor` diagnoses the local service and connection without
-revealing credentials.
+Every connection is HTTP MCP with an API key. For example:
+
+```sh
+claude mcp add --transport http artifact-server http://localhost:8787/mcp \
+  --header "Authorization: Bearer <key>"
+```
+
+Artifact Server does not register MCP connections in AI clients and has no stdio
+transport. The key lives only in the client's own configuration.
 
 Account-required artifact links use Artifact Server browser sign-in: API-key
 sign-in on a team server and the automatic owner session on a local server.
@@ -355,10 +356,9 @@ selected version. Agents prefer the Review URL for human handoff and never label
 the raw content URL as Review.
 
 These paths are release requirements. Each advertised client must pass clean
-connection, repeat connection, disconnect, stale-state recovery, and hostile
-credential tests. API-key paths must also pass rotation and revoke tests. A
-local release cannot ship with manual token copying. API-key issuance must use
-an administration surface, never startup output.
+connection, repeat connection, and hostile credential tests. API-key paths must
+also pass rotation and revoke tests. API-key issuance must use an administration
+surface, never startup output.
 
 The initial tool surface is:
 
@@ -399,9 +399,7 @@ The CLI keeps named profiles for exact server origins. On a remote server,
 administrator-issued scoped key from standard input and stores it in the
 operating-system credential store. Local mode uses private user-only state
 without browser login or a visible secret. CI
-uses a scoped service credential from its secret manager. `artifactserver
-connect` remains the command for registering an MCP connection; it is not CLI
-login.
+uses a scoped service credential from its secret manager.
 
 Artifact Server ships one portable **`artifact-server`** Agent Skill. Its entrypoint selects one internal reference:
 
@@ -478,7 +476,7 @@ A requirement is complete only when both tests pass on every applicable deployme
 - Single-file and complete-site publishing.
 - Browser-native file handling.
 - Immutable versions, canonical manifests, text comparison, restore, and two read settings.
-- `artifactserver connect`, the credential-hidden local stdio bridge, HTTP API, modern MCP, and `artifact-server` skill.
+- HTTP API, modern MCP over HTTP with an API key, and `artifact-server` skill.
 - Unique `*.localhost` version origins and the browser security tests.
 - Git handoff disabled by default; an independently configured Cloudflare Artifacts provider is optional.
 - No automatic committed-blob garbage collection.
@@ -536,7 +534,7 @@ Every applicable release must prove:
 - public-to-private changes stop new origin access and attempt the configured CDN purge;
 - backup and restore preserve IDs before a deployment is called team-ready;
 - local/team target resolution never guesses between configured servers.
-- local MCP setup requires no browser, visible token, copied key, Docker requirement, or startup-log inspection;
+- a local server accepts a managed API key at `/mcp` without Docker or startup-log inspection;
 - remote MCP connects with a scoped API key and refuses an expired, rotated, or revoked key;
 - self-hosted and automation API keys are issued through an administration surface and never exposed in startup or diagnostic logs;
 - every advertised Codex, Claude Code, Cursor, and VS Code connection path passes from clean and stale client state.

@@ -1906,20 +1906,6 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-30T17:56:35.366Z"
 
-  - id: MCP-016
-    kind: release_gate
-    behavior: The supported local MCP path is install Artifact Server, run artifactserver connect, and use the selected AI client without browser sign-in, Docker, a visible token, copied key, or startup-log inspection.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-016-B, description: "From a clean local package, connect Codex, Claude Code, Cursor, and VS Code through artifactserver connect, complete discovery and representative tool calls, restart, reconnect, disconnect, and run doctor."}
-      failure: {id: MCP-016-F, description: "Multiple-client ambiguity asks for a choice, stale or corrupt registration produces a useful diagnosis, and no command output, log, project file, process argument, or diagnostic bundle exposes the internal local credential."}
-    deployments: [local]
-    status: implementing
-    proof_gap: Adapter and packaged-bridge tests exist, but clean real-host connect, representative use, restart, reconnect, disconnect, doctor, stale-state, and credential-leak proof is not complete for all four named clients.
-    depends_on: [MCP-002, MCP-009, OPS-008]
-    evidence: []
-
   - id: MCP-018
     kind: release_gate
     behavior: Self-hosted fallback and unattended MCP access use scoped user or service API keys issued through an administration interface or administrator CLI and stored through the client or deployment secret manager.
@@ -1943,27 +1929,8 @@ requirements:
       failure: {id: MCP-019-F, description: "A host with missing transport, protocol, authorization, installation, upgrade, or stale-state evidence is omitted from the supported-client list rather than inferred to work."}
     deployments: *all
     status: specified
-    depends_on: [MCP-016, MCP-018]
+    depends_on: [MCP-018]
     evidence: []
-
-  - id: MCP-020
-    kind: security
-    behavior: Local MCP connect and disconnect preflight client and private registration state, journal every intended client change before mutation, resume forward or roll back after interruption, and refuse to overwrite independently changed client configuration.
-    owner: mcp
-    source: {file: artifact-server-mcp-baseline.md, anchor: transactional-client-onboarding}
-    acceptance:
-      behavior: {id: MCP-020-B, description: "Interrupt onboarding after the client mutation, restart the process, resume from the private journal, and finish with one exact client registration and no pending journal."}
-      failure: {id: MCP-020-F, description: "A failed client mutation rolls back cleanly, while an independently changed client or private registration state is preserved, blocks recovery, and retains the journal without being overwritten."}
-    deployments: [local]
-    status: behavior_verified
-    proof_gap: Real-process adapter proof covers native-client interruption, rollback, and conflict preservation. Current released Codex, Claude Code, Cursor, and VS Code host versions still require the full MCP-016 and MCP-019 qualification matrix.
-    depends_on: [MCP-016, MCP-019]
-    evidence:
-      - deployment: local
-        tests: [MCP-020-B, MCP-020-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-25T18:29:58.000Z"
 
   - id: SKL-001
     kind: behavior
@@ -3861,7 +3828,7 @@ requirements:
       failure: {id: REL-001-F, description: "The local release cannot be declared complete when any applicable behavior or hostile test lacks passing local evidence."}
     deployments: [local]
     status: specified
-    depends_on: [AUTH-023, AUTH-024, AUTH-026, DEP-004, DEP-019, MCP-016, MCP-018, MCP-019, REL-006]
+    depends_on: [AUTH-023, AUTH-024, AUTH-026, DEP-004, DEP-019, MCP-018, MCP-019, REL-006]
     evidence: []
 
   - id: REL-002

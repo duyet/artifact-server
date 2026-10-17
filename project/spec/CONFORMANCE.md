@@ -37,8 +37,6 @@ The local test report is `project/evidence/local-foundation.json`. Other deploym
 
 The official connection paths are release gates, not documentation-only goals:
 
-- `MCP-016`: local `artifactserver connect` and stdio setup without a browser,
-  visible key, copied secret, Docker requirement, or startup-log inspection;
 - `MCP-018`: administration-issued user and service API keys for self-hosted
   fallback, CI, scripts, and unattended agents, with no secret leakage; and
 - `MCP-019`: real-client installation and stale-state tests in every advertised
