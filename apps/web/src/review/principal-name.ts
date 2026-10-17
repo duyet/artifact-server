@@ -1,4 +1,4 @@
-import type {ArtifactOwner} from "@/api/client";
+import type {ArtifactOwner} from "../api/client.js";
 
 /**
  * A readable name for a principal. Writes made before names were recorded
