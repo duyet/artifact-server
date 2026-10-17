@@ -38,3 +38,14 @@ body {
 [data-annotate-armed-ring] {
   display: none;
 }
+
+/*
+ * HtmlViewer leaves the artifact iframe transparent, so a page that sets no
+ * background showed default black text over the dark shell. Give it the
+ * browser's own light canvas, as opening the page directly would; a page
+ * that paints its own background covers this.
+ */
+#review-root iframe {
+  background-color: Canvas;
+  color-scheme: light;
+}
