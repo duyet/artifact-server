@@ -622,9 +622,9 @@ test.describe("Artifact Server frontend MVP", () => {
       await expect(homeOverlay.getByRole("link", {name: /^GitHub\s*Source and releases$/u}))
         .toHaveAttribute("href", "https://github.com/plannotator/artifact-server");
       await expect(homeOverlay.getByRole("link", {name: /Homepage/u}))
-        .toHaveAttribute("href", "https://artifactserver.com/");
+        .toHaveAttribute("href", "https://github.com/duyet/artifact-server");
       await expect(homeOverlay.getByRole("link", {name: /Docs/u}))
-        .toHaveAttribute("href", "https://artifactserver.com/docs/");
+        .toHaveAttribute("href", "https://github.com/duyet/artifact-server/tree/main/docs");
       await expect(homeOverlay.getByRole("link", {name: /Connect agents/u}))
         .toHaveAttribute("href", "/review/settings/mcp");
       await fixture.page.waitForTimeout(1_200);

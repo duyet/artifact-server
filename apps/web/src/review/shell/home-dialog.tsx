@@ -13,8 +13,8 @@ const resources: readonly {
   readonly title: string;
 }[] = [
   {description: "Source and releases", href: "https://github.com/plannotator/artifact-server", icon: IconBrandGithub, title: "GitHub"},
-  {description: "Product overview", href: "https://artifactserver.com/", icon: IconHome, title: "Homepage"},
-  {description: "Install and deploy", href: "https://artifactserver.com/docs/", icon: IconBook, title: "Docs"},
+  {description: "Product overview", href: "https://github.com/duyet/artifact-server", icon: IconHome, title: "Homepage"},
+  {description: "Install and deploy", href: "https://github.com/duyet/artifact-server/tree/main/docs", icon: IconBook, title: "Docs"},
 ];
 
 /** The product's home card: its mark and where to learn more. */
