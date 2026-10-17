@@ -1,5 +1,5 @@
 import type {ComponentType} from "react";
-import {IconBook, IconBrandGithub, IconExternalLink, IconHome} from "@tabler/icons-react";
+import {IconBook, IconBrandGithub, IconChevronRight, IconExternalLink, IconHome} from "@tabler/icons-react";
 
 import {Dialog, DialogContent, DialogTitle} from "@/components/ui/dialog";
 import {Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle} from "@/components/ui/item";
@@ -42,9 +42,8 @@ export function HomeDialog({
                 <ItemActions><IconExternalLink className="size-4 text-muted-foreground" /></ItemActions>
               </Item>
             ))}
-            {/* TODO(open-source-launch): publish the dedicated agent-connection guide at this canonical route. */}
             <Item
-              render={<a href="https://artifactserver.com/docs/connect-agents/" rel="noreferrer" target="_blank" />}
+              render={<a href="/review/settings/mcp" onClick={() => onOpenChange(false)} />}
               size="sm"
               variant="outline"
             >
@@ -53,7 +52,7 @@ export function HomeDialog({
                 <ItemTitle>Connect agents</ItemTitle>
                 <ItemDescription>MCP and client setup</ItemDescription>
               </ItemContent>
-              <ItemActions><IconExternalLink className="size-4 text-muted-foreground" /></ItemActions>
+              <ItemActions><IconChevronRight className="size-4 text-muted-foreground" /></ItemActions>
             </Item>
           </ItemGroup>
         </nav>

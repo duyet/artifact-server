@@ -626,7 +626,7 @@ test.describe("Artifact Server frontend MVP", () => {
       await expect(homeOverlay.getByRole("link", {name: /Docs/u}))
         .toHaveAttribute("href", "https://artifactserver.com/docs/");
       await expect(homeOverlay.getByRole("link", {name: /Connect agents/u}))
-        .toHaveAttribute("href", "https://artifactserver.com/docs/connect-agents/");
+        .toHaveAttribute("href", "/review/settings/mcp");
       await fixture.page.waitForTimeout(1_200);
       await expect(homeOverlay).toBeVisible();
       await fixture.page.keyboard.press("Escape");
@@ -649,6 +649,17 @@ test.describe("Artifact Server frontend MVP", () => {
       ).toBeVisible();
       await expect(preview.getByRole("heading", {name: "Review preview content"}))
         .toBeVisible();
+
+      // Connect agents opens this server's own MCP settings in place.
+      await reviewHomeLink.click();
+      await homeOverlay.getByRole("link", {name: /Connect agents/u}).click();
+      await expect(homeOverlay).toHaveCount(0);
+      await expect(fixture.page).toHaveURL(/\/review\/settings\/mcp(?:\?|$)/u);
+      await expect(fixture.page.getByRole("heading", {name: "Connect agents with MCP"}))
+        .toBeVisible();
+      expect(await review.evaluate((node) =>
+        node instanceof HTMLElement ? node.dataset["documentIdentity"] : undefined
+      )).toBe(documentIdentity);
 
       await fixture.page.emulateMedia({reducedMotion: "reduce"});
       await fixture.page.goto(
