@@ -111,6 +111,8 @@ test.describe("Artifact Server frontend MVP", () => {
         "↑",
         "J",
         "↓",
+        "⌘ / Ctrl",
+        "K",
         "[",
         "]",
         "F",
