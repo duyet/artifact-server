@@ -17,8 +17,7 @@
     ],
     "overrides": {
       "fast-uri": "3.1.6",
-      "qs": "6.16.0",
-      "gaxios>uuid": "11.1.1"
+      "qs": "6.16.0"
     }
   },
   "scripts": {
@@ -52,7 +51,6 @@
     "test:helm": "scripts/with-kubernetes-test-tools.sh scripts/run-helm-integration.sh",
     "test:storage-s3": "bash scripts/run-minio-integration.sh",
     "test:storage-versity": "bash scripts/run-versity-integration.sh",
-    "test:storage-native-cloud": "bash scripts/run-native-cloud-storage-integration.sh",
     "test:external-storage-runtime": "bash scripts/run-external-storage-runtime-integration.sh",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @artifact-server/web typecheck && pnpm --filter @plannotator/artifact-server-pi typecheck && pnpm --filter @plannotator/artifact-server-opencode typecheck && pnpm --filter @plannotator/artifact-server-claude-channel typecheck",
@@ -61,18 +59,14 @@
     "verify:external-storage-runtime": "pnpm test:external-storage-runtime",
     "verify:helm-static": "pnpm test:helm-static",
     "verify:helm": "pnpm test:helm-static && pnpm test:helm",
-    "verify:aws-s3": "bash scripts/run-aws-s3-probe.sh",
     "verify:oci-image": "pnpm test:oci-image",
-    "verify:object-storage": "pnpm test:storage-s3 && pnpm test:storage-native-cloud"
+    "verify:object-storage": "pnpm test:storage-s3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1109.0",
     "@aws-sdk/lib-storage": "3.1109.0",
-    "@azure/identity": "4.13.1",
-    "@azure/storage-blob": "12.33.0",
     "@effect/platform-node-shared": "4.0.0-rc.115",
     "@effect/sql-pg": "4.0.0-rc.115",
-    "@google-cloud/storage": "8.0.1",
     "@hono/node-server": "2.1.0",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",

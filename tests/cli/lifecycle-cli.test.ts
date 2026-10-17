@@ -342,45 +342,6 @@ describe("Artifact Server lifecycle CLI", () => {
           objectStorageSecret: "provider_chain",
         });
       expect(providerChain.objectStorage).not.toHaveProperty("accessKeyId");
-      const gcs = await Effect.runPromise(
-        parseExternalStorageRuntimeConfiguration({
-          environment: {
-            ...externalConfigurationEnvironment(),
-            ARTIFACT_SERVER_GCS_BUCKET: "artifact-server-qualification",
-            ARTIFACT_SERVER_GCS_PROJECT_ID: "artifact-server-qualification",
-            ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER: "gcs",
-          },
-          hostname: "127.0.0.1",
-          port: "8787",
-        }),
-      );
-      expect(summarizeRuntimeConfiguration(gcs)).toMatchObject({
-        credentialSources: {
-          objectStorageAccessKey: "provider_chain",
-          objectStorageSecret: "provider_chain",
-        },
-        objectStorageProvider: "gcs",
-      });
-      const azureBlob = await Effect.runPromise(
-        parseExternalStorageRuntimeConfiguration({
-          environment: {
-            ...externalConfigurationEnvironment(),
-            ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL:
-              "https://artifactserver.blob.core.windows.net",
-            ARTIFACT_SERVER_AZURE_BLOB_CONTAINER: "artifacts",
-            ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER: "azure-blob",
-          },
-          hostname: "127.0.0.1",
-          port: "8787",
-        }),
-      );
-      expect(summarizeRuntimeConfiguration(azureBlob)).toMatchObject({
-        credentialSources: {
-          objectStorageAccessKey: "provider_chain",
-          objectStorageSecret: "provider_chain",
-        },
-        objectStorageProvider: "azure-blob",
-      });
       await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
         environment: {
           ...externalConfigurationEnvironment(),
@@ -390,20 +351,6 @@ describe("Artifact Server lifecycle CLI", () => {
         port: "8787",
       }))).rejects.toMatchObject({
         field: "ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER",
-        reason: "invalid_value",
-      });
-      await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
-        environment: {
-          ...externalConfigurationEnvironment(),
-          ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL:
-            "http://artifactserver.blob.core.windows.net",
-          ARTIFACT_SERVER_AZURE_BLOB_CONTAINER: "artifacts",
-          ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER: "azure-blob",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL",
         reason: "invalid_value",
       });
       await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({

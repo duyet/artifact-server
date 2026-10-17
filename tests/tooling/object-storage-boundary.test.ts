@@ -10,14 +10,6 @@ const providerImports = [
     allowedPath: /^src\/storage\/s3-/u,
     specifier: "@aws-sdk/",
   },
-  {
-    allowedPath: /^src\/storage\/gcs-/u,
-    specifier: "@google-cloud/storage",
-  },
-  {
-    allowedPath: /^src\/storage\/azure-blob-/u,
-    specifier: "@azure/storage-blob",
-  },
 ] as const;
 
 describe("object-storage provider boundary", () => {

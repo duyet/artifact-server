@@ -21,10 +21,6 @@ import type {
   ObjectStorageProviderKind,
 } from
   "../storage/object-storage-provider.js";
-import {createAzureBlobObjectStorageProviderFactory} from
-  "../storage/azure-blob-object-storage.js";
-import {createGcsObjectStorageProviderFactory} from
-  "../storage/gcs-object-storage.js";
 import {
   createS3ObjectStorageProviderFactory,
   type S3ObjectStorageProviderConfig,
@@ -53,9 +49,6 @@ const hostnameSchema = Schema.String.check(
 );
 const installationIdSchema = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u),
-);
-const gcpProjectIdSchema = Schema.String.check(
-  Schema.isPattern(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/u),
 );
 const requestLogSampleRateSchema = Schema.NumberFromString.check(
   Schema.isBetween({minimum: 0, maximum: 1}),
@@ -343,10 +336,6 @@ function parseObjectStorage(
 ): Effect.Effect<ParsedObjectStorage, RuntimeConfigurationError> {
   const provider = environment["ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER"] ?? "s3";
   switch (provider) {
-    case "azure-blob":
-      return parseAzureBlobObjectStorage(environment);
-    case "gcs":
-      return parseGcsObjectStorage(environment);
     case "s3":
       return parseS3ObjectStorage(environment);
     default:
@@ -356,57 +345,6 @@ function parseObjectStorage(
       );
   }
 }
-
-const parseAzureBlobObjectStorage = Effect.fn("parseAzureBlobObjectStorage")(
-  function*(
-    environment: NodeJS.ProcessEnv,
-  ): Effect.fn.Return<ParsedObjectStorage, RuntimeConfigurationError> {
-    const accountUrl = yield* parseRequiredEnvironment(
-      "ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL",
-      environment["ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL"],
-      urlStringSchema,
-    );
-    yield* assertHttpsServiceUrl(
-      "ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL",
-      accountUrl,
-    );
-    return {
-      accessKeySource: "provider_chain",
-      factory: createAzureBlobObjectStorageProviderFactory({
-        accountUrl,
-        container: yield* parseRequiredEnvironment(
-          "ARTIFACT_SERVER_AZURE_BLOB_CONTAINER",
-          environment["ARTIFACT_SERVER_AZURE_BLOB_CONTAINER"],
-          Schema.NonEmptyString,
-        ),
-      }),
-      secretSource: "provider_chain",
-    };
-  },
-);
-
-const parseGcsObjectStorage = Effect.fn("parseGcsObjectStorage")(
-  function*(
-    environment: NodeJS.ProcessEnv,
-  ): Effect.fn.Return<ParsedObjectStorage, RuntimeConfigurationError> {
-    return {
-      accessKeySource: "provider_chain",
-      factory: createGcsObjectStorageProviderFactory({
-        bucket: yield* parseRequiredEnvironment(
-          "ARTIFACT_SERVER_GCS_BUCKET",
-          environment["ARTIFACT_SERVER_GCS_BUCKET"],
-          Schema.NonEmptyString,
-        ),
-        projectId: yield* parseRequiredEnvironment(
-          "ARTIFACT_SERVER_GCS_PROJECT_ID",
-          environment["ARTIFACT_SERVER_GCS_PROJECT_ID"],
-          gcpProjectIdSchema,
-        ),
-      }),
-      secretSource: "provider_chain",
-    };
-  },
-);
 
 const parseS3ObjectStorage = Effect.fn("parseS3ObjectStorage")(
   function*(
@@ -810,28 +748,6 @@ function assertHttpServiceUrl(
     return invalidValue(
       field,
       `${field} must use HTTP or HTTPS and cannot contain credentials.`,
-    );
-  }
-  return Effect.void;
-}
-
-function assertHttpsServiceUrl(
-  field: string,
-  value: string,
-): Effect.Effect<void, RuntimeConfigurationError> {
-  let serviceUrl: URL;
-  try {
-    serviceUrl = new URL(value);
-  } catch {
-    return invalidValue(field, `${field} must be a valid HTTPS URL.`);
-  }
-  if (
-    serviceUrl.protocol !== "https:" ||
-    serviceUrl.username !== "" || serviceUrl.password !== ""
-  ) {
-    return invalidValue(
-      field,
-      `${field} must use HTTPS and cannot contain credentials.`,
     );
   }
   return Effect.void;
