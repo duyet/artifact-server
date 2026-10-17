@@ -131,6 +131,10 @@ const declaredFileSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 }).strict();
+const artifactOwnerSchema = z.object({
+  displayName: z.string().nullable(),
+  principalId: z.string(),
+}).strict();
 const artifactRecordSchema = z.object({
   accessSetting: accessSettingSchema,
   createdAt: z.string(),
@@ -138,6 +142,7 @@ const artifactRecordSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  owner: artifactOwnerSchema,
   path: z.string().nullable(),
   projectId: z.string(),
   tags: z.array(z.string()),
@@ -150,6 +155,7 @@ const versionRecordSchema = z.object({
   id: z.string(),
   manifestDigest: z.string(),
   number: z.number().int().positive(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: z.enum(["static", "spa"]),
@@ -862,10 +868,11 @@ export function createArtifactMcpServer(
     {
       title: "List artifacts",
       description:
-        "Find artifacts visible to the caller. Use tag for exact normalized-tag filtering and nextCursor to continue a large result set.",
+        "Find artifacts visible to the caller. Use tag for exact normalized-tag filtering, owner to keep only the caller's own artifacts (me) or ones others created (others), and nextCursor to continue a large result set.",
       inputSchema: z.object({
         cursor: z.string().max(1_024).nullable().default(null),
         limit: z.number().int().min(1).max(maximumListedArtifacts).default(50),
+        owner: z.enum(["all", "me", "others"]).default("all"),
         projectId: optionalProjectIdSchema,
         tag: tagSchema.nullable().default(null),
       }).strict(),
@@ -875,23 +882,31 @@ export function createArtifactMcpServer(
           browserUrl: z.url(),
           createdAt: z.string(),
           currentVersionId: z.string(),
+          currentVersionNumber: z.number().int().positive(),
           id: z.string(),
           name: z.string(),
+          owner: artifactOwnerSchema,
           projectId: z.string(),
           tags: z.array(z.string()),
+          updatedAt: z.string(),
           versionCount: z.number().int().positive(),
+          views: z.object({
+            last30Days: z.number().int().nonnegative(),
+            total: z.number().int().nonnegative(),
+          }).strict(),
         })),
         nextCursor: z.string().nullable(),
       }),
       annotations: readOnlyAnnotations,
     },
-    async ({cursor, limit, projectId, tag}) => toolResult(async () => {
+    async ({cursor, limit, owner, projectId, tag}) => toolResult(async () => {
       const page = await runMcpApplicationEffect(
         dependencies,
         ArtifactManagementService.use((management) =>
           management.listArtifacts({
             cursor: decodePageCursor(cursor),
             limit,
+            owner,
             principal: identity.principal,
             projectId,
             search: null,
@@ -909,11 +924,15 @@ export function createArtifactMcpServer(
           ),
           createdAt: artifact.createdAt,
           currentVersionId: artifact.currentVersionId,
+          currentVersionNumber: artifact.currentVersionNumber,
           id: artifact.id,
           name: artifact.name,
+          owner: artifact.owner,
           projectId: artifact.projectId,
           tags: [...artifact.tags],
+          updatedAt: artifact.currentVersionCreatedAt,
           versionCount: artifact.versionCount,
+          views: artifact.views,
         })),
         nextCursor: encodePageCursor(page.nextCursor),
       };

@@ -524,6 +524,16 @@ export function createApplicationLayer(
           try: () => adapters.repository.listArtifacts(command),
           catch: (cause) => repositoryFailure("listArtifacts", cause),
         }),
+      readArtifactViewDays: (command) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.readArtifactViewDays(command),
+          catch: (cause) => repositoryFailure("readArtifactViewDays", cause),
+        }),
+      readArtifactViewTotals: (artifactIds) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.readArtifactViewTotals(artifactIds),
+          catch: (cause) => repositoryFailure("readArtifactViewTotals", cause),
+        }),
       restoreVersion: (command) =>
         Effect.tryPromise({
           try: () => adapters.repository.restoreVersion(command),

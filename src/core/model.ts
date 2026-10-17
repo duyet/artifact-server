@@ -69,6 +69,16 @@ export interface ProjectRecord {
   readonly name: string;
 }
 
+/** The principal who created an artifact, captured when it was created. */
+export interface ArtifactOwner {
+  /**
+   * The creator's display name at creation. Null for an artifact created
+   * before owners were recorded, whose principal came from its first version.
+   */
+  readonly displayName: string | null;
+  readonly principalId: string;
+}
+
 export interface ArtifactRecord {
   readonly accessSetting: AccessSetting;
   readonly createdAt: string;
@@ -76,6 +86,7 @@ export interface ArtifactRecord {
   readonly deletedAt: string | null;
   readonly id: string;
   readonly name: string;
+  readonly owner: ArtifactOwner;
   /** The readable path claimed at creation, served at `/<path>/` in path mode. */
   readonly path: string | null;
   readonly projectId: string;
@@ -141,7 +152,27 @@ export interface ArtifactActionRecord {
 /** One active artifact with exact aggregate data needed by list surfaces. */
 export interface ArtifactListItem extends ArtifactRecord {
   readonly commentCount: number;
+  /** The current version's creation time, which is the artifact's last change. */
+  readonly currentVersionCreatedAt: string;
+  readonly currentVersionNumber: number;
   readonly versionCount: number;
+}
+
+/** The views one listed artifact received. */
+export interface ArtifactListViews {
+  readonly last30Days: number;
+  readonly total: number;
+}
+
+/** One listed artifact together with its view counts. */
+export interface ArtifactListItemWithViews extends ArtifactListItem {
+  readonly views: ArtifactListViews;
+}
+
+/** One bounded page of active artifacts with their view counts. */
+export interface ArtifactPageWithViews {
+  readonly items: readonly ArtifactListItemWithViews[];
+  readonly nextCursor: PageCursor | null;
 }
 
 /** One bounded page of active artifacts. */
@@ -235,6 +266,8 @@ export interface VersionRecord {
   readonly id: string;
   readonly manifestDigest: string;
   readonly number: number;
+  /** The publisher's display name at publication; null before it was recorded. */
+  readonly publisherDisplayName: string | null;
   readonly publisherPrincipalId: string;
   readonly projectId: string;
   readonly routingMode: RoutingMode;

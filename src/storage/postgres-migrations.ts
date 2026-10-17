@@ -710,6 +710,31 @@ const addApiKeySessions = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+// An artifact's owner is the principal who created it. Artifacts created
+// before owners were recorded take the publisher of their first version and
+// keep a null name, because nobody recorded the name that publisher had then.
+const addArtifactOwner = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    "ALTER TABLE artifacts ADD COLUMN owner_principal_id TEXT",
+    "ALTER TABLE artifacts ADD COLUMN owner_display_name TEXT",
+    `UPDATE artifacts SET owner_principal_id = (
+      SELECT versions.publisher_principal_id FROM versions
+      WHERE versions.installation_id = artifacts.installation_id
+        AND versions.artifact_id = artifacts.id
+        AND versions.number = 1
+    )`,
+    "ALTER TABLE artifacts ALTER COLUMN owner_principal_id SET NOT NULL",
+    "ALTER TABLE versions ADD COLUMN publisher_display_name TEXT",
+    `CREATE INDEX artifacts_owner_created
+      ON artifacts (
+        installation_id, project_id, owner_principal_id, deleted_at,
+        created_at DESC, id DESC
+      )`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -725,10 +750,11 @@ const migrationLoader = Migrator.fromRecord({
   "0012_artifact_path": addArtifactPath,
   "0013_artifact_views": addArtifactViews,
   "0014_api_key_sessions": addApiKeySessions,
+  "0015_artifact_owner": addArtifactOwner,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 14;
+export const requiredPostgresSchemaVersion = 15;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -825,6 +851,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 14,
     name: "api_key_sessions",
+  }, {
+    migration_id: 15,
+    name: "artifact_owner",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

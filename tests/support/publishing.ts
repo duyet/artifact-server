@@ -15,6 +15,10 @@ const publishResponseSchema = z.object({
     deletedAt: z.string().nullable(),
     id: z.string(),
     name: z.string(),
+    owner: z.object({
+      displayName: z.string().nullable(),
+      principalId: z.string(),
+    }),
     projectId: z.string(),
     tags: z.array(z.string()),
   }),
@@ -28,6 +32,7 @@ const publishResponseSchema = z.object({
     id: z.string(),
     manifestDigest: z.string(),
     number: z.number().int().positive(),
+    publisherDisplayName: z.string().nullable(),
     publisherPrincipalId: z.string(),
     projectId: z.string(),
     routingMode: z.enum(["static", "spa"]),

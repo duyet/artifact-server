@@ -124,6 +124,11 @@ import {
 } from "../../../src/core/publishing-limits.js";
 import {createManifest} from "../../../src/manifest/create-manifest.js";
 import {
+  artifactOwnerColumns,
+  ownerFilterParameters,
+  withArtifactOwner,
+} from "../../../src/storage/artifact-owner-row.js";
+import {
   publicLinkInventoryRowSchema,
   publicLinkPageFromRows,
 } from "../../../src/storage/public-link-inventory-row.js";
@@ -273,7 +278,8 @@ const gitHistoryMappingRowSchema = z.object({
   repositoryName: z.string(),
   versionId: z.string(),
 });
-const artifactRowSchema = z.object({
+const artifactRowColumns = {
+  ...artifactOwnerColumns,
   accessSetting: accessSettingSchema,
   createdAt: z.string(),
   currentVersionId: z.string(),
@@ -282,11 +288,16 @@ const artifactRowSchema = z.object({
   name: z.string(),
   path: z.null(),
   projectId: z.string(),
-});
-const artifactListRowSchema = artifactRowSchema.extend({
+};
+const artifactRowSchema = z.object(artifactRowColumns)
+  .transform(withArtifactOwner);
+const artifactListRowSchema = z.object({
+  ...artifactRowColumns,
   commentCount: z.coerce.number().int().nonnegative(),
+  currentVersionCreatedAt: z.string(),
+  currentVersionNumber: z.coerce.number().int().positive(),
   versionCount: z.coerce.number().int().positive(),
-});
+}).transform(withArtifactOwner);
 const tagRowSchema = z.object({artifactId: z.string(), tag: z.string()});
 const artifactViewDayRowSchema = z.object({
   artifactId: z.string(),
@@ -313,6 +324,7 @@ const versionRowSchema = z.object({
   manifestDigest: z.string(),
   number: z.number().int().positive(),
   projectId: z.string(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   routingMode: routingModeSchema,
 });
@@ -531,6 +543,8 @@ const versionContentRowSchema = z.object({
 const artifactSelect = `
   SELECT id, project_id AS projectId, name, NULL AS path,
     access_setting AS accessSetting,
+    owner_principal_id AS ownerPrincipalId,
+    owner_display_name AS ownerDisplayName,
     current_version_id AS currentVersionId,
     created_at AS createdAt, deleted_at AS deletedAt
   FROM artifacts
@@ -539,7 +553,9 @@ const versionSelect = `
   SELECT id, project_id AS projectId, artifact_id AS artifactId, number,
     manifest_digest AS manifestDigest, entry_path AS entryPath,
     routing_mode AS routingMode, content_token AS contentToken,
-    publisher_principal_id AS publisherPrincipalId, created_at AS createdAt
+    publisher_principal_id AS publisherPrincipalId,
+    publisher_display_name AS publisherDisplayName,
+    created_at AS createdAt
   FROM versions
 `;
 const commentThreadSelect = `
@@ -1043,8 +1059,9 @@ export function createD1ArtifactRepository(
     database.prepare(`
       INSERT INTO versions (
         id, project_id, artifact_id, number, manifest_digest, entry_path,
-        routing_mode, content_token, publisher_principal_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        routing_mode, content_token, publisher_principal_id,
+        publisher_display_name, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       command.versionId,
       command.projectId,
@@ -1055,6 +1072,7 @@ export function createD1ArtifactRepository(
       command.manifest.routingMode,
       command.contentToken,
       command.principalId,
+      command.principalDisplayName,
       command.createdAt,
     ),
     ...insertRowsStatements(
@@ -2232,14 +2250,17 @@ export function createD1ArtifactRepository(
           database.prepare(`
             INSERT INTO artifacts (
               id, project_id, name, search_name, access_setting,
+              owner_principal_id, owner_display_name,
               current_version_id, created_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
           `).bind(
             command.artifactId,
             command.projectId,
             command.name,
             normalizeArtifactSearchText(command.name),
             command.accessSetting,
+            command.principalId,
+            command.principalDisplayName,
             command.createdAt,
           ),
           ...versionStatements(command, 1),
@@ -2510,12 +2531,23 @@ export function createD1ArtifactRepository(
       const tagFilterJson = command.tags.length === 0
         ? null
         : JSON.stringify(command.tags);
+      const {notOwnedBy, ownedBy} = ownerFilterParameters(command.owner);
       const result = await database.prepare(`
         SELECT * FROM (
           SELECT id, project_id AS projectId, name, NULL AS path,
             access_setting AS accessSetting,
+            owner_principal_id AS ownerPrincipalId,
+            owner_display_name AS ownerDisplayName,
             current_version_id AS currentVersionId,
             created_at AS createdAt, deleted_at AS deletedAt,
+            (
+              SELECT created_at FROM versions
+              WHERE versions.id = artifacts.current_version_id
+            ) AS currentVersionCreatedAt,
+            (
+              SELECT number FROM versions
+              WHERE versions.id = artifacts.current_version_id
+            ) AS currentVersionNumber,
             (
               SELECT COUNT(*) FROM comment_threads
               WHERE comment_threads.project_id = artifacts.project_id
@@ -2528,6 +2560,8 @@ export function createD1ArtifactRepository(
             ) AS versionCount
           FROM artifacts
           WHERE project_id = ? AND deleted_at IS NULL
+            AND (? IS NULL OR owner_principal_id = ?)
+            AND (? IS NULL OR owner_principal_id <> ?)
             AND (? IS NULL
               OR instr(search_name, ?) > 0
               OR EXISTS (
@@ -2545,6 +2579,10 @@ export function createD1ArtifactRepository(
         ORDER BY ${orderSql} LIMIT ?
       `).bind(
         command.projectId,
+        ownedBy,
+        ownedBy,
+        notOwnedBy,
+        notOwnedBy,
         command.search ?? null,
         command.search ?? null,
         command.search ?? null,
@@ -2575,6 +2613,8 @@ export function createD1ArtifactRepository(
           artifact.name AS artifactName,
           NULL AS artifactPath,
           artifact.access_setting AS accessSetting,
+          artifact.owner_principal_id AS ownerPrincipalId,
+          artifact.owner_display_name AS ownerDisplayName,
           artifact.current_version_id AS currentVersionId,
           artifact.created_at AS artifactCreatedAt,
           artifact.deleted_at AS artifactDeletedAt,
@@ -2589,6 +2629,7 @@ export function createD1ArtifactRepository(
           version.routing_mode AS routingMode,
           version.content_token AS contentToken,
           version.publisher_principal_id AS publisherPrincipalId,
+          version.publisher_display_name AS publisherDisplayName,
           version.created_at AS versionCreatedAt
         FROM artifacts artifact
         INNER JOIN projects project ON project.id = artifact.project_id
@@ -2619,6 +2660,10 @@ export function createD1ArtifactRepository(
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        owner: {
+          displayName: row.ownerDisplayName,
+          principalId: row.ownerPrincipalId,
+        },
         path: row.artifactPath,
         projectId: row.projectId,
         tags: await readTags(row.artifactId),

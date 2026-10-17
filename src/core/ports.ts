@@ -116,6 +116,8 @@ export interface CommitNewArtifact {
   readonly name: string;
   /** A readable path already normalized at the boundary, or null. */
   readonly path: string | null;
+  /** The publisher's display name, recorded as the artifact owner's name. */
+  readonly principalDisplayName: string;
   readonly principalId: string;
   readonly projectId: string;
   readonly authorizedByPrincipalId: string | null;
@@ -132,6 +134,8 @@ export interface CommitArtifactVersion {
   readonly idempotencyKey: string;
   readonly inputDigest: string;
   readonly manifest: CanonicalManifest;
+  /** The publisher's display name, recorded on the new version. */
+  readonly principalDisplayName: string;
   readonly principalId: string;
   readonly projectId: string;
   readonly authorizedByPrincipalId: string | null;
@@ -190,11 +194,18 @@ export interface DeleteArtifact {
   readonly projectId: string;
 }
 
+/** Which artifacts a listing keeps, judged by the principal who created them. */
+export type ArtifactOwnerFilter =
+  | {readonly kind: "any"}
+  | {readonly kind: "owned_by"; readonly principalId: string}
+  | {readonly kind: "not_owned_by"; readonly principalId: string};
+
 /** Values used to read one bounded page of active artifacts. */
 export interface ListArtifacts {
   readonly comments: "all" | "with" | "without";
   readonly cursor: PageCursor | null;
   readonly limit: number;
+  readonly owner: ArtifactOwnerFilter;
   readonly projectId: string;
   /** Normalized name-substring or exact-tag search, when supplied. */
   readonly search?: string | null;

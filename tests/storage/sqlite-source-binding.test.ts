@@ -15,6 +15,7 @@ import {createManifest} from "../../src/manifest/create-manifest.js";
 import {SqliteArtifactRepository} from "../../src/storage/sqlite-artifact-repository.js";
 
 const principalId = "principal-linking";
+const principalDisplayName = "Linking owner";
 const linkedArtifactId = "art_linked";
 const plainArtifactId = "art_plain";
 const sourcePath = "/workspace/reports/quarterly.html";
@@ -307,6 +308,7 @@ async function commitLink(
     manifest,
     name: "Quarterly report",
     path: null,
+    principalDisplayName,
     principalId,
     projectId: defaultProjectId,
     source,
@@ -341,6 +343,7 @@ async function commitCapture(
     idempotencyKey: `capture-${uploadId}`,
     inputDigest: `digest-${uploadId}`,
     manifest,
+    principalDisplayName,
     principalId,
     projectId: defaultProjectId,
     source,
@@ -390,6 +393,7 @@ async function commitPlainPublication(repository: SqliteArtifactRepository) {
     manifest,
     name: "Ordinary report",
     path: null,
+    principalDisplayName,
     principalId,
     projectId: defaultProjectId,
     source,

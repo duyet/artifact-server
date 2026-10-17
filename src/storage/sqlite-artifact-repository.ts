@@ -137,6 +137,11 @@ import {
 import { createManifest } from "../manifest/create-manifest.js";
 import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
+import {
+  artifactOwnerColumns,
+  ownerFilterParameters,
+  withArtifactOwner,
+} from "./artifact-owner-row.js";
 import type {
   ListPublicLinks,
   PublicLinkInventoryPage,
@@ -214,6 +219,9 @@ const publishedRowSchema = z.object({
   currentVersionId: z.string(),
   entryPath: z.string(),
   manifestDigest: z.string(),
+  ownerDisplayName: z.string().nullable(),
+  ownerPrincipalId: z.string(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: routingModeSchema,
@@ -257,7 +265,8 @@ const artifactActionRowSchema = z.object({
   projectId: z.string(),
   versionId: z.string(),
 });
-const artifactRowSchema = z.object({
+const artifactRowColumns = {
+  ...artifactOwnerColumns,
   accessSetting: accessSettingSchema,
   createdAt: z.string(),
   currentVersionId: z.string(),
@@ -266,7 +275,9 @@ const artifactRowSchema = z.object({
   name: z.string(),
   path: z.string().nullable(),
   projectId: z.string(),
-});
+};
+const artifactRowSchema = z.object(artifactRowColumns)
+  .transform(withArtifactOwner);
 const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactViewDayRowSchema = z.object({
   artifactId: z.string(),
@@ -284,10 +295,13 @@ const publicArtifactSummaryRowSchema = z.object({
   name: z.string(),
   path: z.string().nullable(),
 });
-const artifactListRowSchema = artifactRowSchema.extend({
+const artifactListRowSchema = z.object({
+  ...artifactRowColumns,
   commentCount: z.number().int().nonnegative(),
+  currentVersionCreatedAt: z.string(),
+  currentVersionNumber: z.number().int().positive(),
   versionCount: z.number().int().positive(),
-});
+}).transform(withArtifactOwner);
 const artifactTagRowSchema = z.object({
   artifactId: z.string(),
   tag: z.string(),
@@ -300,6 +314,7 @@ const versionRowSchema = z.object({
   id: z.string(),
   manifestDigest: z.string(),
   number: z.number().int().positive(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: routingModeSchema,
@@ -1350,9 +1365,10 @@ export class SqliteArtifactRepository implements
       .prepare(
         `INSERT INTO artifacts (
           id, project_id, name, search_name, access_setting,
+          owner_principal_id, owner_display_name,
           current_version_id, created_at, deleted_at, path,
           source_path, source_fingerprint, source_status, source_verified_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
       )
       .run(
         command.artifactId,
@@ -1360,6 +1376,8 @@ export class SqliteArtifactRepository implements
         command.name,
         normalizeArtifactSearchText(command.name),
         command.accessSetting,
+        command.principalId,
+        command.principalDisplayName,
         command.createdAt,
         command.path,
         binding === null ? null : binding.path,
@@ -1379,6 +1397,7 @@ export class SqliteArtifactRepository implements
       1,
       command.manifest,
       command.principalId,
+      command.principalDisplayName,
     );
     this.#database
       .prepare("UPDATE artifacts SET current_version_id = ? WHERE id = ?")
@@ -1486,6 +1505,7 @@ export class SqliteArtifactRepository implements
       nextNumber,
       command.manifest,
       command.principalId,
+      command.principalDisplayName,
     );
     const update = this.#database
       .prepare(
@@ -1952,6 +1972,7 @@ export class SqliteArtifactRepository implements
             routing_mode AS routingMode,
             content_token AS contentToken,
             publisher_principal_id AS publisherPrincipalId,
+            publisher_display_name AS publisherDisplayName,
             created_at AS createdAt
            FROM versions
            WHERE project_id = ? AND artifact_id = ?
@@ -1994,6 +2015,7 @@ export class SqliteArtifactRepository implements
       const tagFilterJson = command.tags.length === 0
         ? null
         : JSON.stringify(command.tags);
+      const {notOwnedBy, ownedBy} = ownerFilterParameters(command.owner);
       const rows = this.#database
         .prepare(
           `SELECT * FROM (
@@ -2003,9 +2025,19 @@ export class SqliteArtifactRepository implements
               name,
               path,
               access_setting AS accessSetting,
+              owner_principal_id AS ownerPrincipalId,
+              owner_display_name AS ownerDisplayName,
               current_version_id AS currentVersionId,
               created_at AS createdAt,
               deleted_at AS deletedAt,
+              (
+                SELECT created_at FROM versions
+                WHERE versions.id = artifacts.current_version_id
+              ) AS currentVersionCreatedAt,
+              (
+                SELECT number FROM versions
+                WHERE versions.id = artifacts.current_version_id
+              ) AS currentVersionNumber,
               (
                 SELECT COUNT(*) FROM comment_threads
                 WHERE comment_threads.project_id = artifacts.project_id
@@ -2019,6 +2051,8 @@ export class SqliteArtifactRepository implements
             FROM artifacts
             WHERE project_id = ?
               AND deleted_at IS NULL
+              AND (? IS NULL OR owner_principal_id = ?)
+              AND (? IS NULL OR owner_principal_id <> ?)
               AND (
                 ? IS NULL
                 OR instr(search_name, ?) > 0
@@ -2043,6 +2077,10 @@ export class SqliteArtifactRepository implements
         )
         .all(
           command.projectId,
+          ownedBy,
+          ownedBy,
+          notOwnedBy,
+          notOwnedBy,
           command.search ?? null,
           command.search ?? null,
           command.search ?? null,
@@ -2072,6 +2110,8 @@ export class SqliteArtifactRepository implements
             artifact.name AS artifactName,
             artifact.path AS artifactPath,
             artifact.access_setting AS accessSetting,
+            artifact.owner_principal_id AS ownerPrincipalId,
+            artifact.owner_display_name AS ownerDisplayName,
             artifact.current_version_id AS currentVersionId,
             artifact.created_at AS artifactCreatedAt,
             artifact.deleted_at AS artifactDeletedAt,
@@ -2086,6 +2126,7 @@ export class SqliteArtifactRepository implements
             version.routing_mode AS routingMode,
             version.content_token AS contentToken,
             version.publisher_principal_id AS publisherPrincipalId,
+            version.publisher_display_name AS publisherDisplayName,
             version.created_at AS versionCreatedAt
            FROM artifacts artifact
            INNER JOIN projects project ON project.id = artifact.project_id
@@ -2118,6 +2159,10 @@ export class SqliteArtifactRepository implements
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        owner: {
+          displayName: row.ownerDisplayName,
+          principalId: row.ownerPrincipalId,
+        },
         path: row.artifactPath,
         projectId: row.projectId,
       })));
@@ -2804,6 +2849,8 @@ export class SqliteArtifactRepository implements
           name,
           path,
           access_setting AS accessSetting,
+          owner_principal_id AS ownerPrincipalId,
+          owner_display_name AS ownerDisplayName,
           current_version_id AS currentVersionId,
           created_at AS createdAt,
           deleted_at AS deletedAt
@@ -2827,6 +2874,8 @@ export class SqliteArtifactRepository implements
           name,
           path,
           access_setting AS accessSetting,
+          owner_principal_id AS ownerPrincipalId,
+          owner_display_name AS ownerDisplayName,
           current_version_id AS currentVersionId,
           created_at AS createdAt,
           deleted_at AS deletedAt
@@ -2995,6 +3044,7 @@ export class SqliteArtifactRepository implements
           routing_mode AS routingMode,
           content_token AS contentToken,
           publisher_principal_id AS publisherPrincipalId,
+          publisher_display_name AS publisherDisplayName,
           created_at AS createdAt
          FROM versions
          WHERE project_id = ? AND id = ? AND artifact_id = ?`,
@@ -3166,13 +3216,15 @@ export class SqliteArtifactRepository implements
     number: number,
     manifest: CommitNewArtifact["manifest"],
     publisherPrincipalId: string,
+    publisherDisplayName: string,
   ): void {
     this.#database
       .prepare(
         `INSERT INTO versions (
           id, project_id, artifact_id, number, manifest_digest, entry_path,
-          routing_mode, content_token, publisher_principal_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          routing_mode, content_token, publisher_principal_id,
+          publisher_display_name, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         versionId,
@@ -3184,6 +3236,7 @@ export class SqliteArtifactRepository implements
         manifest.routingMode,
         contentToken,
         publisherPrincipalId,
+        publisherDisplayName,
         createdAt,
       );
 
@@ -5056,6 +5109,7 @@ export class SqliteArtifactRepository implements
     this.#addSourceBindingColumnsIfMissing();
     this.#addGitHistoryMirrorTablesIfMissing();
     this.#addArtifactPathIfMissing();
+    this.#addArtifactOwnerIfMissing();
     this.#database.exec(`
       CREATE INDEX IF NOT EXISTS projects_active_created
         ON projects (archived_at, created_at, id);
@@ -5193,6 +5247,35 @@ export class SqliteArtifactRepository implements
       CREATE UNIQUE INDEX IF NOT EXISTS artifacts_live_path
         ON artifacts (path) WHERE path IS NOT NULL AND deleted_at IS NULL
     `);
+  }
+
+  // An artifact's owner is the principal who created it. Artifacts created
+  // before owners were recorded take the publisher of their first version and
+  // keep a null name, because nobody recorded the name that publisher had then.
+  #addArtifactOwnerIfMissing(): void {
+    const artifactColumns = this.#tableColumns("artifacts");
+    const versionColumns = this.#tableColumns("versions");
+    this.#transaction(() => {
+      if (!artifactColumns.includes("owner_principal_id")) {
+        this.#database.exec(`
+          ALTER TABLE artifacts ADD COLUMN owner_principal_id TEXT;
+          ALTER TABLE artifacts ADD COLUMN owner_display_name TEXT;
+          UPDATE artifacts SET owner_principal_id = (
+            SELECT publisher_principal_id FROM versions
+            WHERE versions.artifact_id = artifacts.id AND versions.number = 1
+          );
+        `);
+      }
+      if (!versionColumns.includes("publisher_display_name")) {
+        this.#database.exec(
+          "ALTER TABLE versions ADD COLUMN publisher_display_name TEXT",
+        );
+      }
+      this.#database.exec(`
+        CREATE INDEX IF NOT EXISTS artifacts_owner_created
+          ON artifacts (project_id, owner_principal_id, deleted_at, created_at DESC, id DESC)
+      `);
+    });
   }
 
   // One nullable column group on the artifact record carries every linked
@@ -5756,6 +5839,8 @@ export class SqliteArtifactRepository implements
           a.name AS artifactName,
           a.path AS artifactPath,
           a.access_setting AS accessSetting,
+          a.owner_principal_id AS ownerPrincipalId,
+          a.owner_display_name AS ownerDisplayName,
           a.current_version_id AS currentVersionId,
           a.created_at AS artifactCreatedAt,
           a.deleted_at AS artifactDeletedAt,
@@ -5766,6 +5851,7 @@ export class SqliteArtifactRepository implements
           v.routing_mode AS routingMode,
           v.content_token AS contentToken,
           v.publisher_principal_id AS publisherPrincipalId,
+          v.publisher_display_name AS publisherDisplayName,
           v.created_at AS versionCreatedAt
         FROM versions v
         JOIN artifacts a ON a.id = v.artifact_id
@@ -5780,6 +5866,10 @@ export class SqliteArtifactRepository implements
       deletedAt: parsed.artifactDeletedAt,
       id: parsed.artifactId,
       name: parsed.artifactName,
+      owner: {
+        displayName: parsed.ownerDisplayName,
+        principalId: parsed.ownerPrincipalId,
+      },
       path: parsed.artifactPath,
       projectId: parsed.projectId,
       tags: this.#readTags(parsed.artifactId),
@@ -5792,6 +5882,7 @@ export class SqliteArtifactRepository implements
       id: parsed.versionId,
       manifestDigest: parsed.manifestDigest,
       number: parsed.versionNumber,
+      publisherDisplayName: parsed.publisherDisplayName,
       publisherPrincipalId: parsed.publisherPrincipalId,
       projectId: parsed.projectId,
       routingMode: parsed.routingMode,

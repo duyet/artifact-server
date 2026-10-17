@@ -5068,3 +5068,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server, including the ordering, both windows, the sparse series, an anonymous read, the no-cache header, truncation at the 500 cap with the newest-first window, a private and a deleted artifact, the application policy on /, and the pure tree and chart builders with no server and no browser. The Postgres read path and the light and dark browser captures run only in CI, and no deployed run exists.
     depends_on: [FRK-008, FRK-007, FRK-002]
     evidence: []
+
+  - id: FRK-010
+    kind: behavior
+    behavior: An artifact records the principal who created it and that principal's display name at creation, every version records its publisher's display name, and the artifact list carries the owner, the last change, the current version number, and view counts, filtered to the caller's own artifacts or to others' artifacts on request.
+    owner: artifact-core
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-010-B, description: "Publish one artifact as the installation token and one as a service key, publish a second version of the first as the service key, and observe the unchanged owner, each version's publisher name, the list's owner, last change, current version number, and 30-day and total views, and owner=me and owner=others from both principals."}
+      failure: {id: FRK-010-F, description: "An unknown owner scope is 422, a principal who only published a later version owns nothing, and a schema-14 database upgrades with each owner taken from its first version's publisher and a null name rather than a guessed one."}
+    deployments: [local, single_server, kubernetes, cloudflare]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server, including the schema-14 upgrade. The Postgres migration 0015 and its owner filter run only in CI with Docker, the D1 columns and filter compile and pass the existing Cloudflare runtime suite but no D1 test asserts the owner or the backfill, and no deployed run exists.
+    depends_on: [FRK-008, PUB-001]
+    evidence: []

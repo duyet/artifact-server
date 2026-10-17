@@ -8,7 +8,7 @@ import {defaultGitHistoryMaximumCopiedFiles} from
   "../../../src/git-history/git-history-capability.js";
 
 /** D1 schema revision required by the Cloudflare runtime. */
-export const requiredD1SchemaVersion = 10;
+export const requiredD1SchemaVersion = 11;
 
 /** SQL literal list of every action kind the ledger accepts. */
 const actionKindList = [
@@ -625,6 +625,7 @@ export async function migrateD1(
     await addGitHistoryMirrorColumnsIfMissing(database);
     await widenRegisteredAgentsIfNeeded(database);
     await addArtifactSearchNameIfMissing(database);
+    await addArtifactOwnerIfMissing(database);
   }
   await database.batch([
     database.prepare(`
@@ -667,6 +668,51 @@ async function addArtifactSearchNameIfMissing(
       artifact.id,
     )
   ));
+}
+
+/**
+ * An artifact's owner is the principal who created it. Artifacts created
+ * before owners were recorded take the publisher of their first version and
+ * keep a null name, because nobody recorded the name that publisher had then.
+ * The columns and the index cannot live in the shared schema statements: a
+ * database created before this revision already holds the tables, so
+ * `CREATE TABLE IF NOT EXISTS` leaves the columns absent.
+ */
+async function addArtifactOwnerIfMissing(
+  database: D1Database,
+): Promise<void> {
+  const [artifactColumns, versionColumns] = await Promise.all([
+    database.prepare("PRAGMA table_info(artifacts)").all<{name: string}>(),
+    database.prepare("PRAGMA table_info(versions)").all<{name: string}>(),
+  ]);
+  const statements: D1PreparedStatement[] = [];
+  if (!artifactColumns.results.some((column) =>
+    column.name === "owner_principal_id")) {
+    // One batch is one transaction: the backfill cannot be skipped once the
+    // column exists. The backfill is a single correlated statement, which
+    // keeps it far below D1's bound-parameter limit.
+    statements.push(
+      database.prepare("ALTER TABLE artifacts ADD COLUMN owner_principal_id TEXT"),
+      database.prepare("ALTER TABLE artifacts ADD COLUMN owner_display_name TEXT"),
+      database.prepare(`
+        UPDATE artifacts SET owner_principal_id = (
+          SELECT publisher_principal_id FROM versions
+          WHERE versions.artifact_id = artifacts.id AND versions.number = 1
+        )
+      `),
+    );
+  }
+  if (!versionColumns.results.some((column) =>
+    column.name === "publisher_display_name")) {
+    statements.push(database.prepare(
+      "ALTER TABLE versions ADD COLUMN publisher_display_name TEXT",
+    ));
+  }
+  statements.push(database.prepare(`
+    CREATE INDEX IF NOT EXISTS artifacts_owner_created
+      ON artifacts(project_id, owner_principal_id, deleted_at, created_at DESC, id DESC)
+  `));
+  await database.batch(statements);
 }
 
 async function addGitHistoryMirrorColumnsIfMissing(

@@ -586,6 +586,7 @@ function makeLinkedArtifactService(
             manifest: upload.manifest,
             name,
             path: null,
+            principalDisplayName: command.principal.displayName,
             principalId: command.principal.id,
             projectId: project.id,
             source: {
@@ -685,6 +686,7 @@ function makeLinkedArtifactService(
           idempotencyKey,
           inputDigest,
           manifest: upload.manifest,
+          principalDisplayName: input.principal.displayName,
           principalId: input.principal.id,
           projectId: input.projectId,
           source: {

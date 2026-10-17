@@ -102,7 +102,7 @@ import {
   commentClearScopes,
   type ArtifactActionPage,
   type ArtifactDeletion,
-  type ArtifactPage,
+  type ArtifactPageWithViews,
   type ArtifactState,
   type ArtifactVersion,
   commentThreadStates,
@@ -398,6 +398,7 @@ const pageQuerySchema = z.object({
 });
 const artifactPageQuerySchema = pageQuerySchema.extend({
   comments: z.enum(["all", "with", "without"]).default("all"),
+  owner: z.enum(["all", "me", "others"]).default("all"),
   sort: z.enum(["comments", "newest"]).default("newest"),
   tags: z.array(z.string().max(200)).max(20).default([]),
 });
@@ -1774,6 +1775,7 @@ export function createHttpApp(
           comments: query.comments,
           cursor: decodePageCursor(query.cursor),
           limit: query.limit,
+          owner: query.owner,
           principal: context.get("principal"),
           projectId: requestedProjectId(context),
           search: query.search ?? null,
@@ -3151,12 +3153,20 @@ function artifactDetailsResponse(
 function artifactPageResponse(
   requestUrl: URL,
   contentDomain: string | null,
-  page: ArtifactPage,
+  page: ArtifactPageWithViews,
 ) {
   return {
-    artifacts: page.items.map(({commentCount, versionCount, ...artifact}) => ({
+    artifacts: page.items.map(({
+      commentCount,
+      currentVersionCreatedAt,
+      currentVersionNumber,
+      versionCount,
+      views,
+      ...artifact
+    }) => ({
       artifact,
       commentCount,
+      currentVersionNumber,
       links: {
         artifact: artifactBrowserUrl(requestUrl, contentDomain, artifact),
         management: new URL(
@@ -3164,7 +3174,10 @@ function artifactPageResponse(
           requestUrl,
         ).toString(),
       },
+      owner: artifact.owner,
+      updatedAt: currentVersionCreatedAt,
       versionCount,
+      views,
     })),
     nextCursor: encodePageCursor(page.nextCursor),
   };

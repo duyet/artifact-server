@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { Context, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Duration, Effect, Layer } from "effect";
 
 import type { ApplicationClock } from "./application-clock.js";
 import {
@@ -16,6 +16,7 @@ import {
   type ProjectManagementFailure,
   ProjectManagementService,
 } from "./project-management.js";
+import {dayOf, publicCatalogWindowDays} from "./public-artifact-catalog.js";
 import {
   ArtifactNotFound,
   type ArtifactMutationConflict,
@@ -33,18 +34,23 @@ import type {
   ArtifactActionPage,
   ArtifactDeletion,
   ArtifactPage,
+  ArtifactPageWithViews,
   ArtifactRecord,
   ArtifactState,
   ArtifactVersion,
+  ArtifactViewDay,
+  ArtifactViewTotal,
   PageCursor,
   VersionRecord,
 } from "../core/model.js";
 import type {
+  ArtifactOwnerFilter,
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
   DeleteArtifact,
   ListArtifactActions,
   ListArtifacts,
+  ReadArtifactViewDays,
   RestoreArtifactVersion,
 } from "../core/ports.js";
 
@@ -94,11 +100,18 @@ export interface ChangeArtifactTagsCommand extends ReadArtifactCommand {
   readonly tags: readonly string[];
 }
 
+/**
+ * Whose artifacts a listing keeps, relative to the caller: everything, the
+ * ones the caller created, or the ones someone else created and shared.
+ */
+export type ArtifactOwnerScope = "all" | "me" | "others";
+
 /** Input for listing active artifacts visible to one principal. */
 export interface ListArtifactsCommand {
   readonly comments?: "all" | "with" | "without";
   readonly cursor: PageCursor | null;
   readonly limit: number;
+  readonly owner?: ArtifactOwnerScope;
   readonly principal: Principal;
   readonly projectId: string | null;
   readonly search: string | null;
@@ -170,6 +183,12 @@ export interface ArtifactManagementRepository {
   readonly listArtifacts: (
     command: ListArtifacts,
   ) => Effect.Effect<ArtifactPage, ArtifactRepositoryFailure>;
+  readonly readArtifactViewDays: (
+    command: ReadArtifactViewDays,
+  ) => Effect.Effect<readonly ArtifactViewDay[], ArtifactRepositoryFailure>;
+  readonly readArtifactViewTotals: (
+    artifactIds: readonly string[],
+  ) => Effect.Effect<readonly ArtifactViewTotal[], ArtifactRepositoryFailure>;
   readonly restoreVersion: (
     command: RestoreArtifactVersion,
   ) => Effect.Effect<
@@ -228,7 +247,7 @@ interface ArtifactManagementOperations {
   ) => Effect.Effect<ArtifactActionPage, ArtifactManagementFailure>;
   readonly listArtifacts: (
     command: ListArtifactsCommand,
-  ) => Effect.Effect<ArtifactPage, ArtifactManagementFailure>;
+  ) => Effect.Effect<ArtifactPageWithViews, ArtifactManagementFailure>;
   readonly restoreVersion: (
     command: RestoreArtifactVersionCommand,
   ) => Effect.Effect<ArtifactState, ArtifactManagementFailure>;
@@ -430,15 +449,49 @@ function makeArtifactManagementService(
         command.principal,
         command.projectId,
       );
-      return yield* dependencies.repository.listArtifacts({
+      const page = yield* dependencies.repository.listArtifacts({
         comments,
         cursor: command.cursor,
         limit,
+        owner: ownerFilter(command.owner ?? "all", command.principal),
         projectId: project.id,
         search,
         sort,
         tags,
       });
+      return yield* withListedViews(page);
+    },
+  );
+
+  const withListedViews = Effect.fn("ArtifactManagementService.withListedViews")(
+    function*(page: ArtifactPage) {
+      const artifactIds = page.items.map((item) => item.id);
+      if (artifactIds.length === 0) return {...page, items: []};
+      const now = yield* dependencies.clock.now;
+      const [days, totals] = yield* Effect.all([
+        dependencies.repository.readArtifactViewDays({
+          artifactIds,
+          sinceDay: dayOf(DateTime.subtractDuration(
+            now,
+            Duration.days(publicCatalogWindowDays - 1),
+          )),
+          untilDay: dayOf(now),
+        }),
+        dependencies.repository.readArtifactViewTotals(artifactIds),
+      ], {concurrency: 2});
+      return {
+        ...page,
+        items: page.items.map((item) => ({
+          ...item,
+          views: {
+            last30Days: days
+              .filter((day) => day.artifactId === item.id)
+              .reduce((sum, day) => sum + day.count, 0),
+            total: totals.find((total) => total.artifactId === item.id)
+              ?.count ?? 0,
+          },
+        })),
+      };
     },
   );
 
@@ -603,6 +656,17 @@ function makeArtifactManagementService(
     listVersions,
     restoreVersion,
   });
+}
+
+function ownerFilter(
+  scope: ArtifactOwnerScope,
+  principal: Principal,
+): ArtifactOwnerFilter {
+  if (scope === "me") return {kind: "owned_by", principalId: principal.id};
+  if (scope === "others") {
+    return {kind: "not_owned_by", principalId: principal.id};
+  }
+  return {kind: "any"};
 }
 
 interface ManagementInputDigest {

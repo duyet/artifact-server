@@ -127,6 +127,11 @@ import {
   agentUnavailableStalenessMilliseconds,
   registeredAgentRetentionMilliseconds,
 } from "../core/publishing-limits.js";
+import {
+  artifactOwnerColumns,
+  ownerFilterParameters,
+  withArtifactOwner,
+} from "./artifact-owner-row.js";
 import {createManifest} from "../manifest/create-manifest.js";
 import type {PostgresDatabase} from "./postgres-database.js";
 import type {
@@ -230,7 +235,8 @@ const gitHistoryMappingRowSchema = z.object({
   repositoryName: z.string(),
   versionId: z.string(),
 });
-const artifactRowSchema = z.object({
+const artifactRowColumns = {
+  ...artifactOwnerColumns,
   accessSetting: accessSettingSchema,
   createdAt: z.string(),
   currentVersionId: z.string(),
@@ -239,7 +245,9 @@ const artifactRowSchema = z.object({
   name: z.string(),
   path: z.string().nullable(),
   projectId: z.string(),
-});
+};
+const artifactRowSchema = z.object(artifactRowColumns)
+  .transform(withArtifactOwner);
 const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactViewDayRowSchema = z.object({
   artifactId: z.string(),
@@ -257,10 +265,13 @@ const publicArtifactSummaryRowSchema = z.object({
   name: z.string(),
   path: z.string().nullable(),
 });
-const artifactListRowSchema = artifactRowSchema.extend({
+const artifactListRowSchema = z.object({
+  ...artifactRowColumns,
   commentCount: z.coerce.number().int().nonnegative(),
+  currentVersionCreatedAt: z.string(),
+  currentVersionNumber: positiveIntegerSchema,
   versionCount: z.coerce.number().int().positive(),
-});
+}).transform(withArtifactOwner);
 const artifactTagRowSchema = z.object({artifactId: z.string(), tag: z.string()});
 const versionRowSchema = z.object({
   artifactId: z.string(),
@@ -270,6 +281,7 @@ const versionRowSchema = z.object({
   id: z.string(),
   manifestDigest: z.string(),
   number: positiveIntegerSchema,
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: routingModeSchema,
@@ -285,7 +297,10 @@ const publishedRowSchema = z.object({
   currentVersionId: z.string(),
   entryPath: z.string(),
   manifestDigest: z.string(),
+  ownerDisplayName: z.string().nullable(),
+  ownerPrincipalId: z.string(),
   projectId: z.string(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   routingMode: routingModeSchema,
   versionCreatedAt: z.string(),
@@ -1292,10 +1307,12 @@ export class PostgresArtifactRepository implements
         }
         yield* sql`INSERT INTO artifacts (
           installation_id, project_id, id, name, search_name, access_setting,
+          owner_principal_id, owner_display_name,
           current_version_id, created_at, deleted_at, path
         ) VALUES (
           ${installationId}, ${command.projectId}, ${command.artifactId}, ${command.name},
-          ${normalizeArtifactSearchText(command.name)}, ${command.accessSetting}, NULL,
+          ${normalizeArtifactSearchText(command.name)}, ${command.accessSetting},
+          ${command.principalId}, ${command.principalDisplayName}, NULL,
           ${command.createdAt}, NULL, ${command.path}
         )`;
         yield* this.#replaceTags(command.artifactId, command.tags);
@@ -1308,6 +1325,7 @@ export class PostgresArtifactRepository implements
           1,
           command.manifest,
           command.principalId,
+          command.principalDisplayName,
         );
         yield* sql`UPDATE artifacts SET current_version_id = ${command.versionId}
           WHERE installation_id = ${installationId}
@@ -1399,6 +1417,7 @@ export class PostgresArtifactRepository implements
           nextNumber,
           command.manifest,
           command.principalId,
+          command.principalDisplayName,
         );
         const updated = yield* sql`UPDATE artifacts
           SET current_version_id = ${command.versionId}
@@ -1764,6 +1783,7 @@ export class PostgresArtifactRepository implements
           routing_mode AS "routingMode",
           content_token AS "contentToken",
           publisher_principal_id AS "publisherPrincipalId",
+          publisher_display_name AS "publisherDisplayName",
           project_id AS "projectId", created_at AS "createdAt"
          FROM versions
          WHERE installation_id = $1 AND project_id = $2 AND artifact_id = $3
@@ -1796,6 +1816,7 @@ export class PostgresArtifactRepository implements
       const tagFilterJson = command.tags.length === 0
         ? null
         : JSON.stringify(command.tags);
+      const {notOwnedBy, ownedBy} = ownerFilterParameters(command.owner);
       const queryParameters = command.sort === "comments"
         ? [
             installationId,
@@ -1806,6 +1827,8 @@ export class PostgresArtifactRepository implements
             command.cursor?.id ?? null,
             command.cursor?.rank ?? null,
             command.limit + 1,
+            ownedBy,
+            notOwnedBy,
           ]
         : [
             installationId,
@@ -1815,14 +1838,34 @@ export class PostgresArtifactRepository implements
             command.cursor?.createdAt ?? null,
             command.cursor?.id ?? null,
             command.limit + 1,
+            ownedBy,
+            notOwnedBy,
           ];
       const limitPlaceholder = command.sort === "comments" ? "$8" : "$7";
+      // The two owner binds follow the limit, so they take the next two slots
+      // whichever sort shaped the earlier placeholders.
+      const ownedByPlaceholder = command.sort === "comments" ? "$9" : "$8";
+      const notOwnedByPlaceholder = command.sort === "comments" ? "$10" : "$9";
       const rows = yield* sql.unsafe<object>(
         `SELECT * FROM (
           SELECT id, project_id AS "projectId", name, path,
             access_setting AS "accessSetting",
+            owner_principal_id AS "ownerPrincipalId",
+            owner_display_name AS "ownerDisplayName",
             current_version_id AS "currentVersionId",
             created_at AS "createdAt", deleted_at AS "deletedAt",
+            (
+              SELECT created_at FROM versions
+              WHERE versions.installation_id = artifacts.installation_id
+                AND versions.project_id = artifacts.project_id
+                AND versions.id = artifacts.current_version_id
+            ) AS "currentVersionCreatedAt",
+            (
+              SELECT number FROM versions
+              WHERE versions.installation_id = artifacts.installation_id
+                AND versions.project_id = artifacts.project_id
+                AND versions.id = artifacts.current_version_id
+            ) AS "currentVersionNumber",
             (
               SELECT COUNT(*)::int FROM comment_threads
               WHERE comment_threads.installation_id = artifacts.installation_id
@@ -1838,6 +1881,10 @@ export class PostgresArtifactRepository implements
           FROM artifacts
           WHERE installation_id = $1 AND project_id = $2
             AND deleted_at IS NULL
+            AND (${ownedByPlaceholder}::text IS NULL
+              OR owner_principal_id = ${ownedByPlaceholder}::text)
+            AND (${notOwnedByPlaceholder}::text IS NULL
+              OR owner_principal_id <> ${notOwnedByPlaceholder}::text)
             AND ($3::text IS NULL
               OR strpos(search_name, $3) > 0
               OR EXISTS (
@@ -1879,6 +1926,8 @@ export class PostgresArtifactRepository implements
           artifact.name AS "artifactName",
           artifact.path AS "artifactPath",
           artifact.access_setting AS "accessSetting",
+          artifact.owner_principal_id AS "ownerPrincipalId",
+          artifact.owner_display_name AS "ownerDisplayName",
           artifact.current_version_id AS "currentVersionId",
           artifact.created_at AS "artifactCreatedAt",
           artifact.deleted_at AS "artifactDeletedAt",
@@ -1893,6 +1942,7 @@ export class PostgresArtifactRepository implements
           version.routing_mode AS "routingMode",
           version.content_token AS "contentToken",
           version.publisher_principal_id AS "publisherPrincipalId",
+          version.publisher_display_name AS "publisherDisplayName",
           version.created_at AS "versionCreatedAt"
          FROM artifacts artifact
          INNER JOIN projects project
@@ -1925,6 +1975,10 @@ export class PostgresArtifactRepository implements
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        owner: {
+          displayName: row.ownerDisplayName,
+          principalId: row.ownerPrincipalId,
+        },
         path: row.artifactPath,
         projectId: row.projectId,
       })));
@@ -3578,6 +3632,8 @@ export class PostgresArtifactRepository implements
       const rows = yield* sql.unsafe<object>(
         `SELECT id, project_id AS "projectId", name, path,
           access_setting AS "accessSetting",
+          owner_principal_id AS "ownerPrincipalId",
+          owner_display_name AS "ownerDisplayName",
           current_version_id AS "currentVersionId",
           created_at AS "createdAt", deleted_at AS "deletedAt"
          FROM artifacts
@@ -3668,6 +3724,7 @@ export class PostgresArtifactRepository implements
           manifest_digest AS "manifestDigest", entry_path AS "entryPath",
           routing_mode AS "routingMode", content_token AS "contentToken",
           publisher_principal_id AS "publisherPrincipalId",
+          publisher_display_name AS "publisherDisplayName",
           project_id AS "projectId", created_at AS "createdAt"
          FROM versions
          WHERE installation_id = $1 AND project_id = $2
@@ -3734,12 +3791,15 @@ export class PostgresArtifactRepository implements
           a.path AS "artifactPath",
           a.project_id AS "projectId",
           a.access_setting AS "accessSetting",
+          a.owner_principal_id AS "ownerPrincipalId",
+          a.owner_display_name AS "ownerDisplayName",
           a.current_version_id AS "currentVersionId",
           a.created_at AS "artifactCreatedAt", a.deleted_at AS "artifactDeletedAt",
           v.id AS "versionId", v.number AS "versionNumber",
           v.manifest_digest AS "manifestDigest", v.entry_path AS "entryPath",
           v.routing_mode AS "routingMode", v.content_token AS "contentToken",
           v.publisher_principal_id AS "publisherPrincipalId",
+          v.publisher_display_name AS "publisherDisplayName",
           v.created_at AS "versionCreatedAt"
          FROM versions v
          JOIN artifacts a
@@ -3758,6 +3818,10 @@ export class PostgresArtifactRepository implements
           deletedAt: parsed.artifactDeletedAt,
           id: parsed.artifactId,
           name: parsed.artifactName,
+          owner: {
+            displayName: parsed.ownerDisplayName,
+            principalId: parsed.ownerPrincipalId,
+          },
           path: parsed.artifactPath,
           projectId: parsed.projectId,
           tags: yield* this.#readTags(parsed.artifactId),
@@ -3771,6 +3835,7 @@ export class PostgresArtifactRepository implements
           id: parsed.versionId,
           manifestDigest: parsed.manifestDigest,
           number: parsed.versionNumber,
+          publisherDisplayName: parsed.publisherDisplayName,
           publisherPrincipalId: parsed.publisherPrincipalId,
           projectId: parsed.projectId,
           routingMode: parsed.routingMode,
@@ -3965,17 +4030,19 @@ export class PostgresArtifactRepository implements
     number: number,
     manifest: CommitNewArtifact["manifest"],
     publisherPrincipalId: string,
+    publisherDisplayName: string,
   ): Effect.Effect<void, unknown, SqlClient> {
     const installationId = this.#installationId;
     return Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
       yield* sql`INSERT INTO versions (
         installation_id, project_id, id, artifact_id, number, manifest_digest, entry_path,
-        routing_mode, content_token, publisher_principal_id, created_at
+        routing_mode, content_token, publisher_principal_id,
+        publisher_display_name, created_at
       ) VALUES (
         ${installationId}, ${projectId}, ${versionId}, ${artifactId}, ${number},
         ${manifest.digest}, ${manifest.entryPath}, ${manifest.routingMode},
-        ${contentToken}, ${publisherPrincipalId}, ${createdAt}
+        ${contentToken}, ${publisherPrincipalId}, ${publisherDisplayName}, ${createdAt}
       )`;
       for (const entry of manifest.entries) {
         yield* sql`INSERT INTO manifest_entries (
