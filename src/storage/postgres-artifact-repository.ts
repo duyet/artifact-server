@@ -229,6 +229,7 @@ const artifactRowSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  path: z.string().nullable(),
   projectId: z.string(),
 });
 const artifactListRowSchema = artifactRowSchema.extend({
@@ -254,6 +255,7 @@ const publishedRowSchema = z.object({
   artifactDeletedAt: z.string().nullable(),
   artifactId: z.string(),
   artifactName: z.string(),
+  artifactPath: z.string().nullable(),
   contentToken: z.string(),
   currentVersionId: z.string(),
   entryPath: z.string(),
@@ -1684,7 +1686,7 @@ export class PostgresArtifactRepository implements
       const limitPlaceholder = command.sort === "comments" ? "$8" : "$7";
       const rows = yield* sql.unsafe<object>(
         `SELECT * FROM (
-          SELECT id, project_id AS "projectId", name,
+          SELECT id, project_id AS "projectId", name, path,
             access_setting AS "accessSetting",
             current_version_id AS "currentVersionId",
             created_at AS "createdAt", deleted_at AS "deletedAt",
@@ -1742,6 +1744,7 @@ export class PostgresArtifactRepository implements
           artifact.id AS "artifactId",
           artifact.project_id AS "projectId",
           artifact.name AS "artifactName",
+          artifact.path AS "artifactPath",
           artifact.access_setting AS "accessSetting",
           artifact.current_version_id AS "currentVersionId",
           artifact.created_at AS "artifactCreatedAt",
@@ -1789,6 +1792,7 @@ export class PostgresArtifactRepository implements
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        path: row.artifactPath,
         projectId: row.projectId,
       })));
       return publicLinkPageFromRows(parsedRows, artifacts, command.limit);
@@ -3414,7 +3418,7 @@ export class PostgresArtifactRepository implements
     return Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
       const rows = yield* sql.unsafe<object>(
-        `SELECT id, project_id AS "projectId", name,
+        `SELECT id, project_id AS "projectId", name, path,
           access_setting AS "accessSetting",
           current_version_id AS "currentVersionId",
           created_at AS "createdAt", deleted_at AS "deletedAt"
@@ -3569,6 +3573,7 @@ export class PostgresArtifactRepository implements
       const sql = yield* SqlClient;
       const rows = yield* sql.unsafe<object>(
         `SELECT a.id AS "artifactId", a.name AS "artifactName",
+          a.path AS "artifactPath",
           a.project_id AS "projectId",
           a.access_setting AS "accessSetting",
           a.current_version_id AS "currentVersionId",
@@ -3595,6 +3600,7 @@ export class PostgresArtifactRepository implements
           deletedAt: parsed.artifactDeletedAt,
           id: parsed.artifactId,
           name: parsed.artifactName,
+          path: parsed.artifactPath,
           projectId: parsed.projectId,
           tags: yield* this.#readTags(parsed.artifactId),
         },

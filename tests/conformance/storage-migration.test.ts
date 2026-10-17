@@ -302,6 +302,53 @@ describe("local storage migration", () => {
     });
   });
 
+  test("foundation: a schema-12 database gains the artifact path column and keeps serving", async () => {
+    server = await startTestServer(installation);
+    const published = await publishNew(server, installation, {
+      accessSetting: "public_link",
+      content: "<!doctype html><title>Before artifact paths</title>",
+      idempotencyKey: "schema-twelve-path-migration",
+    });
+    expect(published.response.status).toBe(201);
+    await server.stop();
+    server = null;
+
+    const databasePath = path.join(installation.dataDirectory, "artifact-server.db");
+    const previous = new DatabaseSync(databasePath);
+    try {
+      previous.exec(`
+        DROP INDEX artifacts_live_path;
+        ALTER TABLE artifacts DROP COLUMN path;
+        PRAGMA user_version = 12;
+      `);
+    } finally {
+      previous.close();
+    }
+
+    server = await startTestServer(installation);
+    const details = await fetch(
+      `${server.baseUrl}/api/v1/artifacts/${published.body.artifact.id}`,
+      {headers: {Authorization: `Bearer ${installation.apiToken}`}},
+    );
+    expect(details.status).toBe(200);
+    await expect(details.json()).resolves.toMatchObject({
+      artifact: {id: published.body.artifact.id, path: null},
+    });
+    const rendered = await fetchVersion(server, published.body.links.version);
+    expect(rendered.status).toBe(200);
+    await expect(rendered.text()).resolves.toContain("Before artifact paths");
+
+    const upgraded = new DatabaseSync(databasePath, {readOnly: true});
+    try {
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 13});
+      expect(upgraded.prepare(
+        "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'artifacts_live_path'",
+      ).get()).toEqual({name: "artifacts_live_path"});
+    } finally {
+      upgraded.close();
+    }
+  });
+
   test("foundation: the previous management schema upgrades to durable tag and deletion idempotency", async () => {
     server = await startTestServer(installation);
     const published = await publishNew(server, installation, {

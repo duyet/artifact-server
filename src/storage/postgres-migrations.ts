@@ -655,6 +655,19 @@ const addArtifactSearchName = Effect.gen(function*() {
   );
 });
 
+// `path` is the readable URL path an artifact claims at creation. Byte-order
+// collation keeps the descendant range check in the claim exact.
+const addArtifactPath = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `ALTER TABLE artifacts ADD COLUMN path TEXT COLLATE "C"`,
+    `CREATE UNIQUE INDEX artifacts_live_path
+      ON artifacts (installation_id, path)
+      WHERE path IS NOT NULL AND deleted_at IS NULL`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -667,10 +680,11 @@ const migrationLoader = Migrator.fromRecord({
   "0009_git_history_mirror": addGitHistoryMirror,
   "0010_agent_capabilities": widenRegisteredAgentKind,
   "0011_artifact_search_name": addArtifactSearchName,
+  "0012_artifact_path": addArtifactPath,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 11;
+export const requiredPostgresSchemaVersion = 12;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -758,6 +772,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 11,
     name: "artifact_search_name",
+  }, {
+    migration_id: 12,
+    name: "artifact_path",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

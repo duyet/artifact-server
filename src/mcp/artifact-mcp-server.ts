@@ -135,6 +135,7 @@ const artifactRecordSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  path: z.string().nullable(),
   projectId: z.string(),
   tags: z.array(z.string()),
 }).strict();
