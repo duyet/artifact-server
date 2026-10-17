@@ -247,6 +247,7 @@ export async function createExternalStorageRuntime(
       artifactViews: artifactViewRecorder,
       blobs,
       browserAccess: config.browserAccess,
+      clock: runtimeClock,
       completedRequestLogSampleRate:
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,

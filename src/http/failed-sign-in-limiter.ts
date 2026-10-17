@@ -1,0 +1,74 @@
+import type {Clock} from "../core/ports.js";
+
+/** Fixed-window bound on failed browser sign-ins from one client address. */
+export interface FailedSignInPolicy {
+  readonly maximumAddresses: number;
+  readonly maximumFailures: number;
+  readonly windowMilliseconds: number;
+}
+
+export const defaultFailedSignInPolicy: FailedSignInPolicy = {
+  maximumAddresses: 10_000,
+  maximumFailures: 5,
+  windowMilliseconds: 60_000,
+};
+
+interface FailureWindow {
+  failures: number;
+  readonly resetsAt: number;
+}
+
+/** In-memory failed sign-in counter for one server process. */
+export class FailedSignInLimiter {
+  readonly #clock: Clock;
+  readonly #policy: FailedSignInPolicy;
+  readonly #windows = new Map<string, FailureWindow>();
+
+  constructor(clock: Clock, policy: FailedSignInPolicy = defaultFailedSignInPolicy) {
+    this.#clock = clock;
+    this.#policy = policy;
+  }
+
+  /** Whole seconds until the address may try again, or null when it may try now. */
+  retryAfterSeconds(address: string): number | null {
+    const now = this.#clock.now().getTime();
+    const window = this.#windows.get(address);
+    if (window === undefined) return null;
+    if (window.resetsAt <= now) {
+      this.#windows.delete(address);
+      return null;
+    }
+    return window.failures >= this.#policy.maximumFailures
+      ? Math.ceil((window.resetsAt - now) / 1_000)
+      : null;
+  }
+
+  recordFailure(address: string): void {
+    const now = this.#clock.now().getTime();
+    const window = this.#windows.get(address);
+    if (window !== undefined && window.resetsAt > now) {
+      window.failures += 1;
+      return;
+    }
+    this.#windows.delete(address);
+    this.#evict(now);
+    this.#windows.set(address, {
+      failures: 1,
+      resetsAt: now + this.#policy.windowMilliseconds,
+    });
+  }
+
+  clear(address: string): void {
+    this.#windows.delete(address);
+  }
+
+  #evict(now: number): void {
+    for (const [address, window] of this.#windows) {
+      if (window.resetsAt <= now) this.#windows.delete(address);
+    }
+    for (const address of this.#windows.keys()) {
+      if (this.#windows.size < this.#policy.maximumAddresses) return;
+      this.#windows.delete(address);
+    }
+  }
+}
