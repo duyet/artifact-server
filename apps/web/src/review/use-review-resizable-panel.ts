@@ -132,6 +132,9 @@ export function useReviewResizablePanel({
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>): void => {
     if (event.button !== 0) return;
     event.preventDefault();
+    // Keep the drag on this edge: without capture, moving over the preview
+    // iframe sends every later pointer event to the iframe's document.
+    event.currentTarget.setPointerCapture(event.pointerId);
     startPositionRef.current = event.clientX;
     latestPositionRef.current = event.clientX;
     startWidthRef.current = widthRef.current;
