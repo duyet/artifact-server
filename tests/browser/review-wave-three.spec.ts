@@ -4,7 +4,7 @@ import {z} from "zod";
 import {publishNew, publishVersion} from "../support/publishing.js";
 import {
   artifactPreview,
-  galleryRow,
+  artifactSidebar,
   localLogin,
   startBrowserFixture,
   stopBrowserFixture,
@@ -160,7 +160,7 @@ test.describe("Artifact Server Review wave three", () => {
     }
   });
 
-  test("ART-009-B ART-009-F: Review searches the whole project, not just the loaded page of the catalog", async ({browser}) => {
+  test("ART-009-B ART-009-F: Review searches the whole project and preserves a nonmatching preview", async ({browser}) => {
     const fixture = await startBrowserFixture(browser);
     try {
       const selected = await publishNew(fixture.server, fixture.installation, {
@@ -197,23 +197,45 @@ test.describe("Artifact Server Review wave three", () => {
           response,
         });
       });
-      // The Artifacts gallery is the only surface with search. The loaded
-      // catalog page leaves the historical plan out, so finding it proves the
-      // search reaches the whole project.
-      await fixture.page.goto(`${fixture.server.baseUrl}/review?project=prj_default`);
-      await expect(galleryRow(fixture.page, "Decision Board Result")).toBeVisible();
-      await expect(galleryRow(fixture.page, "Selected historical plan")).toHaveCount(0);
+      // The loaded catalog page leaves the historical plan out, so finding it
+      // proves the search reaches the whole project, while the viewer keeps
+      // the exact artifact and version it opened.
+      const selectedUrl = reviewUrl(
+        fixture.server.baseUrl,
+        selected.body.artifact.id,
+        selected.body.version.id,
+      );
+      await fixture.page.goto(selectedUrl);
+      const preview = artifactPreview(fixture.page);
+      const tree = artifactSidebar(fixture.page);
+      await expect(preview.getByRole("heading", {name: "Selected preview remains"}))
+        .toBeVisible();
+      await expect(tree.getByRole("link", {exact: true, name: "Decision Board Result"}))
+        .toBeVisible();
+      await expect(tree.getByRole("link", {exact: true, name: "Selected historical plan"}))
+        .toHaveCount(0);
 
-      const search = fixture.page.getByRole("searchbox", {name: "Search artifacts"});
+      const search = tree.getByRole("searchbox", {name: "Search artifacts"});
       await search.fill("  DECISION   BOARD ");
-      await expect(galleryRow(fixture.page, "Decision Board Result")).toBeVisible();
-      await expect(galleryRow(fixture.page, "Selected historical plan")).toHaveCount(0);
+      await expect(tree.getByRole("link", {exact: true, name: "Decision Board Result"}))
+        .toBeVisible();
+      await expect(tree.getByRole("link", {exact: true, name: "Selected historical plan"}))
+        .toHaveCount(0);
+      await expect(preview.getByRole("heading", {name: "Selected preview remains"}))
+        .toBeVisible();
 
       await search.fill("HIDDEN-TARGET");
-      await expect(galleryRow(fixture.page, "Selected historical plan")).toBeVisible();
-      await expect(galleryRow(fixture.page, "Decision Board Result")).toHaveCount(0);
+      await expect(tree.getByRole("link", {exact: true, name: "Selected historical plan"}))
+        .toBeVisible();
+      await expect(tree.getByRole("link", {exact: true, name: "Decision Board Result"}))
+        .toHaveCount(0);
       await search.fill("hidden");
-      await expect(fixture.page.getByText("No matching artifacts", {exact: true})).toBeVisible();
+      await expect(tree.getByText("No matching artifacts", {exact: true})).toBeVisible();
+      await expect(preview.getByRole("heading", {name: "Selected preview remains"}))
+        .toBeVisible();
+      const location = new URL(fixture.page.url()).searchParams;
+      expect(location.get("artifact")).toBe(selected.body.artifact.id);
+      expect(location.get("version")).toBe(selected.body.version.id);
       expect(result.body.artifact.id).not.toBe(selected.body.artifact.id);
     } finally {
       await stopBrowserFixture(fixture);

@@ -5,6 +5,7 @@ import {
   IconLogout,
   IconMoon,
   IconRefresh,
+  IconSearch,
   IconSelector,
   IconSettings,
   IconSun,
@@ -30,6 +31,7 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
+  SidebarInput,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
@@ -107,6 +109,17 @@ export function AppSidebar({
               />
             </SidebarMenuItem>
           </SidebarMenu>
+          <form className="relative" onSubmit={(event) => event.preventDefault()} role="search">
+            <SidebarInput
+              aria-label="Search artifacts"
+              className="pl-8"
+              onChange={(event) => catalog.setQuery(event.currentTarget.value)}
+              placeholder="Search artifacts…"
+              type="search"
+              value={catalog.query}
+            />
+            <IconSearch className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 opacity-50 select-none" />
+          </form>
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
@@ -142,6 +155,7 @@ export function AppSidebar({
             </SidebarGroupAction>
             <SidebarGroupContent>
               <ArtifactTree
+                filtered={catalog.query.trim() !== ""}
                 items={catalog.items}
                 loading={catalog.loading}
                 projectId={projectId}

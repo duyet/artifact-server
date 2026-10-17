@@ -7,9 +7,7 @@ import {
   IconList,
   IconMessage,
   IconRefresh,
-  IconSearch,
   IconStack2,
-  IconX,
 } from "@tabler/icons-react";
 import {toast} from "sonner";
 
@@ -23,7 +21,6 @@ import {Alert, AlertDescription, AlertTitle} from "@/components/ui/alert";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
 import {Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle} from "@/components/ui/empty";
-import {InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput} from "@/components/ui/input-group";
 import {Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue} from "@/components/ui/select";
 import {Skeleton} from "@/components/ui/skeleton";
 import {Tabs, TabsList, TabsTrigger} from "@/components/ui/tabs";
@@ -168,25 +165,6 @@ export function ArtifactsPage({
           </TabsList>
         </Tabs>
         <div className="flex flex-wrap items-center gap-2">
-          <InputGroup className="max-w-sm min-w-48 flex-1">
-            <InputGroupAddon>
-              <IconSearch />
-            </InputGroupAddon>
-            <InputGroupInput
-              aria-label="Search artifacts"
-              onChange={(event) => catalog.setQuery(event.currentTarget.value)}
-              placeholder="Search artifacts…"
-              type="search"
-              value={catalog.query}
-            />
-            {catalog.query === "" ? null : (
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton aria-label="Clear search" onClick={() => catalog.setQuery("")} size="icon-xs">
-                  <IconX />
-                </InputGroupButton>
-              </InputGroupAddon>
-            )}
-          </InputGroup>
           <CatalogFilters
             commentFilter={catalog.commentFilter}
             knownTags={catalog.knownTags}

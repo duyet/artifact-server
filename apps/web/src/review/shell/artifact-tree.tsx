@@ -21,13 +21,18 @@ function segmentsOf(item: CatalogItem): readonly string[] {
   return path === null || path === "" ? [item.artifact.name] : path.split("/");
 }
 
-/** The project's artifacts as a file tree, linking each to its viewer. */
+/**
+ * The project's artifacts as a file tree, linking each to its viewer. Search
+ * results open every folder so each match is visible.
+ */
 export function ArtifactTree({
+  filtered,
   items,
   loading,
   projectId,
   selectedArtifactId,
 }: {
+  readonly filtered: boolean;
   readonly items: readonly CatalogItem[];
   readonly loading: boolean;
   readonly projectId: string;
@@ -42,11 +47,17 @@ export function ArtifactTree({
       </SidebarMenu>
     );
   }
+  if (filtered && items.length === 0) {
+    return <p className="px-2 py-1.5 text-xs text-muted-foreground">No matching artifacts</p>;
+  }
   const tree = buildPathTree(items, segmentsOf);
-  const selectedPath = items.find(({artifact}) => artifact.id === selectedArtifactId)?.artifact.path ?? null;
-  const openFolders = new Set(selectedPath === null ? [] : ancestorFolderPaths(selectedPath));
+  const openFolders = new Set(filtered
+    ? items.flatMap(({artifact}) => artifact.path === null ? [] : ancestorFolderPaths(artifact.path))
+    : ancestorFolderPaths(items.find(({artifact}) => artifact.id === selectedArtifactId)?.artifact.path ?? ""));
   return (
-    <SidebarMenu>
+    // Folders read `openFolders` only when they mount, so entering or leaving
+    // search remounts the tree.
+    <SidebarMenu key={filtered ? "search" : "browse"}>
       {tree.map((node) => (
         <TreeNode
           key={node.kind === "leaf" ? node.item.artifact.id : `folder:${node.path}`}
