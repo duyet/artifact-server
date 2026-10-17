@@ -318,7 +318,7 @@ describe("editing one text file", () => {
       .toEqual(baseFiles[1]?.bytes);
   }, 60_000);
 
-  test("EDT-002-B: the committed file keeps the byte order mark and CRLF line endings it was uploaded with", async () => {
+  test("the committed file keeps the byte order mark and CRLF line endings it was uploaded with", async () => {
     const published = await publishHandbook();
     const bytes = new Uint8Array([
       0xef, 0xbb, 0xbf,

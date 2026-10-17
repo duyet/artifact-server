@@ -99,7 +99,7 @@ describe("web edit and rename", () => {
     expect(await readFile(source.artifact.id, source.version.id, "notes.txt")).toEqual(crlfNotes);
   });
 
-  test("EDT-002-F: a save against a stale current version is a conflict and publishes nothing", async () => {
+  test("a save against a stale current version is a conflict and publishes nothing", async () => {
     const source = await publishSource();
     const input = {
       artifactId: source.artifact.id,
@@ -126,7 +126,7 @@ describe("web edit and rename", () => {
     )).toBe("winner\n");
   });
 
-  test("FRK-012-B: renaming changes the name without a new version, and a stale rename is a conflict", async () => {
+  test("renaming changes the name without a new version, and a stale rename is a conflict", async () => {
     const source = await publishSource();
 
     const renamed = await renameArtifact(transport, {
