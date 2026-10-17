@@ -79,9 +79,11 @@ import {
   AgentNotFound,
   ArtifactNotFound,
   ArtifactMutationConflict,
+  ArtifactPathTaken,
   ArtifactRepositoryFailure,
   AuthenticationRequired,
   BlobStorageFailure,
+  CapabilityUnavailable,
   CommentNotFound,
   CommentResolved,
   DispatchStateConflict,
@@ -699,6 +701,11 @@ export function createApplicationLayer(
           try: () => adapters.repository.findPreviewLease(tokenDigest, requestTime),
           catch: (cause) => repositoryFailure("findPreviewLease", cause),
         }),
+      findArtifactByPath: (candidates) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.findArtifactByPath(candidates),
+          catch: (cause) => repositoryFailure("findArtifactByPath", cause),
+        }),
       findCurrentVersion: (projectId, artifactId) =>
         Effect.tryPromise({
           try: () => adapters.repository.findCurrentVersion(projectId, artifactId),
@@ -1280,7 +1287,10 @@ function classifySourceReadinessFailure(cause: unknown) {
 
 function classifyCommitNewFailure(cause: unknown) {
   if (
-    cause instanceof IdempotencyConflict || cause instanceof ProjectArchived
+    cause instanceof ArtifactPathTaken ||
+    cause instanceof CapabilityUnavailable ||
+    cause instanceof IdempotencyConflict ||
+    cause instanceof ProjectArchived
   ) return cause;
   if (
     cause instanceof UploadNotFound ||

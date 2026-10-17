@@ -55,6 +55,8 @@ An agent uses this sequence:
 
 When the agent publishes a new version, it first reads the current version ID. It sends that ID as `expectedCurrentVersionId`.
 
+A `new_artifact` target may carry an optional `path`, such as `2026/10/report`. On a server without a content domain, `links.artifact` is then `/<path>/` on the application host, and new versions keep it. The rules match the CLI's [`--path`](./cli.md#choose-a-readable-path). An invalid path returns `INVALID_INPUT` with a message that says what is wrong.
+
 ## Use the publication result
 
 Every successful publication returns structured data and a short text summary.

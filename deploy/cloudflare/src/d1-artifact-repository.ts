@@ -8,6 +8,7 @@ import {
   AgentDispatchNotFound,
   ArtifactMutationConflict,
   ArtifactNotFound,
+  CapabilityUnavailable,
   CommentNotFound,
   CommentResolved,
   DispatchStateConflict,
@@ -278,6 +279,7 @@ const artifactRowSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  path: z.null(),
   projectId: z.string(),
 });
 const artifactListRowSchema = artifactRowSchema.extend({
@@ -509,7 +511,7 @@ const versionContentRowSchema = z.object({
 });
 
 const artifactSelect = `
-  SELECT id, project_id AS projectId, name,
+  SELECT id, project_id AS projectId, name, NULL AS path,
     access_setting AS accessSetting,
     current_version_id AS currentVersionId,
     created_at AS createdAt, deleted_at AS deletedAt
@@ -2194,6 +2196,11 @@ export function createD1ArtifactRepository(
     },
 
     commitNewArtifact: async (command: CommitNewArtifact) => {
+      if (command.path !== null) {
+        throw new CapabilityUnavailable({
+          message: "Readable artifact paths are not available on this deployment.",
+        });
+      }
       const replay = await findIdempotentPublication(
         command.projectId,
         command.idempotencyKey,
@@ -2325,6 +2332,7 @@ export function createD1ArtifactRepository(
     findArtifact: (projectId, artifactId) => readArtifactOrNull(projectId, artifactId),
     findArtifactForAdministration: (projectId, artifactId) =>
       readArtifactOrNull(projectId, artifactId, true),
+    findArtifactByPath: () => Promise.resolve(null),
     findCurrentVersion: async (projectId, artifactId) => {
       const row = await database.prepare(`
         SELECT project_id AS projectId, current_version_id AS currentVersionId
@@ -2445,7 +2453,7 @@ export function createD1ArtifactRepository(
         : JSON.stringify(command.tags);
       const result = await database.prepare(`
         SELECT * FROM (
-          SELECT id, project_id AS projectId, name,
+          SELECT id, project_id AS projectId, name, NULL AS path,
             access_setting AS accessSetting,
             current_version_id AS currentVersionId,
             created_at AS createdAt, deleted_at AS deletedAt,
@@ -2506,6 +2514,7 @@ export function createD1ArtifactRepository(
           artifact.id AS artifactId,
           artifact.project_id AS projectId,
           artifact.name AS artifactName,
+          NULL AS artifactPath,
           artifact.access_setting AS accessSetting,
           artifact.current_version_id AS currentVersionId,
           artifact.created_at AS artifactCreatedAt,
@@ -2551,6 +2560,7 @@ export function createD1ArtifactRepository(
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        path: row.artifactPath,
         projectId: row.projectId,
         tags: await readTags(row.artifactId),
       })));

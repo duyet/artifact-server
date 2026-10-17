@@ -76,8 +76,16 @@ export interface ArtifactRecord {
   readonly deletedAt: string | null;
   readonly id: string;
   readonly name: string;
+  /** The readable path claimed at creation, served at `/<path>/` in path mode. */
+  readonly path: string | null;
   readonly projectId: string;
   readonly tags: readonly string[];
+}
+
+/** The live artifact that holds one of a request's candidate paths. */
+export interface ArtifactPathMatch {
+  readonly id: string;
+  readonly path: string;
 }
 
 /** An artifact record whose deletion state is known to be committed. */

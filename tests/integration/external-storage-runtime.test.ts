@@ -517,6 +517,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           "ALTER TABLE actions DROP COLUMN project_id CASCADE",
           "ALTER TABLE idempotency_records DROP COLUMN project_id CASCADE",
           "ALTER TABLE versions DROP COLUMN project_id CASCADE",
+          "ALTER TABLE artifacts DROP COLUMN path",
           "ALTER TABLE artifacts DROP COLUMN search_name",
           "ALTER TABLE artifacts DROP COLUMN project_id CASCADE",
           "ALTER TABLE login_attempts DROP COLUMN nonce",
@@ -874,6 +875,79 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     );
     expect(folder.status).toBe(200);
     expect(await folder.text()).toBe(content);
+  });
+
+  test("external-storage foundation: two processes racing for one artifact path admit exactly one create and both serve it", async () => {
+    expect.hasAssertions();
+    const pathApiToken = managedTestKey("artifact-path-installation");
+    const identity = {
+      apiToken: pathApiToken,
+      installationId: "artifact-path-external-storage-installation",
+      sameHost: true,
+    };
+    const [first, second] = await Promise.all([
+      startExternalStorageProcess(environment, identity),
+      startExternalStorageProcess(environment, identity),
+    ]);
+    const commitWithPath = async (
+      server: ExternalStorageProcess,
+      artifactPath: string,
+      idempotencyKey: string,
+    ) => {
+      const upload = await stageExternalStorageFile(
+        server.baseUrl,
+        pathApiToken,
+        `<h1>${idempotencyKey}</h1>`,
+      );
+      return fetch(upload.commitUrl, {
+        body: JSON.stringify({target: {
+          accessSetting: "public_link",
+          kind: "new_artifact",
+          name: `Path claim ${idempotencyKey}`,
+          path: artifactPath,
+        }}),
+        headers: mutationHeaders(pathApiToken, idempotencyKey),
+        method: "POST",
+      });
+    };
+
+    const raceKey = randomUUID();
+    const races = await Promise.all([
+      commitWithPath(first, "2026/10/raced", `path-race-a-${raceKey}`),
+      commitWithPath(second, "2026/10/raced", `path-race-b-${raceKey}`),
+    ]);
+    expect(
+      races.map(({status}) => status).toSorted((left, right) => left - right),
+    ).toEqual([201, 409]);
+    const outcomes = await Promise.all(races.map(async (response) => {
+      const body: unknown = await response.json();
+      return {body, status: response.status};
+    }));
+    const winner = z.object({
+      artifact: z.object({path: z.string()}),
+      links: z.object({artifact: z.url()}),
+    }).parse(outcomes.find(({status}) => status === 201)?.body);
+    const loser = outcomes.find(({status}) => status === 409);
+    expect(winner.artifact.path).toBe("2026/10/raced");
+    expect(new URL(winner.links.artifact).pathname).toBe("/2026/10/raced/");
+    expect(z.object({error: z.object({code: z.string()})}).parse(loser?.body))
+      .toEqual({error: {code: "ARTIFACT_PATH_TAKEN"}});
+    const served = await Promise.all([first, second].map((server) =>
+      fetchContentThroughServer(server.baseUrl, winner.links.artifact)));
+    expect(await Promise.all(served.map(async (response) => ({
+      body: await response.text(),
+      status: response.status,
+    })))).toEqual(Array.from({length: 2}, () => ({
+      body: expect.stringMatching(/^<h1>path-race-[ab]-/u),
+      status: 200,
+    })));
+
+    const ancestor = await commitWithPath(second, "2026/10", `path-ancestor-${raceKey}`);
+    expect(ancestor.status).toBe(409);
+    await ancestor.arrayBuffer();
+    const sibling = await commitWithPath(first, "2026/10/raced-v2", `path-sibling-${raceKey}`);
+    expect(sibling.status).toBe(201);
+    await sibling.arrayBuffer();
   });
 
   test("foundation: independent external-storage processes expose the same stateless MCP installation", async () => {

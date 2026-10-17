@@ -17,6 +17,7 @@ export const publicLinkInventoryRowSchema = z.object({
   artifactDeletedAt: z.string().nullable(),
   artifactId: z.string(),
   artifactName: z.string(),
+  artifactPath: z.string().nullable(),
   contentToken: z.string(),
   currentVersionId: z.string(),
   entryPath: z.string(),

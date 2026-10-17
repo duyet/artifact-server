@@ -174,7 +174,7 @@ describe("same-host content sandbox", () => {
     const applicationRoutes = await Promise.all([
       `${server.baseUrl}/health`,
       `${server.baseUrl}/api/v1/session`,
-      `${server.baseUrl}/not-a-route`,
+      `${server.baseUrl}/not-a-route.txt`,
     ].map(async (url) => {
       const response = await fetch(url);
       return {

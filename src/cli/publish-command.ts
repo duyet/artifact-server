@@ -25,6 +25,7 @@ interface PublishOptions {
   readonly entry?: string;
   readonly expectedVersion?: string;
   readonly name?: string;
+  readonly path?: string;
   readonly public: boolean;
   readonly project?: string;
   readonly profile?: string;
@@ -73,6 +74,12 @@ export function configurePublishCommand(
         .default("static"),
     )
     .addOption(new Option("--name <name>", "name for a new artifact"))
+    .addOption(
+      new Option(
+        "--path <path>",
+        "readable path for a new artifact, such as 2026/10/report",
+      ),
+    )
     .addOption(new Option("--public", "allow the link to open without sign-in").default(false))
     .addOption(
       new Option("--tag <tag>", "tag for a new artifact; repeat for more tags")
@@ -142,9 +149,14 @@ function publicationCommand(
         routingMode: options.routing,
       };
   if (options.artifact !== undefined && options.expectedVersion !== undefined) {
-    if (options.name !== undefined || options.public || options.tag.length > 0) {
+    if (
+      options.name !== undefined
+      || options.path !== undefined
+      || options.public
+      || options.tag.length > 0
+    ) {
       throw new Error(
-        "--name, --public, and --tag apply only when creating a new artifact.",
+        "--name, --path, --public, and --tag apply only when creating a new artifact.",
       );
     }
     return withEntryPath({
@@ -158,7 +170,7 @@ function publicationCommand(
   }
 
   const access = options.public ? {accessSetting: "public_link" as const} : {};
-  const target = options.name === undefined
+  const named = options.name === undefined
     ? {
       ...access,
       kind: "new_artifact" as const,
@@ -170,6 +182,9 @@ function publicationCommand(
       name: options.name,
       tags: options.tag,
     };
+  const target = options.path === undefined
+    ? named
+    : {...named, path: options.path};
   return withEntryPath({
     ...common,
     target,

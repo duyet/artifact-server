@@ -20,7 +20,9 @@ The publish command always returns structured JSON. Do not add a `--json` flag.
 artifactserver publish "<path>" --profile "<profile>" --server "<origin>" --project "<project-id>" --name "<name>"
 ```
 
-Optional creation flags are repeatable `--tag`, `--public`, and `--entry`. Account-required access is the default.
+Optional creation flags are repeatable `--tag`, `--public`, `--entry`, and `--path`. Account-required access is the default.
+
+`--path "<yyyy>/<mm>/<slug>"` claims a readable URL path on a server without a content domain. Use it only when the user asks for a specific URL. The server rejects a reserved, malformed, or overlapping path with a message that names the problem. Report that message, and do not retry with a guessed path. A path cannot change later.
 
 ### Publish a new version
 
@@ -59,7 +61,7 @@ Project creation, rename, archive, or unarchive are ordinary product actions but
 
 Do not use MCP upload tools when the files exist on the user's machine and the CLI is available. The CLI provides the one-step authenticated experience.
 
-Use `artifact_create_upload` and `artifact_commit_upload` only when the current agent environment can actually read the file bytes and execute the returned authenticated HTTP uploads. Call `artifact_capabilities` first. Never place file bytes, base64, or a local path in MCP arguments, and never expose the MCP bearer credential to the model or output.
+Use `artifact_create_upload` and `artifact_commit_upload` only when the current agent environment can actually read the file bytes and execute the returned authenticated HTTP uploads. A `new_artifact` target accepts the same optional `path` as the CLI's `--path`. Call `artifact_capabilities` first. Never place file bytes, base64, or a local path in MCP arguments, and never expose the MCP bearer credential to the model or output.
 
 ## Final result
 

@@ -585,6 +585,7 @@ function makeLinkedArtifactService(
             inputDigest,
             manifest: upload.manifest,
             name,
+            path: null,
             principalId: command.principal.id,
             projectId: project.id,
             source: {

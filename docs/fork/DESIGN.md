@@ -356,6 +356,147 @@ The runbook lists these steps. Each one is a setting outside the repository:
 9. Confirm that the gateway's posix directory supports `user.` extended attributes, or that the gateway runs with `--sidecar`. Note whether it is ext4, because one file then caps near 11 GiB (section 2).
 10. Run commit 2's contract test once against the real gateway, with a key that may create the throwaway bucket `artifact-server-integration`. Delete that bucket afterward.
 
+## 11. Readable artifact paths
+
+This section was the design for brief r3. Citations are against `b644213`. Branch `feat/artifact-paths` implements it. As built, one test differs: FRK-002-B probed `/not-a-route` as an application route, but that URL is now a path request that carries the sandbox headers, so the probe moved to `/not-a-route.txt`.
+
+The operator is moving 29 static reports from `docs/artifacts/<yyyy>/<mm>/<slug>.html` and wants URLs of the same shape, for example `https://artifacts.example.internal/2026/10/agent-console/` with an asset at `/2026/10/agent-console/shots/a.jpg`. An artifact may therefore claim one optional path when it is created. A path is guessable. The server is VPN-only with no login, and the operator accepts that.
+
+### Data shape
+
+The path is a nullable column on the artifact row, not a separate table. Every reader that builds `links.artifact` already loads that row, so a column needs no join.
+
+- `ArtifactRecord` (`src/core/model.ts:72`) gains `path: string | null`. `CommitNewArtifact` (`src/core/ports.ts:104`) gains the same field. `CommitLinkedArtifact` extends it (`:377`), and linked artifacts pass `null`.
+- A new version never writes the artifact row's name or tags (`CommitArtifactVersion`, `src/core/ports.ts:121`). It keeps the path the same way, with no new code.
+- The value is a plain string. The codebase has no branded types (no `Brand` anywhere in `src`), and one brand here would be the only one. Instead, `parseArtifactPath` is the only way a path enters the server (see "Validation and reserved segments").
+- The column is named `path`. In SQLite it sits next to `source_path`, which is the file-system path of a linked source. The migration's code comment says that the two are unrelated.
+
+Paths are prefix-free within an installation. No live path equals another, and no live path is a prefix of another at a `/` boundary. `2026/10/agent-console` and `2026/10/agent-console-v2` can both exist, but `2026/10` and `2026/10/agent-console` cannot. With nesting, the longer path would hide the shorter artifact's files under that subfolder, and nobody would notice until a reader got the wrong page. A prefix-free rule fails at publish time instead, and every request matches at most one artifact.
+
+The rule covers live artifacts only. Deletion is a one-way tombstone (`src/storage/postgres-artifact-repository.ts:1505`), and nothing undeletes an artifact, so a deleted artifact frees its path. There is no rename, so to move content to a path, delete the artifact and publish it again.
+
+| Backend | Schema change | Claim under concurrent publishes |
+| --- | --- | --- |
+| SQLite | `requiredSqliteSchemaVersion` goes from 12 to 13 (`src/storage/sqlite-schema.ts:9`). A new `#addArtifactPathIfMissing` runs after `#addGitHistoryMirrorTablesIfMissing` (`src/storage/sqlite-artifact-repository.ts:4903`). It checks for the column first, as `#addSourceBindingColumnsIfMissing` does (`:5033`), then adds `path TEXT` and `CREATE UNIQUE INDEX IF NOT EXISTS artifacts_live_path ON artifacts (path) WHERE path IS NOT NULL AND deleted_at IS NULL`. The index is not gated on `user_version`, because `SqliteIdentityRepository` also stamps that value (`src/storage/sqlite-identity-repository.ts:748`). | `#applyNewArtifactCommit` (`:1302`) already runs inside `BEGIN IMMEDIATE` (`#transaction`, `:5691`). One writer holds the database while it checks and inserts. |
+| Postgres | Migration `0012_artifact_path` runs `ALTER TABLE artifacts ADD COLUMN path TEXT COLLATE "C"` and `CREATE UNIQUE INDEX artifacts_live_path ON artifacts (installation_id, path) WHERE path IS NOT NULL AND deleted_at IS NULL`. It is registered in `Migrator.fromRecord` (`src/storage/postgres-migrations.ts:658`), `requiredPostgresSchemaVersion` becomes 12 (`:673`), and `expectedHistory` gains `{migration_id: 12, name: "artifact_path"}` (`:760`). Without that entry, startup reports a divergent history. | `commitNewArtifact` runs at READ COMMITTED and locks only the idempotency key (`src/storage/postgres-artifact-repository.ts:1242`). After the replay check, a create that has a path takes `pg_advisory_xact_lock(hashtextextended('<installation>:artifact-paths', 0))`, in the same form as `lockIdempotency` (`:4835`). It then checks and inserts. A create without a path never takes the lock. |
+| D1 | None. The Cloudflare worker always sets a content domain (`deploy/cloudflare/src/worker.ts:76`), so the HTTP boundary refuses a path before D1 sees one. | `commitNewArtifact` (`deploy/cloudflare/src/d1-artifact-repository.ts:2196`) throws `CapabilityUnavailable` for a non-null path. Its projections return `path: null`, and its path lookup returns `null`. |
+
+The claim check is one query in both SQL backends. It looks for a live row whose path is the new path or one of its ancestors (`path IN (...)`, at most 6 values), or a descendant (`path >= '<p>/' AND path < '<p>0'`). The character `0` comes right after `/` in byte order. Both `COLLATE "C"` and the SQLite default `BINARY` compare bytes, so the range is exact for ASCII paths. A hit throws the new `ArtifactPathTaken` (409 `ARTIFACT_PATH_TAKEN`), whose message names the existing path. The unique index is a backstop. If a bug let two writers past the check, the second insert would fail instead of storing a duplicate.
+
+The order inside `commitNewArtifact` matters. The idempotency replay check runs before the claim, so a retried create returns its original result instead of a 409 against its own path. The claim runs after `storeFiles` (`src/application/publish-artifact.ts:253`), so a 409 leaves unreferenced, content-addressed blobs behind, as any failed commit does. ADR 0006 allows that (`project/spec/decisions/0006-postgres-external-storage-runtime.md:32`).
+
+`newArtifactInputDigest` (`src/application/publish-artifact.ts:356`) adds `path` only when it is set. The digest of a publish without a path stays byte-identical, so an idempotency key issued before the upgrade still replays after it. The same key with a different path fails with `IdempotencyConflict`, as any other changed field does.
+
+The two new error tags, `ArtifactPathTaken` and `InvalidArtifactPath`, need the usual edits:
+
+- `errorCodes` and `artifactServerFailureSchema` (`src/core/errors.ts:4`, `:472`).
+- The exhaustive switch in `src/http/artifact-http-failure.ts`, which ends in `casesHandled` (`:116`).
+- `CommitNewFailure` (`src/application/publish-artifact.ts:86`).
+- `classifyCommitNewFailure` (`src/local/create-local-application-layer.ts:1281`). Without this edit, the conflict becomes a 500.
+
+Every query that fills an artifact row schema reads the new column (SQLite `artifactRowSchema` at `src/storage/sqlite-artifact-repository.ts:251`, Postgres at `src/storage/postgres-artifact-repository.ts:225`). Those include SQLite `listArtifacts`, `#readArtifactOrNull`, and `#readArtifactIncludingDeletedOrNull` (`:1826`, `:2654`, `:2673`), and Postgres `listArtifacts` and `#readArtifactOrNull` (`:1642`, `:3407`). Two client schemas change too:
+
+- The MCP `artifactRecordSchema` is `.strict()` (`src/mcp/artifact-mcp-server.ts:131`). Without `path`, structured results fail validation.
+- The client `artifactSchema` (`src/client/file-publication-client.ts:75`) drops unknown fields. It gains `path` so that CLI output shows it.
+
+### Request routing
+
+`parseSameHostContentRequest` (`src/http/same-host-content.ts:60`) stays the one pure predicate behind both the isolation wrapper (`src/http/create-http-app.ts:706`) and the content router (`:717`). It gains a third variant:
+
+```ts
+/** A request whose leading segments may name an artifact path. */
+export interface SameHostPathRequest {
+  /** Prefixes of the request path that are valid artifact paths, shortest first, at most 6. */
+  readonly candidates: readonly [string, ...string[]];
+  readonly kind: "path";
+  readonly requestUrl: URL;
+}
+```
+
+The first segment picks the form, in this order:
+
+| First segment | Form | Lookup |
+| --- | --- | --- |
+| `v` | Version, unchanged | None |
+| Matches the folder pattern (`src/http/same-host-content.ts:13`) | Folder, unchanged | `resolvePublicArtifact` by ID |
+| Empty, a reserved root, or not a valid path segment | Application route | None |
+| Any other valid path segment | Path | One indexed query |
+
+The candidates are the prefixes `s1`, `s1/s2`, and so on, up to 6 segments. They stop at the first segment that is not valid, such as `index.html` or the empty segment after a trailing slash. `/2026/10/agent-console/shots/a.jpg` has the candidates `2026`, `2026/10`, `2026/10/agent-console`, and `2026/10/agent-console/shots`.
+
+The router calls a new `ContentAccessService.resolvePublicArtifactPath(candidates)`. That calls a new repository method, `findArtifactByPath(candidates)`, which runs `SELECT id, path FROM artifacts WHERE path IN (...) AND deleted_at IS NULL` on the partial unique index. It then reuses `resolvePublicArtifact` (`src/application/content-access.ts:409`). Paths are prefix-free, so at most one row comes back. The router then answers in one of four ways:
+
+- **No row.** The router calls `next()`. No application route owns the segment, so `app.notFound` answers 404 `NOT_FOUND` (`src/http/create-http-app.ts:2531`), as it does for any unknown path today. The isolation wrapper still adds the sandbox headers, because the predicate claimed the URL.
+- **An `account_required` artifact.** `resolvePublicArtifact` fails with `ContentSessionRequired`, which is 401 `CONTENT_NOT_PUBLIC`, as for folders.
+- **A request that ends at the path with no slash**, such as `/2026/10/agent-console?x=1`. The router answers 308 to `/2026/10/agent-console/?x=1`, so relative URLs resolve inside the artifact.
+- **Anything else.** The remaining segments become the in-version URL, and `serveVersionContent` runs as it does for folders (`:3574`). Range, ETag, HEAD, 405, and the SPA fallback come with it.
+
+A new `serveArtifactPath` sits next to `serveArtifactFolder` (`:3559`). Both forms get their `{slashMissing, versionUrl}` from `same-host-content.ts`, so the two cannot drift apart.
+
+The cost per request was counted from the code, not measured. An application route pays only for the pure classifier, as today. A path hit costs one indexed query more than a folder hit: 5 queries on Postgres and 6 statements on SQLite, against 4 and 5 for a folder. A miss costs one indexed query. A scanner probing `/wp-admin/` pays that query, which is acceptable on a VPN.
+
+A new `artifactContentRoot(artifact)` in `same-host-content.ts` returns `/<path>/` when the artifact has a path, else `/<folder>/`, else `null`. `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`) and the redirect guard of `/artifacts/:artifactId` (`src/http/create-http-app.ts:2518`) both call it. `links.artifact` therefore prefers the path at all 11 call sites. Each site passes a full artifact record (`grep -n "artifactBrowserUrl(" src`), so none needs an edit. An artifact that has a path still answers at its folder URL, with no redirect, because no response ever returned that URL as its link.
+
+### Validation and reserved segments
+
+`parseArtifactPath(raw)` lives in `src/http/same-host-content.ts`, next to the folder pattern and the classifier, so the publish rule and the routing rule read the same constants. It removes one leading and one trailing `/`, then requires:
+
+- 1 to 6 segments joined by `/`, at most 200 characters in all.
+- Each segment matches `^[a-z0-9][a-z0-9-]*$`.
+- The first segment is not in `reservedPathRoots` and does not match the folder pattern.
+
+Uppercase is rejected, not folded, because a folded path is a URL the publisher never typed. Each failure throws `InvalidArtifactPath` (422 `INVALID_INPUT`) with a message that names the segment, for example `The first path segment "api" is reserved by the application.` A Zod refinement would lose that message, because the Zod handler replaces every message with "The request does not match the API contract." (`src/http/create-http-app.ts:2567`).
+
+`reservedPathRoots` is the one list of reserved first segments: `administration`, `api`, `artifacts`, `assets`, `auth`, `health`, `mcp`, `projects`, `ready`, `review`, `review-frame`, `v`, and `workbench`. `.well-known` and the empty root fail the segment grammar, so they need no entry. The classifier and `parseArtifactPath` both read the list.
+
+The route-table walk in FRK-003-F (`tests/conformance/frk-003-artifact-folders.test.ts:153`) gains one assertion: every registered first segment that is a valid path segment is in `reservedPathRoots`. A route that upstream adds later fails CI until the fork reserves it. Reserving it hides every artifact whose path starts with that segment, although each one still answers at its folder URL. Before merging such an upstream change, list the affected rows with `SELECT path FROM artifacts WHERE path = '<root>' OR path LIKE '<root>/%'`.
+
+Paths exist only in path mode. A new `assertArtifactPathsAvailable(contentDomain)`, modeled on `assertCookieSessionsAvailable` (`src/http/same-host-content.ts:134`), throws `CapabilityUnavailable` when a content domain is set. Host mode has no route that could serve a path, and a stored but unserved field would hide the mistake.
+
+### API, CLI, and MCP
+
+- **HTTP.** The `new_artifact` target of the commit body (`src/http/create-http-app.ts:203`) gains `path: z.string().min(1).max(200).optional()`. The commit route (`:2287`) calls `assertArtifactPathsAvailable` and `parseArtifactPath`, then passes `path: string | null` on. The `new_version` target stays `.strict()`, so a path there is 422.
+- **Application.** `CommitStagedUploadTarget` (`src/application/staged-upload.ts:69`) and `PublishPreparedNewArtifactCommand` (`src/application/publish-artifact.ts:55`) gain `path: string | null`. `publishPreparedNew` (`:217`) puts it in the digest and the commit command.
+- **MCP.** The `new_artifact` target of `artifact_commit_upload` (`src/mcp/artifact-mcp-server.ts:1261`) gains the same optional `path`, described as "Optional readable path such as 2026/10/report. 1 to 6 lowercase segments, served at /<path>/ and kept by new versions." The handler makes the same two calls.
+- **CLI.** `publish --path 2026/10/agent-console`. `FilePublicationTarget` (`src/client/file-publication-client.ts:187`) and `effectiveCommitTarget` (`:385`) carry it. The CLI does not validate it, so the operator reads the server's message. The new-version guard (`src/cli/publish-command.ts:145`) becomes "--name, --path, --public, and --tag apply only when creating a new artifact." `prepareFilePublication` (`:309`) already hashes the whole target into the operation digest, so a retried command reuses its idempotency key.
+- **Responses.** Every artifact record carries `path`, and `links.artifact` is `/<path>/` when it is set.
+- **No rename.** Changing a path needs a management route, an MCP tool, a CLI command, an action record, and a rule for the old URL. That is not free.
+- **Docs.** `docs/cli.md`, `docs/mcp.md`, `skills/artifact-server/references/artifact-operations.md`, and the migration steps in `docs/fork/RUNBOOK.md`.
+
+Suppose a report's HTML points at its sibling folder as `agent-console/shots/a.jpg`. That link breaks at `/2026/10/agent-console/`, because the document's base URL is now the artifact itself. Stage each report as a directory that holds `index.html` and the sibling folder's contents, and remove the `agent-console/` prefix from those links. This is inferred from the layout in the brief and was not checked against the 29 files.
+
+### Follow-up, not planned: folder index pages
+
+A path miss could list the public artifacts under it, so `/2026/10/` would show the October reports. Paths are prefix-free, so `2026/10` can never be both an artifact and an index. The work is:
+
+- One repository method per backend, `listPublicArtifactsUnder(prefix, limit)`, a range scan on the same index. D1 returns an empty list.
+- One server-rendered HTML page with escaping. The sandbox headers already apply.
+- One FRK requirement with its tests.
+
+The estimate is about 150 source lines and 100 test lines, in one pull request, for half a day of work. An index makes every public artifact easy to find, so whether to build it is the operator's call.
+
+### Commits
+
+Branch `feat/artifact-paths`, one pull request. Each commit adds its ledger entry together with its tests, because `scripts/check-conformance-test-ids.rb` rejects unknown IDs. Local checks are single test files only. The Postgres checks run in CI.
+
+| # | Commit | Check |
+| --- | --- | --- |
+| 1 | `docs(fork): design readable artifact paths` | This section. Its citations resolve at `b644213`. |
+| 2 | `feat(storage): add the artifact path column` | SQLite: a new case in `tests/conformance/storage-migration.test.ts` builds a schema-12 database by hand, as the case at `:121` does, starts a server on it, and reads `user_version` 13, the new index, and `path: null` on its artifacts. Postgres (CI): `tests/integration/external-storage-runtime.test.ts:274` and `:464` import `requiredPostgresSchemaVersion` and migrate to it, so `0012` runs. `pnpm typecheck` covers all three backends. |
+| 3 | `feat(publish): claim a readable path when an artifact is created` | FRK-006 in `tests/conformance/frk-006-artifact-paths.test.ts`. B: an HTTP publish with `/2026/10/agent-console/` stores `2026/10/agent-console`, a new version keeps it, and the same idempotency key replays. F: an equal, ancestor, or descendant path is 409. Two concurrent creates of one path give one 201 and one 409. Reserved, folder-shaped, uppercase, empty-segment, and 7-segment paths are 422 with their messages. A path on `new_version` is 422. A host-mode server answers `CapabilityUnavailable`. A deleted artifact frees its path. The FRK-003-F walk gains the reserved-root assertion. CI: a Postgres foundation case in which two processes race for one path. |
+| 4 | `feat(http): serve artifacts at their readable paths` | FRK-007 in `tests/conformance/frk-007-artifact-path-serving.test.ts`. B: the entry, a nested asset, and the SPA fallback at the path. A new version at the same URL. `links.artifact` over HTTP and MCP. `/artifacts/:artifactId` answers 302 to the path. The folder URL still serves. The sandbox and CORS headers appear on 200, 206, 304, 404, and HEAD. F: `account_required` is 401. A missing slash is 308 and keeps its query. An unknown path is 404 `NOT_FOUND`. `/api/v1/session` carries no sandbox header. A deleted artifact's path is 404. POST is 405. |
+| 5 | `feat(publish): accept a path from the CLI and MCP` | FRK-006-B gains an MCP commit and a spawned CLI `publish --path`, following `callMcpTool` and `publishOverCli` in `tests/conformance/frk-005-public-default.test.ts:192` and `:231`. `--path` together with `--artifact` fails with the guard message. |
+| 6 | `docs: document readable artifact paths` | The four docs list `--path` and the MCP field, and every command matches `publish --help`. |
+
+From this commit on, the fork owns migration numbers. Upstream's next migrations will also be Postgres `0012` and SQLite 13. Merging one means renumbering it after the fork's, because deployments will already have applied the fork's `0012`.
+
+### Open decisions
+
+1. Paths are prefix-free. The alternative, nesting with longest-prefix matching, fails silently when a new path hides files.
+2. A deleted artifact frees its path. The alternative keeps the claim forever and leaves no way to reuse a path.
+3. A path sent to a host-mode server is refused, not stored.
+4. An artifact that has a path still answers at its folder URL, with no redirect.
+
 ## Decisions
 
 All seven open decisions from revision 1 are settled:

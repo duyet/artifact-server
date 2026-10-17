@@ -71,6 +71,7 @@ export type CommitStagedUploadTarget =
     readonly accessSetting: AccessSetting;
     readonly kind: "new_artifact";
     readonly name: string;
+    readonly path: string | null;
     readonly tags?: readonly string[];
   }
   | {
@@ -393,6 +394,7 @@ function makeStagedUploadService(
             idempotencyKey: command.idempotencyKey,
             manifest: upload.manifest,
             name: command.target.name,
+            path: command.target.path,
             principal: command.principal,
             projectId: project.id,
             source,

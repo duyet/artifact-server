@@ -51,6 +51,7 @@ import {
   type ArtifactActionRecord,
   type ArtifactDeletion,
   type ArtifactPage,
+  type ArtifactPathMatch,
   type ArtifactRecord,
   type ArtifactState,
   type ArtifactTombstone,
@@ -129,6 +130,7 @@ import {
 } from "../core/publishing-limits.js";
 import { createManifest } from "../manifest/create-manifest.js";
 import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
+import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
 import type {
   ListPublicLinks,
   PublicLinkInventoryPage,
@@ -201,6 +203,7 @@ const publishedRowSchema = z.object({
   artifactDeletedAt: z.string().nullable(),
   artifactId: z.string(),
   artifactName: z.string(),
+  artifactPath: z.string().nullable(),
   contentToken: z.string(),
   currentVersionId: z.string(),
   entryPath: z.string(),
@@ -255,8 +258,10 @@ const artifactRowSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  path: z.string().nullable(),
   projectId: z.string(),
 });
+const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactListRowSchema = artifactRowSchema.extend({
   commentCount: z.number().int().nonnegative(),
   versionCount: z.number().int().positive(),
@@ -1315,14 +1320,15 @@ export class SqliteArtifactRepository implements
       command.manifest.digest,
       command.createdAt,
     );
+    if (command.path !== null) this.#assertArtifactPathFree(command.path);
 
     this.#database
       .prepare(
         `INSERT INTO artifacts (
           id, project_id, name, search_name, access_setting,
-          current_version_id, created_at, deleted_at,
+          current_version_id, created_at, deleted_at, path,
           source_path, source_fingerprint, source_status, source_verified_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
       )
       .run(
         command.artifactId,
@@ -1331,6 +1337,7 @@ export class SqliteArtifactRepository implements
         normalizeArtifactSearchText(command.name),
         command.accessSetting,
         command.createdAt,
+        command.path,
         binding === null ? null : binding.path,
         binding === null ? null : binding.fingerprint,
         binding === null ? null : sourceFreshnessStates.inSync,
@@ -1379,6 +1386,23 @@ export class SqliteArtifactRepository implements
     );
 
     return this.#readPublishedVersion(command.projectId, command.versionId, false);
+  }
+
+  // The caller's BEGIN IMMEDIATE transaction holds the only writer, so no
+  // other claim can land between this check and the insert.
+  #assertArtifactPathFree(path: string): void {
+    const claim = artifactPathClaim(path);
+    const placeholders = claim.lineage.map(() => "?").join(", ");
+    const row = this.#database
+      .prepare(
+        `SELECT path FROM artifacts
+         WHERE path IS NOT NULL AND deleted_at IS NULL
+           AND (path IN (${placeholders}) OR (path >= ? AND path < ?))
+         LIMIT 1`,
+      )
+      .get(...claim.lineage, claim.descendants.from, claim.descendants.to);
+    const existing = z.object({path: z.string()}).nullable().parse(row ?? null);
+    if (existing !== null) throw artifactPathTaken(path, existing.path);
   }
 
   #applyVersionCommit(
@@ -1756,6 +1780,21 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  findArtifactByPath(
+    candidates: readonly string[],
+  ): Promise<ArtifactPathMatch | null> {
+    return Promise.resolve().then(() => {
+      const placeholders = candidates.map(() => "?").join(", ");
+      const row = this.#database
+        .prepare(
+          `SELECT id, path FROM artifacts
+           WHERE path IN (${placeholders}) AND deleted_at IS NULL`,
+        )
+        .get(...candidates);
+      return artifactPathMatchSchema.nullable().parse(row ?? null);
+    });
+  }
+
   findVersionRecord(
     projectId: string,
     artifactId: string,
@@ -1862,6 +1901,7 @@ export class SqliteArtifactRepository implements
               id,
               project_id AS projectId,
               name,
+              path,
               access_setting AS accessSetting,
               current_version_id AS currentVersionId,
               created_at AS createdAt,
@@ -1930,6 +1970,7 @@ export class SqliteArtifactRepository implements
             artifact.id AS artifactId,
             artifact.project_id AS projectId,
             artifact.name AS artifactName,
+            artifact.path AS artifactPath,
             artifact.access_setting AS accessSetting,
             artifact.current_version_id AS currentVersionId,
             artifact.created_at AS artifactCreatedAt,
@@ -1977,6 +2018,7 @@ export class SqliteArtifactRepository implements
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        path: row.artifactPath,
         projectId: row.projectId,
       })));
       return publicLinkPageFromRows(parsedRows, artifacts, command.limit);
@@ -2658,6 +2700,7 @@ export class SqliteArtifactRepository implements
           id,
           project_id AS projectId,
           name,
+          path,
           access_setting AS accessSetting,
           current_version_id AS currentVersionId,
           created_at AS createdAt,
@@ -2680,6 +2723,7 @@ export class SqliteArtifactRepository implements
           id,
           project_id AS projectId,
           name,
+          path,
           access_setting AS accessSetting,
           current_version_id AS currentVersionId,
           created_at AS createdAt,
@@ -4901,6 +4945,7 @@ export class SqliteArtifactRepository implements
     this.#widenRegisteredAgentsIfNeeded();
     this.#addSourceBindingColumnsIfMissing();
     this.#addGitHistoryMirrorTablesIfMissing();
+    this.#addArtifactPathIfMissing();
     this.#database.exec(`
       CREATE INDEX IF NOT EXISTS projects_active_created
         ON projects (archived_at, created_at, id);
@@ -5023,6 +5068,20 @@ export class SqliteArtifactRepository implements
         ON git_history_jobs (installation_id, artifact_id, state);
       CREATE INDEX IF NOT EXISTS git_history_mappings_artifact
         ON git_history_mappings (installation_id, artifact_id, status);
+    `);
+  }
+
+  // `path` is the readable URL path an artifact claims at creation. It is
+  // unrelated to `source_path`, the file a linked artifact reads from disk.
+  // The index is created on every start rather than behind user_version,
+  // because the identity repository stamps the same version.
+  #addArtifactPathIfMissing(): void {
+    if (!this.#tableColumns("artifacts").includes("path")) {
+      this.#database.exec("ALTER TABLE artifacts ADD COLUMN path TEXT");
+    }
+    this.#database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS artifacts_live_path
+        ON artifacts (path) WHERE path IS NOT NULL AND deleted_at IS NULL
     `);
   }
 
@@ -5585,6 +5644,7 @@ export class SqliteArtifactRepository implements
           a.id AS artifactId,
           a.project_id AS projectId,
           a.name AS artifactName,
+          a.path AS artifactPath,
           a.access_setting AS accessSetting,
           a.current_version_id AS currentVersionId,
           a.created_at AS artifactCreatedAt,
@@ -5610,6 +5670,7 @@ export class SqliteArtifactRepository implements
       deletedAt: parsed.artifactDeletedAt,
       id: parsed.artifactId,
       name: parsed.artifactName,
+      path: parsed.artifactPath,
       projectId: parsed.projectId,
       tags: this.#readTags(parsed.artifactId),
     };

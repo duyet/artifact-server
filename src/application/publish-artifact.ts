@@ -4,9 +4,11 @@ import { Context, DateTime, Effect, Layer, Schema } from "effect";
 
 import {
   ArtifactNotFound,
+  type ArtifactPathTaken,
   type ArtifactRepositoryFailure,
   type AuthorizationDenied,
   type BlobStorageFailure,
+  type CapabilityUnavailable,
   type IdempotencyConflict,
   InvalidArtifactName,
   type InvalidArtifactTags,
@@ -58,6 +60,8 @@ export interface PublishPreparedNewArtifactCommand {
   readonly idempotencyKey: string;
   readonly manifest: CanonicalManifest;
   readonly name: string;
+  /** A path already normalized by `parseArtifactPath`, or null. */
+  readonly path: string | null;
   readonly principal: Principal;
   readonly projectId: string;
   readonly source: PublicationSource;
@@ -84,6 +88,8 @@ type SourceReadinessFailure =
   | ArtifactRepositoryFailure;
 
 type CommitNewFailure =
+  | ArtifactPathTaken
+  | CapabilityUnavailable
   | IdempotencyConflict
   | ProjectArchived
   | SourceReadinessFailure;
@@ -141,6 +147,8 @@ export type PublishArtifactFailure =
   | IdempotencyConflict
   | SourceReadinessFailure
   | ArtifactNotFound
+  | ArtifactPathTaken
+  | CapabilityUnavailable
   | PublishConflict
   | ProjectArchived
   | BlobStorageFailure
@@ -233,6 +241,7 @@ function makePublishArtifactService(
       accessSetting: command.accessSetting,
       manifest: command.manifest,
       name,
+      path: command.path,
       principalId: command.principal.id,
       projectId: command.projectId,
       tags,
@@ -263,6 +272,7 @@ function makePublishArtifactService(
       inputDigest,
       manifest: command.manifest,
       name,
+      path: command.path,
       principalId: command.principal.id,
       projectId: command.projectId,
       authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
@@ -340,6 +350,7 @@ interface NewArtifactDigestInput {
   readonly accessSetting: AccessSetting;
   readonly manifest: CanonicalManifest;
   readonly name: string;
+  readonly path: string | null;
   readonly principalId: string;
   readonly projectId: string;
   readonly tags: readonly string[];
@@ -354,14 +365,19 @@ interface ArtifactVersionDigestInput {
 }
 
 function newArtifactInputDigest(input: NewArtifactDigestInput): string {
-  const canonicalInput = JSON.stringify({
+  const fields = {
     accessSetting: input.accessSetting,
     manifestDigest: input.manifest.digest,
     name: input.name,
     principalId: input.principalId,
     projectId: input.projectId,
     tags: input.tags,
-  });
+  };
+  // A path-less create keeps the digest it had before paths existed, so its
+  // idempotency keys still replay after an upgrade.
+  const canonicalInput = JSON.stringify(
+    input.path === null ? fields : {...fields, path: input.path},
+  );
   return createHash("sha256").update(canonicalInput).digest("hex");
 }
 

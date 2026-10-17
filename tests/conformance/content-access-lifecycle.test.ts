@@ -284,6 +284,7 @@ async function publishPrivateArtifact(runtime: ApplicationRuntime) {
         accessSetting: "account_required",
         kind: "new_artifact",
         name: "Private content lifecycle fixture",
+        path: null,
       },
       uploadId: upload.id,
     })),

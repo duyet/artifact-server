@@ -94,7 +94,10 @@ import {
   versionBrowserUrl,
   versionFileBrowserUrl,
 } from "../http/artifact-http-links.js";
-import {assertCookieSessionsAvailable} from "../http/same-host-content.js";
+import {
+  assertCookieSessionsAvailable,
+  requestedArtifactPath,
+} from "../http/same-host-content.js";
 import {artifactServerFailureResponse} from "../http/artifact-http-failure.js";
 import {
   renderBundleMessage,
@@ -135,6 +138,7 @@ const artifactRecordSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  path: z.string().nullable(),
   projectId: z.string(),
   tags: z.array(z.string()),
 }).strict();
@@ -1264,6 +1268,9 @@ export function createArtifactMcpServer(
             ),
             kind: z.literal("new_artifact"),
             name: z.string().min(1).max(200),
+            path: z.string().min(1).max(200).optional().describe(
+              "Optional readable path such as 2026/10/report. 1 to 6 lowercase segments, served at /<path>/ and kept by new versions.",
+            ),
             tags: z.array(tagSchema).max(20).default([]),
           }).strict(),
           z.object({
@@ -1278,6 +1285,12 @@ export function createArtifactMcpServer(
       annotations: idempotentWriteAnnotations,
     },
     async ({idempotencyKey, projectId, target, uploadId}) => toolResult(async () => {
+      const commitTarget = target.kind === "new_artifact"
+        ? {
+          ...target,
+          path: requestedArtifactPath(target.path, dependencies.contentDomain),
+        }
+        : target;
       const published = await runMcpApplicationEffect(
         dependencies,
         StagedUploadService.use((uploads) =>
@@ -1285,7 +1298,7 @@ export function createArtifactMcpServer(
             idempotencyKey,
             principal: identity.principal,
             projectId,
-            target,
+            target: commitTarget,
             uploadId,
           })
         ),

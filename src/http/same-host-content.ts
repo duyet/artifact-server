@@ -1,10 +1,11 @@
 /**
  * Fork-owned knowledge of path mode: content served from the application
  * origin instead of per-version content hosts. Everything that names the `/v/`
- * prefix or the artifact folder shape lives here so upstream files only call in.
+ * prefix, the artifact folder shape, or the readable artifact path grammar
+ * lives here so upstream files only call in.
  */
 
-import {CapabilityUnavailable} from "../core/errors.js";
+import {CapabilityUnavailable, InvalidArtifactPath} from "../core/errors.js";
 
 const versionPathSegment = "v";
 const artifactIdPrefix = "art_";
@@ -15,6 +16,34 @@ const artifactFolderPattern = new RegExp(
 );
 const artifactIdPattern = new RegExp(`^${artifactIdPrefix}(${uuidSource})$`);
 const maxFolderSlugLength = 60;
+const artifactPathSegmentPattern = /^[a-z0-9][a-z0-9-]*$/u;
+const maxArtifactPathSegments = 6;
+const maxArtifactPathLength = 200;
+
+/**
+ * First path segments that belong to the application. An artifact path may
+ * not start with one, so no artifact can hide an application route.
+ */
+export const reservedPathRoots: ReadonlySet<string> = new Set([
+  "administration",
+  "api",
+  "artifacts",
+  "assets",
+  "auth",
+  "health",
+  "mcp",
+  "projects",
+  "ready",
+  "review",
+  "review-frame",
+  versionPathSegment,
+  "workbench",
+]);
+
+/** Whether one path segment fits the readable artifact path grammar. */
+export function isArtifactPathSegment(segment: string): boolean {
+  return artifactPathSegmentPattern.test(segment);
+}
 
 /** The path of one immutable version, or of one file inside it, in path mode. */
 export function sameHostVersionPath(
@@ -38,18 +67,31 @@ export interface SameHostVersionRequest {
   readonly versionUrl: URL;
 }
 
+/** A request split at the root of one artifact's current version. */
+export interface ArtifactRootTarget {
+  readonly slashMissing: boolean;
+  /** The request URL with its pathname relative to the artifact root. */
+  readonly versionUrl: URL;
+}
+
 /** One `/<folder>/<path>` request for the current version of a public artifact. */
-export interface SameHostFolderRequest {
+export interface SameHostFolderRequest extends ArtifactRootTarget {
   readonly artifactId: string;
   readonly folder: string;
   readonly kind: "folder";
-  readonly slashMissing: boolean;
-  /** The request URL with its pathname relative to the folder. */
-  readonly versionUrl: URL;
+}
+
+/** A request whose leading segments may name an artifact path. */
+export interface SameHostPathRequest {
+  /** Prefixes of the request path that are valid artifact paths, shortest first, at most 6. */
+  readonly candidates: readonly [string, ...string[]];
+  readonly kind: "path";
+  readonly requestUrl: URL;
 }
 
 export type SameHostContentRequest =
   | SameHostFolderRequest
+  | SameHostPathRequest
   | SameHostVersionRequest;
 
 /**
@@ -76,15 +118,33 @@ export function parseSameHostContentRequest(
     };
   }
   const folder = parseArtifactFolder(first);
-  if (folder === null) return null;
+  if (folder !== null) {
+    return {...folder, ...artifactRootTarget(requestUrl, 1), kind: "folder"};
+  }
+  if (reservedPathRoots.has(first) || !isArtifactPathSegment(first)) return null;
+  const candidates: [string, ...string[]] = [first];
+  let prefix = first;
+  for (const segment of segments.slice(2, maxArtifactPathSegments + 1)) {
+    if (!isArtifactPathSegment(segment)) break;
+    prefix = `${prefix}/${segment}`;
+    candidates.push(prefix);
+  }
+  return {candidates, kind: "path", requestUrl};
+}
+
+/** Split a path request at the artifact path that one of its candidates matched. */
+export function artifactPathTarget(
+  request: SameHostPathRequest,
+  path: string,
+): ArtifactRootTarget {
+  return artifactRootTarget(request.requestUrl, path.split("/").length);
+}
+
+function artifactRootTarget(requestUrl: URL, rootSegments: number): ArtifactRootTarget {
+  const segments = requestUrl.pathname.split("/");
   const versionUrl = new URL(requestUrl);
-  versionUrl.pathname = `/${segments.slice(2).join("/")}`;
-  return {
-    ...folder,
-    kind: "folder",
-    slashMissing: segments.length === 2,
-    versionUrl,
-  };
+  versionUrl.pathname = `/${segments.slice(rootSegments + 1).join("/")}`;
+  return {slashMissing: segments.length === rootSegments + 1, versionUrl};
 }
 
 /**
@@ -141,6 +201,71 @@ export function assertCookieSessionsAvailable(
   }
 }
 
+/**
+ * Readable paths are served only from the application origin. Host mode has no
+ * route that could serve one, so it refuses the path instead of storing it.
+ */
+function assertArtifactPathsAvailable(contentDomain: string | null): void {
+  if (contentDomain !== null) {
+    throw new CapabilityUnavailable({
+      message: "Readable artifact paths need a deployment without a content domain.",
+    });
+  }
+}
+
+/**
+ * Normalize a publisher's requested path, such as `/2026/10/report/`, to the
+ * stored form `2026/10/report`. The only way a path enters the server.
+ */
+export function parseArtifactPath(raw: string): string {
+  const path = raw.replace(/^\//u, "").replace(/\/$/u, "");
+  if (path.length > maxArtifactPathLength) {
+    throw new InvalidArtifactPath({
+      message: `An artifact path has at most ${maxArtifactPathLength} characters.`,
+    });
+  }
+  const segments = path.split("/");
+  if (segments.length > maxArtifactPathSegments) {
+    throw new InvalidArtifactPath({
+      message: `An artifact path has at most ${maxArtifactPathSegments} segments, and "${path}" has ${segments.length}.`,
+    });
+  }
+  for (const segment of segments) {
+    if (segment === "") {
+      throw new InvalidArtifactPath({
+        message: `The artifact path "${path}" has an empty segment.`,
+      });
+    }
+    if (!isArtifactPathSegment(segment)) {
+      throw new InvalidArtifactPath({
+        message: `The path segment "${segment}" may contain only lowercase letters, digits, and hyphens, and must not start with a hyphen.`,
+      });
+    }
+  }
+  const first = segments[0] ?? "";
+  if (reservedPathRoots.has(first)) {
+    throw new InvalidArtifactPath({
+      message: `The first path segment "${first}" is reserved by the application.`,
+    });
+  }
+  if (parseArtifactFolder(first) !== null) {
+    throw new InvalidArtifactPath({
+      message: `The first path segment "${first}" has the shape of an artifact folder.`,
+    });
+  }
+  return path;
+}
+
+/** The stored path for an optional path field of a create request. */
+export function requestedArtifactPath(
+  raw: string | undefined,
+  contentDomain: string | null,
+): string | null {
+  if (raw === undefined) return null;
+  assertArtifactPathsAvailable(contentDomain);
+  return parseArtifactPath(raw);
+}
+
 function folderSlug(name: string): string {
   return name
     .normalize("NFKD")
@@ -166,6 +291,18 @@ export function artifactFolder(
   if (uuid === undefined) return null;
   const slug = folderSlug(artifact.name);
   return slug === "" ? uuid : `${slug}-${uuid}`;
+}
+
+/**
+ * Where an artifact's current version is served in path mode: its readable
+ * path when it has one, else its folder. Null when it has neither.
+ */
+export function artifactContentRoot(
+  artifact: {readonly id: string; readonly name: string; readonly path: string | null},
+): string | null {
+  if (artifact.path !== null) return `/${artifact.path}/`;
+  const folder = artifactFolder(artifact);
+  return folder === null ? null : `/${folder}/`;
 }
 
 /** Read an artifact ID out of a path segment shaped like an artifact folder. */

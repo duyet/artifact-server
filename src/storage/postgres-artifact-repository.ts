@@ -41,6 +41,7 @@ import {
   type ArtifactActionRecord,
   type ArtifactDeletion,
   type ArtifactPage,
+  type ArtifactPathMatch,
   type ArtifactRecord,
   type ArtifactState,
   type ArtifactTombstone,
@@ -130,6 +131,7 @@ import {
   publicLinkInventoryRowSchema,
   publicLinkPageFromRows,
 } from "./public-link-inventory-row.js";
+import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
 import {
   gitHistoryCopyPolicyDigest,
   gitHistoryJobId,
@@ -229,8 +231,10 @@ const artifactRowSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  path: z.string().nullable(),
   projectId: z.string(),
 });
+const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactListRowSchema = artifactRowSchema.extend({
   commentCount: z.coerce.number().int().nonnegative(),
   versionCount: z.coerce.number().int().positive(),
@@ -254,6 +258,7 @@ const publishedRowSchema = z.object({
   artifactDeletedAt: z.string().nullable(),
   artifactId: z.string(),
   artifactName: z.string(),
+  artifactPath: z.string().nullable(),
   contentToken: z.string(),
   currentVersionId: z.string(),
   entryPath: z.string(),
@@ -1257,13 +1262,17 @@ export class PostgresArtifactRepository implements
           command.manifest.digest,
           command.createdAt,
         );
+        if (command.path !== null) {
+          yield* lockArtifactPaths(sql, installationId);
+          yield* this.#assertArtifactPathFree(command.path);
+        }
         yield* sql`INSERT INTO artifacts (
           installation_id, project_id, id, name, search_name, access_setting,
-          current_version_id, created_at, deleted_at
+          current_version_id, created_at, deleted_at, path
         ) VALUES (
           ${installationId}, ${command.projectId}, ${command.artifactId}, ${command.name},
           ${normalizeArtifactSearchText(command.name)}, ${command.accessSetting}, NULL,
-          ${command.createdAt}, NULL
+          ${command.createdAt}, NULL, ${command.path}
         )`;
         yield* this.#replaceTags(command.artifactId, command.tags);
         yield* this.#insertVersion(
@@ -1563,6 +1572,22 @@ export class PostgresArtifactRepository implements
     ));
   }
 
+  async findArtifactByPath(
+    candidates: readonly string[],
+  ): Promise<ArtifactPathMatch | null> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT id, path FROM artifacts
+         WHERE installation_id = $1 AND path = ANY($2::text[])
+           AND deleted_at IS NULL`,
+        [installationId, candidates],
+      );
+      return artifactPathMatchSchema.nullable().parse(rows[0] ?? null);
+    }));
+  }
+
   async findVersionRecord(
     projectId: string,
     artifactId: string,
@@ -1684,7 +1709,7 @@ export class PostgresArtifactRepository implements
       const limitPlaceholder = command.sort === "comments" ? "$8" : "$7";
       const rows = yield* sql.unsafe<object>(
         `SELECT * FROM (
-          SELECT id, project_id AS "projectId", name,
+          SELECT id, project_id AS "projectId", name, path,
             access_setting AS "accessSetting",
             current_version_id AS "currentVersionId",
             created_at AS "createdAt", deleted_at AS "deletedAt",
@@ -1742,6 +1767,7 @@ export class PostgresArtifactRepository implements
           artifact.id AS "artifactId",
           artifact.project_id AS "projectId",
           artifact.name AS "artifactName",
+          artifact.path AS "artifactPath",
           artifact.access_setting AS "accessSetting",
           artifact.current_version_id AS "currentVersionId",
           artifact.created_at AS "artifactCreatedAt",
@@ -1789,6 +1815,7 @@ export class PostgresArtifactRepository implements
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        path: row.artifactPath,
         projectId: row.projectId,
       })));
       return publicLinkPageFromRows(parsedRows, artifacts, command.limit);
@@ -3361,6 +3388,29 @@ export class PostgresArtifactRepository implements
     });
   }
 
+  #assertArtifactPathFree(path: string) {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const claim = artifactPathClaim(path);
+      const rows = yield* sql.unsafe<object>(
+        `SELECT path FROM artifacts
+         WHERE installation_id = $1
+           AND path IS NOT NULL AND deleted_at IS NULL
+           AND (path = ANY($2::text[]) OR (path >= $3 AND path < $4))
+         LIMIT 1`,
+        [
+          installationId,
+          claim.lineage,
+          claim.descendants.from,
+          claim.descendants.to,
+        ],
+      );
+      const existing = z.object({path: z.string()}).nullable().parse(rows[0] ?? null);
+      if (existing !== null) yield* artifactPathTaken(path, existing.path);
+    });
+  }
+
   #assertProjectActive(
     projectId: string,
   ) {
@@ -3414,7 +3464,7 @@ export class PostgresArtifactRepository implements
     return Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
       const rows = yield* sql.unsafe<object>(
-        `SELECT id, project_id AS "projectId", name,
+        `SELECT id, project_id AS "projectId", name, path,
           access_setting AS "accessSetting",
           current_version_id AS "currentVersionId",
           created_at AS "createdAt", deleted_at AS "deletedAt"
@@ -3569,6 +3619,7 @@ export class PostgresArtifactRepository implements
       const sql = yield* SqlClient;
       const rows = yield* sql.unsafe<object>(
         `SELECT a.id AS "artifactId", a.name AS "artifactName",
+          a.path AS "artifactPath",
           a.project_id AS "projectId",
           a.access_setting AS "accessSetting",
           a.current_version_id AS "currentVersionId",
@@ -3595,6 +3646,7 @@ export class PostgresArtifactRepository implements
           deletedAt: parsed.artifactDeletedAt,
           id: parsed.artifactId,
           name: parsed.artifactName,
+          path: parsed.artifactPath,
           projectId: parsed.projectId,
           tags: yield* this.#readTags(parsed.artifactId),
         },
@@ -4829,6 +4881,17 @@ function lockAgentClaim(
 ): Effect.Effect<readonly object[], unknown> {
   return sql`SELECT pg_advisory_xact_lock(
     hashtextextended(${`agent-claim:${installationId}:${agentId}`}, 0)
+  )`;
+}
+
+// Paths are prefix-free across the installation, so every create that
+// claims one serializes on a single lock while it checks and inserts.
+function lockArtifactPaths(
+  sql: SqlClient,
+  installationId: string,
+): Effect.Effect<readonly object[], unknown> {
+  return sql`SELECT pg_advisory_xact_lock(
+    hashtextextended(${`${installationId}:artifact-paths`}, 0)
   )`;
 }
 

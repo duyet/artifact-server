@@ -187,6 +187,7 @@ function artifactFixture(): ArtifactRecord {
     deletedAt: null,
     id: "artifact-1",
     name: "Authorization fixture",
+    path: null,
     projectId: "prj_default",
     tags: [],
   };

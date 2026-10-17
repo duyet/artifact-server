@@ -5,6 +5,7 @@ export const errorCodes = {
   agentNotFound: "AGENT_NOT_FOUND",
   artifactNotFound: "ARTIFACT_NOT_FOUND",
   artifactMutationConflict: "ARTIFACT_MUTATION_CONFLICT",
+  artifactPathTaken: "ARTIFACT_PATH_TAKEN",
   authorizationDenied: "AUTHORIZATION_DENIED",
   authenticationRequired: "AUTHENTICATION_REQUIRED",
   commentNotFound: "COMMENT_NOT_FOUND",
@@ -60,6 +61,12 @@ export class ArtifactNotFound extends Schema.TaggedError<ArtifactNotFound>()(
 /** The artifact changed after a management client read its current state. */
 export class ArtifactMutationConflict extends Schema.TaggedError<ArtifactMutationConflict>()(
   "ArtifactMutationConflict",
+  messageField,
+) {}
+
+/** A live artifact already holds the requested path, an ancestor, or a descendant. */
+export class ArtifactPathTaken extends Schema.TaggedError<ArtifactPathTaken>()(
+  "ArtifactPathTaken",
   messageField,
 ) {}
 
@@ -174,6 +181,12 @@ export class VersionNotFound extends Schema.TaggedError<VersionNotFound>()(
 /** An artifact name cannot be parsed into the supported domain value. */
 export class InvalidArtifactName extends Schema.TaggedError<InvalidArtifactName>()(
   "InvalidArtifactName",
+  messageField,
+) {}
+
+/** A requested artifact path does not meet the readable path grammar. */
+export class InvalidArtifactPath extends Schema.TaggedError<InvalidArtifactPath>()(
+  "InvalidArtifactPath",
   messageField,
 ) {}
 
@@ -376,6 +389,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "disconnectRegisteredAgent",
       "findAgentDispatch",
       "findArtifact",
+      "findArtifactByPath",
       "findArtifactForAdministration",
       "findGitHistoryRepository",
       "findVersionRecord",
@@ -474,6 +488,7 @@ const artifactServerFailureSchema = Schema.Union([
   AgentNotFound,
   ArtifactNotFound,
   ArtifactMutationConflict,
+  ArtifactPathTaken,
   AuthenticationRequired,
   CommentNotFound,
   CommentResolved,
@@ -490,6 +505,7 @@ const artifactServerFailureSchema = Schema.Union([
   ContentBootstrapRejected,
   ContentSessionRequired,
   InvalidArtifactName,
+  InvalidArtifactPath,
   InvalidProjectName,
   InvalidArtifactTags,
   InvalidIdempotencyKey,

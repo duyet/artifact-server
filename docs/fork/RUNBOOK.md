@@ -146,13 +146,37 @@ pnpm artifactserver publish ./report \
 
 `--public` is not needed. With no login, new artifacts default to public links. Against a server with login, the default stays `account_required`.
 
-`links.artifact` is the link to share, for example `https://artifacts.example.internal/q3-cost-report-<uuid>/`. It always serves the current version, and a new version keeps the same link. Anyone who can reach the host and has the link can read it. Agents that call `/mcp` send the same key as a bearer token.
+`links.artifact` is the link to share, for example `https://artifacts.example.internal/q3-cost-report-<uuid>/`, or `https://artifacts.example.internal/<path>/` when the artifact was published with `--path`. It always serves the current version, and a new version keeps the same link. Anyone who can reach the host and has the link can read it. Agents that call `/mcp` send the same key as a bearer token.
 
 Artifact pages run in a CSP sandbox on the application host. Tell publishers three things.
 
 - Build with relative URLs, for example `vite build --base ./`. A root-absolute URL such as `/assets/app.js` hits the application, not the artifact.
 - `localStorage`, `sessionStorage`, IndexedDB, and cookies throw. Wrap them in `try`.
 - Reload after a publish if a page mixes two versions.
+
+### Move the static reports
+
+Each report in `docs/artifacts/<yyyy>/<mm>/<slug>.html` keeps a URL of the same shape, such as `https://artifacts.example.internal/2026/10/agent-console/`. Publish each one with `--path <yyyy>/<mm>/<slug>`.
+
+1. Stage the report as a directory. Copy `<slug>.html` to `index.html`, and copy the contents of its sibling folder `<slug>/`, if there is one, next to it.
+2. Remove the `<slug>/` prefix from links into that folder. The page is served at `/<yyyy>/<mm>/<slug>/`, so the document's base URL is the artifact itself, and `agent-console/shots/a.jpg` must become `shots/a.jpg`.
+3. Publish the directory.
+
+   ```sh
+   pnpm artifactserver publish ./staged/agent-console \
+     --server https://artifacts.example.internal \
+     --token-file ./api-token \
+     --name "Agent console" \
+     --path 2026/10/agent-console | jq -r '.links.artifact'
+   ```
+
+   The command prints `https://artifacts.example.internal/2026/10/agent-console/`.
+
+Step 2 is inferred from the report layout and was not checked against all 29 files. Open each published report and check that its images load.
+
+A publish fails with `ARTIFACT_PATH_TAKEN` when another live artifact holds the same path, an ancestor such as `2026/10`, or a descendant. A path cannot change. To move a report, delete the artifact and publish it again, because deletion frees the path. The folder link of an artifact with a path keeps working.
+
+A path is guessable, so anyone who can reach the host can read a report at its path.
 
 ## Backup and restore
 
