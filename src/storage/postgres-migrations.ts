@@ -722,6 +722,9 @@ const addArtifactOwner = Effect.gen(function*() {
         AND versions.artifact_id = artifacts.id
         AND versions.number = 1
     )`,
+    // artifacts carries a deferred foreign key, so the backfill queues
+    // trigger events that would make the next ALTER TABLE fail.
+    "SET CONSTRAINTS ALL IMMEDIATE",
     "ALTER TABLE artifacts ALTER COLUMN owner_principal_id SET NOT NULL",
     "ALTER TABLE versions ADD COLUMN publisher_display_name TEXT",
     `CREATE INDEX artifacts_owner_created

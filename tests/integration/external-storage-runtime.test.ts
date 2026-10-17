@@ -414,7 +414,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       ARTIFACT_SERVER_DATABASE_URL: migrationEnvironment.databaseUrl,
       ARTIFACT_SERVER_INSTALLATION_ID: identity.installationId,
     });
-    expect(migrated.exitCode).toBe(0);
+    expect(migrated.exitCode, migrated.output).toBe(0);
     expect(JSON.parse(migrated.output)).toMatchObject({
       compatibility: "current",
       currentVersion: requiredPostgresSchemaVersion,
