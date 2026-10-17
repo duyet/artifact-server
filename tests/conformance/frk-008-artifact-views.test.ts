@@ -7,12 +7,20 @@ import {z} from "zod";
 import {
   apiHeaders,
   createTestInstallation,
+  fetchVersion,
   removeTestInstallation,
   startTestServer,
   type RunningTestServer,
   type TestInstallation,
 } from "../support/runtime-harness.js";
-import {publishSite} from "../support/same-host-site.js";
+import {publishSite, spaShell} from "../support/same-host-site.js";
+
+/** The request headers a browser sends on one client-route navigation. */
+const navigation = {
+  Accept: "text/html",
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+};
 
 const viewCountsSchema = z.object({
   last7Days: z.number().int().nonnegative(),
@@ -153,9 +161,35 @@ describe("entry-document view counts", () => {
     expect(storedViewRows(installation, artifactId)).toEqual([
       {count: 4, day: today},
     ]);
-  });
 
-  test("FRK-008-F: assets, probes, misses, leases, and private artifacts add nothing, and the table names no viewer", async () => {
+    // An SPA client route that misses every file is one browser navigation
+    // that answers the entry document, so the same one-view rule counts it.
+    // Only the raw client sends a navigation's Sec-Fetch-Mode; undici's fetch
+    // replaces it with `cors`, which answers no fallback at all.
+    const spa = await publishSite(server, installation, {
+      accessSetting: "public_link",
+      entry: spaShell,
+      name: "Agent console SPA",
+      path: "2026/10/agent-console-spa",
+      routingMode: "spa",
+    });
+    const clientRoute = await fetchVersion(
+      server,
+      `${spa.links.artifact}settings/profile`,
+      "GET",
+      navigation,
+    );
+    expect(clientRoute.status).toBe(200);
+    expect(await clientRoute.text()).toBe(spaShell);
+    await server.flushArtifactViews();
+    expect(treeEntry(await readTree(server), "Agent console SPA").views)
+      .toEqual({last7Days: 1, last30Days: 1, total: 1});
+    expect(storedViewRows(installation, spa.artifact.id)).toEqual([
+      {count: 1, day: today},
+    ]);
+  }, 60_000);
+
+  test("FRK-008-F: assets, probes, misses, leases, private artifacts, and the home shell add nothing, and the table names no viewer", async () => {
     const publicSite = await publishSite(server, installation, {
       accessSetting: "public_link",
       name: "Agent console",
@@ -194,12 +228,34 @@ describe("entry-document view counts", () => {
     // A private artifact cannot be opened at all, so it cannot be counted.
     expect((await fetch(`${server.baseUrl}/2026/10/internal-ledger/`)).status)
       .toBe(401);
+    // The home shell is application UI shared by every artifact, so it is
+    // never anyone's entry document.
+    expect((await fetch(`${server.baseUrl}/`)).status).toBe(200);
+    expect((await fetch(`${server.baseUrl}/`)).status).toBe(200);
+    // A readable path of a static artifact that misses every file has no SPA
+    // entry to fall back to, so even one browser navigation is a plain 404.
+    expect((await fetchVersion(
+      server,
+      `${pathUrl}settings/profile`,
+      "GET",
+      navigation,
+    )).status).toBe(404);
 
     await server.flushArtifactViews();
     expect(storedViewRows(installation, publicSite.artifact.id)).toEqual([]);
     expect(storedViewRows(installation, privateSite.artifact.id)).toEqual([]);
     expect((await readTree(server)).artifacts.map((a) => a.name))
       .toEqual(["Agent console"]);
+
+    // One visible positive, so the negatives above are measured against a
+    // counter that works: a single entry GET lands exactly one row.
+    const counted = await fetch(pathUrl);
+    expect(counted.headers.getSetCookie()).toEqual([]);
+    expect(counted.headers.get("x-artifact-view-token")).toBeNull();
+    await server.flushArtifactViews();
+    expect(storedViewRows(installation, publicSite.artifact.id)).toEqual([
+      {count: 1, day: today},
+    ]);
 
     // The whole counter is three columns, so there is nowhere for an address,
     // a session, a referrer, or a user agent to be stored.
@@ -208,10 +264,5 @@ describe("entry-document view counts", () => {
       "day",
       "count",
     ]);
-    // A counted page gains no cookie and is handed no counting token, so the
-    // counter cannot follow the reader to a second deployment.
-    const entry = await fetch(pathUrl);
-    expect(entry.headers.getSetCookie()).toEqual([]);
-    expect(entry.headers.get("x-artifact-view-token")).toBeNull();
   });
 });

@@ -97,6 +97,8 @@ if (context.req.method === "GET" &&
 
 `requestedPath` is `""` for `/` and the manifest path otherwise (`src/manifest/create-manifest.ts:73`). `content.entryPath` is the version's declared entry document, which is why `VersionContent` carries it beside `entry`: `entry` is whichever manifest entry the request resolved to, so it equals `entryPath` for the page and differs from it for every asset.
 
+**SPA fallback counts.** A client route such as `/2026/10/agent-console/settings/profile` on an SPA names no file, but for a browser navigation it answers the entry document, so it is one page view. The gate above is written for exactly that rule: it counts one GET whenever the response carries the entry document (`content.entry.path === content.entryPath`), which covers the path, folder, version-URL, and fallback forms with one comparison and still excludes every asset, every HEAD probe, and every 404. FRK-008-B proves the fallback form: one client-route navigation lands exactly one view, and the same navigation on a static artifact is a plain 404 with no row.
+
 ### Written without blocking the response
 
 `record` is synchronous, in-memory, and total. It is a `Map` increment keyed by `` `${artifactId}\u0000${day}` `` and cannot fail, await, or touch a database. The content response never waits for a counter.

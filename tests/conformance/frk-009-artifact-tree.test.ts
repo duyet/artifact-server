@@ -15,6 +15,7 @@ import {
 } from "../support/runtime-harness.js";
 import {publishSite} from "../support/same-host-site.js";
 import {
+  commitStagedUpload,
   createStagedUpload,
   uploadEveryStagedFile,
 } from "../support/publishing.js";
@@ -178,7 +179,42 @@ describe("public artifact tree", () => {
       {count: 1, day: "2026-10-15"},
       {count: 2, day: "2026-10-17"},
     ]);
-  });
+
+    // The catalog caps at the 500 newest public artifacts and reports when a
+    // read is capped: an exactly-full read already says `truncated`, because
+    // a silent partial list would cost the reader an artifact they cannot
+    // discover any other way.
+    // Path claims race, so each artifact is claimed before the next one is
+    // sent; parallel commits could fight over the same writer boundaries.
+    for (let index = 1; index <= 496; index += 1) {
+      clock.instant = new Date(today.getTime() + index * 60_000);
+      // eslint-disable-next-line no-await-in-loop
+      await publishBulkArtifact(server, installation, index);
+    }
+    const uncapped = await readTree(server);
+    expect(uncapped.truncated).toBe(false);
+    expect(uncapped.artifacts.length).toBe(499);
+
+    clock.instant = new Date(today.getTime() + 497 * 60_000);
+    await publishBulkArtifact(server, installation, 497);
+    const exactlyFull = await readTree(server);
+    expect(exactlyFull.truncated).toBe(true);
+    expect(exactlyFull.artifacts.length).toBe(500);
+
+    clock.instant = new Date(today.getTime() + 498 * 60_000);
+    await publishBulkArtifact(server, installation, 498);
+    const capped = await readTree(server);
+    expect(capped.truncated).toBe(true);
+    // The window holds the newest 500: the last-published artifact leads it.
+    expect(capped.artifacts.length).toBe(500);
+    expect(capped.artifacts[0]?.path).toBe("2026/bulk/plant-0498");
+    // The oldest artifact fell off the end of the window, and the flat list
+    // stays newest first: every entry is at least as new as the next one.
+    expect(capped.artifacts.map((artifact) => artifact.name))
+      .not.toContain("Agent console");
+    const stamps = capped.artifacts.map((artifact) => artifact.updatedAt);
+    expect(stamps.toSorted().toReversed()).toEqual(stamps);
+  }, 120_000);
 
   test("FRK-009-F: a private or deleted artifact is absent, the endpoint needs no credential, and the application keeps its own", async () => {
     const publicSite = await publishSite(server, installation, {
@@ -205,6 +241,9 @@ describe("public artifact tree", () => {
 
     const anonymous = await fetch(`${server.baseUrl}/api/v1/public/tree`);
     expect(anonymous.status).toBe(200);
+    // Counts move between reads, so the browser revalidates instead of
+    // reusing a cached copy of the catalog.
+    expect(anonymous.headers.get("cache-control")).toBe("no-cache");
     // The catalog is application JSON, not artifact content, so it does not
     // carry the content sandbox.
     expect(anonymous.headers.get("content-security-policy") ?? "")
@@ -251,6 +290,46 @@ describe("public artifact tree", () => {
     })).status).toBe(200);
   });
 });
+
+/**
+ * Publish one single-file public artifact through the cheapest staged-upload
+ * path, claiming one unique bulk path.
+ */
+async function publishBulkArtifact(
+  server: RunningTestServer,
+  installation: TestInstallation,
+  index: number,
+): Promise<void> {
+  const bytes = new TextEncoder().encode(
+    `<!doctype html><title>Bulk report ${index}</title>`,
+  );
+  const files = [{
+    bytes,
+    mediaType: "text/html; charset=utf-8",
+    path: "index.html",
+  }];
+  const planned = await createStagedUpload(
+    server,
+    installation,
+    "index.html",
+    files,
+  );
+  await uploadEveryStagedFile(installation, planned.body, files);
+  const committed = await commitStagedUpload(
+    installation,
+    planned.body,
+    `frk-009-bulk-${String(index).padStart(4, "0")}`,
+    {
+      accessSetting: "public_link",
+      kind: "new_artifact",
+      name: "Bulk report",
+      path: `2026/bulk/plant-${String(index).padStart(4, "0")}`,
+    },
+  );
+  if (committed.response.status !== 201) {
+    throw new Error(`The bulk commit returned HTTP ${committed.response.status}.`);
+  }
+}
 
 /** Commit one new artifact at a path the application may refuse, and answer the status. */
 async function commitAtPath(
