@@ -7,22 +7,35 @@ import {
   type PublicLinkMutationResult,
   type PublicLinkPage,
 } from "@/api/client";
-import {ErrorPanel, PageHeader, StatePanel, StatusBadge} from "@/components/product";
+import {ButtonSpinner, ErrorPanel, PageHeader, StatePanel, StatusBadge} from "@/components/product";
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
-import {Button, ButtonLink} from "@/components/ui/button";
-import {Checkbox} from "@/components/ui/checkbox";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {Button, ButtonLink} from "@/components/ui/button";
+import {Card, CardContent, CardFooter} from "@/components/ui/card";
+import {Checkbox} from "@/components/ui/checkbox";
+import {FieldError} from "@/components/ui/field";
+import {Skeleton} from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {formatTimestamp} from "@/lib/presentation";
 
 const maximumBulkSize = 100;
@@ -247,10 +260,20 @@ export function PublicLinksScreen() {
 
   if (loading && pages.length === 0) {
     return (
-      <StatePanel
-        description="Loading active public links across every project."
-        title="Loading public links"
-      />
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          description="Loading active public links across every project."
+          eyebrow="Administration"
+          title="Public links"
+        />
+        <Card aria-busy="true">
+          <CardContent className="flex flex-col gap-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      </div>
     );
   }
   if (error !== null && pages.length === 0) {
@@ -258,7 +281,7 @@ export function PublicLinksScreen() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <PageHeader
         actions={(
           <Button onClick={() => void loadFirstPage()} type="button" variant="outline">
@@ -300,6 +323,7 @@ export function PublicLinksScreen() {
                   type="button"
                   variant="outline"
                 >
+                  {pending ? <ButtonSpinner /> : null}
                   {pending ? "Retrying…" : "Retry failed"}
                 </Button>
               )
@@ -317,172 +341,165 @@ export function PublicLinksScreen() {
         )
         : (
           <>
-            <section
-              aria-label="Bulk selection"
-              className="flex flex-col gap-3 border p-4 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={visibleItems.length === 0}
-                  onClick={() => selectItems(visibleItems, true)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Select visible ({visibleItems.length})
-                </Button>
-                <Button
-                  disabled={loadedItems.length === 0 || loadedItems.length > maximumBulkSize}
-                  onClick={() => selectItems(loadedItems, true)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {fullyLoaded ? "Select all" : "Select all loaded"} ({loadedItems.length})
-                </Button>
-                <Button
-                  disabled={selectedKeys.size === 0}
-                  onClick={() => setSelectedKeys(new Set())}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Clear selection
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm text-muted-foreground">
-                  {selectedItems.length} selected · maximum {maximumBulkSize}
-                </span>
-                <Button
-                  disabled={pending || selectedItems.length === 0}
-                  onClick={() => setConfirmation(selectedItems)}
-                  size="sm"
-                  type="button"
-                >
-                  Make {selectedItems.length} private
-                </Button>
-              </div>
-              <p className="basis-full text-xs leading-5 text-muted-foreground sm:order-3">
-                {fullyLoaded
-                  ? "All inventory pages are loaded, so Select all covers every listed public link."
-                  : "More inventory pages exist. Select all loaded never includes pages you have not visited."}
-                {loadedItems.length > maximumBulkSize
-                  ? ` Select visible or choose up to ${maximumBulkSize} links for one bulk change.`
-                  : ""}
-              </p>
-              {selectionMessage === null ? null : (
-                <p className="basis-full text-sm text-destructive sm:order-4" role="alert">
-                  {selectionMessage}
+            <Card role="region" aria-label="Bulk selection" size="sm">
+              <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={visibleItems.length === 0}
+                    onClick={() => selectItems(visibleItems, true)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Select visible ({visibleItems.length})
+                  </Button>
+                  <Button
+                    disabled={loadedItems.length === 0 || loadedItems.length > maximumBulkSize}
+                    onClick={() => selectItems(loadedItems, true)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {fullyLoaded ? "Select all" : "Select all loaded"} ({loadedItems.length})
+                  </Button>
+                  <Button
+                    disabled={selectedKeys.size === 0}
+                    onClick={() => setSelectedKeys(new Set())}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm text-muted-foreground">
+                    {selectedItems.length} selected · maximum {maximumBulkSize}
+                  </span>
+                  <Button
+                    disabled={pending || selectedItems.length === 0}
+                    onClick={() => setConfirmation(selectedItems)}
+                    size="sm"
+                    type="button"
+                  >
+                    Make {selectedItems.length} private
+                  </Button>
+                </div>
+              </CardContent>
+              <CardFooter className="flex-col items-start gap-1 text-xs leading-5 text-muted-foreground">
+                <p>
+                  {fullyLoaded
+                    ? "All inventory pages are loaded, so Select all covers every listed public link."
+                    : "More inventory pages exist. Select all loaded never includes pages you have not visited."}
+                  {loadedItems.length > maximumBulkSize
+                    ? ` Select visible or choose up to ${maximumBulkSize} links for one bulk change.`
+                    : ""}
                 </p>
-              )}
-            </section>
+                {selectionMessage === null ? null : <FieldError>{selectionMessage}</FieldError>}
+              </CardFooter>
+            </Card>
 
-            <div className="as-public-links-inventory">
-              <table aria-label="Public links inventory" className="as-public-links-table">
-                <colgroup>
-                  <col className="as-public-links-table__select-column" />
-                  <col className="as-public-links-table__artifact-column" />
-                  <col className="as-public-links-table__link-column" />
-                  <col className="as-public-links-table__actions-column" />
-                </colgroup>
-                <thead className="border-b bg-muted/50 text-xs tracking-widest text-muted-foreground uppercase">
-                  <tr>
-                    <th className="as-public-links-table__select-cell font-semibold">
-                      <Checkbox
-                        aria-label="Select all visible public links"
-                        checked={allVisibleSelected}
-                        onCheckedChange={(checked) => selectItems(visibleItems, checked)}
-                      />
-                    </th>
-                    <th className="font-semibold">Artifact</th>
-                    <th className="font-semibold">Public link</th>
-                    <th className="text-right font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleItems.length === 0
-                    ? (
-                      <tr className="as-public-links-table__empty-row">
-                        <td className="text-center text-muted-foreground" colSpan={4}>
-                          {currentPage?.nextCursor === null
-                            ? "Every public link on this page is now private. Return to a previous page to inspect the remaining loaded links."
-                            : "Every public link on this loaded page is now private. Continue to the next page to inspect older public links."}
-                        </td>
-                      </tr>
-                    )
-                    : visibleItems.map((item) => {
-                    const selected = selectedKeys.has(selectionKey(item));
-                    return (
-                      <tr className="as-public-links-table__row" key={selectionKey(item)}>
-                        <td className="as-public-links-table__select-cell">
-                          <Checkbox
-                            aria-label={`Select ${item.artifact.name}`}
-                            checked={selected}
-                            onCheckedChange={(checked) => selectItems([item], checked)}
-                          />
-                        </td>
-                        <td className="as-public-links-table__artifact-cell">
-                          <div className="as-public-links-table__artifact-heading">
-                            <a
-                              className="as-public-links-table__artifact-link"
-                              href={`/review?${new URLSearchParams({
-                                artifact: item.artifact.id,
-                                project: item.project.id,
-                              })}`}
-                            >
-                              {item.artifact.name}
-                            </a>
-                            {item.project.archivedAt === null
-                              ? null
-                              : <StatusBadge>Archived</StatusBadge>}
-                          </div>
-                          <p className="as-public-links-table__meta">{item.project.name}</p>
-                        </td>
-                        <td className="as-public-links-table__link-cell">
-                          <a
-                            className="as-public-links-table__url"
-                            href={item.links.public}
-                            rel="noreferrer"
-                            target="_blank"
-                            title={item.links.public}
-                          >
-                            {item.links.public}
-                          </a>
-                          <p className="as-public-links-table__meta">
-                            <span>Version {item.currentVersion.number}</span>
-                            <span aria-hidden="true"> · </span>
-                            <span>Saved {formatTimestamp(item.currentVersion.createdAt)}</span>
-                          </p>
-                        </td>
-                        <td className="as-public-links-table__actions-cell">
-                          <div className="as-public-links-table__actions">
-                            <ButtonLink
-                              href={item.links.public}
-                              rel="noreferrer"
-                              size="xs"
-                              target="_blank"
-                              variant="outline"
-                            >
-                              Open
-                            </ButtonLink>
-                            <Button
-                              disabled={pending}
-                              onClick={() => setConfirmation([item])}
-                              size="xs"
-                              type="button"
-                              variant="ghost"
-                            >
-                              Make private
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                    })}
-                </tbody>
-              </table>
-            </div>
+            <Card>
+              <CardContent className="px-0">
+                <Table aria-label="Public links inventory" className="table-fixed">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-10 pl-4">
+                        <Checkbox
+                          aria-label="Select all visible public links"
+                          checked={allVisibleSelected}
+                          onCheckedChange={(checked) => selectItems(visibleItems, checked)}
+                        />
+                      </TableHead>
+                      <TableHead className="w-[34%] pl-4 sm:w-1/3">Artifact</TableHead>
+                      <TableHead>Public link</TableHead>
+                      <TableHead className="w-24 pr-4 text-right sm:w-40">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleItems.length === 0
+                      ? (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell className="px-4 py-6 text-center whitespace-normal text-muted-foreground" colSpan={4}>
+                            {currentPage?.nextCursor === null
+                              ? "Every public link on this page is now private. Return to a previous page to inspect the remaining loaded links."
+                              : "Every public link on this loaded page is now private. Continue to the next page to inspect older public links."}
+                          </TableCell>
+                        </TableRow>
+                      )
+                      : visibleItems.map((item) => {
+                        const selected = selectedKeys.has(selectionKey(item));
+                        return (
+                          <TableRow data-state={selected ? "selected" : undefined} key={selectionKey(item)}>
+                            <TableCell className="pl-4">
+                              <Checkbox
+                                aria-label={`Select ${item.artifact.name}`}
+                                checked={selected}
+                                onCheckedChange={(checked) => selectItems([item], checked)}
+                              />
+                            </TableCell>
+                            <TableCell className="pl-4 overflow-hidden">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <a
+                                  className="truncate font-medium hover:underline"
+                                  href={`/review?${new URLSearchParams({
+                                    artifact: item.artifact.id,
+                                    project: item.project.id,
+                                  })}`}
+                                >
+                                  {item.artifact.name}
+                                </a>
+                                {item.project.archivedAt === null
+                                  ? null
+                                  : <StatusBadge>Archived</StatusBadge>}
+                              </div>
+                              <p className="truncate text-xs text-muted-foreground">{item.project.name}</p>
+                            </TableCell>
+                            <TableCell className="overflow-hidden pr-4">
+                              <a
+                                className="block truncate font-mono text-xs hover:underline"
+                                href={item.links.public}
+                                rel="noreferrer"
+                                target="_blank"
+                                title={item.links.public}
+                              >
+                                {item.links.public}
+                              </a>
+                              <p className="truncate text-xs text-muted-foreground">
+                                <span>Version {item.currentVersion.number}</span>
+                                <span aria-hidden="true"> · </span>
+                                <span>Saved {formatTimestamp(item.currentVersion.createdAt)}</span>
+                              </p>
+                            </TableCell>
+                            <TableCell className="pr-4">
+                              <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end sm:gap-2">
+                                <ButtonLink
+                                  href={item.links.public}
+                                  rel="noreferrer"
+                                  size="xs"
+                                  target="_blank"
+                                  variant="outline"
+                                >
+                                  Open
+                                </ButtonLink>
+                                <Button
+                                  disabled={pending}
+                                  onClick={() => setConfirmation([item])}
+                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  Make private
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
 
             <nav aria-label="Public links pagination" className="flex items-center justify-between">
               <Button
@@ -500,52 +517,40 @@ export function PublicLinksScreen() {
                 type="button"
                 variant="outline"
               >
+                {loading ? <ButtonSpinner /> : null}
                 {loading ? "Loading…" : "Next"}
               </Button>
             </nav>
           </>
         )}
 
-      <Dialog
+      <AlertDialog
         onOpenChange={(open) => {
           if (!open) setConfirmation([]);
         }}
         open={confirmation.length > 0}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
               Make {confirmation.length} public {confirmation.length === 1 ? "link" : "links"} private?
-            </DialogTitle>
-            <DialogDescription>
+            </AlertDialogTitle>
+            <AlertDialogDescription>
               New requests to successful items will require an admitted account. Copies already
-              downloaded or cached outside Artifact Server cannot be recalled.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-sm leading-6 text-muted-foreground">
-            Each item is checked against the current version shown when you selected it. If an
-            artifact changed, that item fails without changing its access and can be retried after
-            refreshing its version.
-          </p>
-          <DialogFooter>
-            <Button
-              disabled={pending}
-              onClick={() => setConfirmation([])}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={pending}
-              onClick={() => void confirmMutation()}
-              type="button"
-            >
+              downloaded or cached outside Artifact Server cannot be recalled. Each item is checked
+              against the current version shown when you selected it. If an artifact changed, that
+              item fails without changing its access and can be retried after refreshing its version.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={pending} onClick={() => void confirmMutation()}>
+              {pending ? <ButtonSpinner /> : null}
               {pending ? "Making private…" : "Make private"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -339,7 +339,7 @@ export function SettingsProject({
       />
       {error === null ? null : <ErrorPanel error={error} />}
 
-      <Card aria-labelledby="project-identity-heading">
+      <Card role="region" aria-labelledby="project-identity-heading">
         <CardHeader>
           <CardTitle aria-level={2} id="project-identity-heading" role="heading">Project identity</CardTitle>
           <CardDescription>Renaming changes the label, not the stable project ID.</CardDescription>
@@ -385,7 +385,7 @@ export function SettingsProject({
       </Card>
 
       {gitHistory.provider === null ? null : (
-        <Card aria-labelledby="project-git-heading">
+        <Card role="region" aria-labelledby="project-git-heading">
           <CardHeader>
             <CardTitle aria-level={2} id="project-git-heading" role="heading">Git history</CardTitle>
             <CardDescription>
@@ -424,7 +424,7 @@ export function SettingsProject({
         </Card>
       )}
 
-      <Card aria-labelledby="project-lifecycle-heading" className="ring-destructive/30">
+      <Card role="region" aria-labelledby="project-lifecycle-heading" className="ring-destructive/30">
         <CardHeader>
           <CardTitle aria-level={2} id="project-lifecycle-heading" role="heading">Project lifecycle</CardTitle>
           <CardDescription>
