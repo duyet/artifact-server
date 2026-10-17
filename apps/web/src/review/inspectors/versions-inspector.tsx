@@ -1,10 +1,25 @@
 import {useState} from "react";
-import {Dialog} from "@base-ui/react/dialog";
 
 import type {Version} from "@/api/client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
+import {Field, FieldGroup, FieldLabel} from "@/components/ui/field";
+import {Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue} from "@/components/ui/select";
+import {Spinner} from "@/components/ui/spinner";
 import {formatTimestamp} from "@/lib/presentation";
 import {compactId} from "../review-location.ts";
-import {InspectorSection} from "./inspector-layout.tsx";
+import {InspectorSection, InspectorStack} from "./inspector-layout.tsx";
 
 export interface VersionListItem {
   readonly links: {readonly review: string; readonly version: string};
@@ -37,55 +52,73 @@ export function VersionsInspector({
     versions.at(-1)?.version.id ?? currentVersionId,
   );
   const [toVersionId, setToVersionId] = useState(currentVersionId);
+  const versionItems = versions.map(({version}) => ({
+    label: `Version ${version.number}`,
+    value: version.id,
+  }));
   return (
-    <div className="as-inspector-stack">
+    <InspectorStack>
       {versions.length < 2 ? null : (
         <InspectorSection count={2} title="Compare versions">
           <form
-            className="as-compare-form"
             onSubmit={(event) => {
               event.preventDefault();
               void onCompare(fromVersionId, toVersionId);
             }}
           >
-            <label>
-              <span>From</span>
-              <select onChange={(event) => setFromVersionId(event.currentTarget.value)} value={fromVersionId}>
-                {versions.map(({version}) => <option key={version.id} value={version.id}>Version {version.number}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>To</span>
-              <select onChange={(event) => setToVersionId(event.currentTarget.value)} value={toVersionId}>
-                {versions.map(({version}) => <option key={version.id} value={version.id}>Version {version.number}</option>)}
-              </select>
-            </label>
-            <button className="as-button" disabled={comparisonLoading || fromVersionId === toVersionId} type="submit">
-              {comparisonLoading ? "Comparing…" : "Compare"}
-            </button>
+            <FieldGroup className="gap-3">
+              <VersionSelect
+                id="review-compare-from"
+                items={versionItems}
+                label="From"
+                onChange={setFromVersionId}
+                value={fromVersionId}
+              />
+              <VersionSelect
+                id="review-compare-to"
+                items={versionItems}
+                label="To"
+                onChange={setToVersionId}
+                value={toVersionId}
+              />
+              <Button
+                className="w-fit"
+                disabled={comparisonLoading || fromVersionId === toVersionId}
+                size="sm"
+                type="submit"
+                variant="outline"
+              >
+                {comparisonLoading ? <Spinner data-icon="inline-start" /> : null}
+                {comparisonLoading ? "Comparing…" : "Compare"}
+              </Button>
+            </FieldGroup>
           </form>
         </InspectorSection>
       )}
       <InspectorSection count={versions.length} title="Immutable history">
-        <ol className="as-version-list">
-          {versions.map(({version}) => (
-            <li key={version.id}>
-              <div className="as-version-list__row">
-                <button
-                  aria-current={selectedVersionId === version.id ? "true" : undefined}
-                  className="as-version-list__select"
-                  data-selected={selectedVersionId === version.id}
+        <ol className="flex flex-col gap-1">
+          {versions.map(({version}) => {
+            const selected = selectedVersionId === version.id;
+            return (
+              <li className="flex items-center gap-1" key={version.id}>
+                <Button
+                  aria-current={selected ? "true" : undefined}
+                  className="h-auto min-w-0 flex-1 justify-between gap-3 py-1.5 data-[selected=true]:bg-muted"
+                  data-selected={selected}
                   onClick={() => onSelect(version.id)}
                   type="button"
+                  variant="ghost"
                 >
-                  <span>
-                    <strong>Version {version.number}</strong>
-                    <time dateTime={version.createdAt}>{formatTimestamp(version.createdAt)}</time>
+                  <span className="flex min-w-0 flex-col items-start">
+                    <span>Version {version.number}</span>
+                    <time className="text-xs font-normal text-muted-foreground" dateTime={version.createdAt}>
+                      {formatTimestamp(version.createdAt)}
+                    </time>
                   </span>
-                  <span className="as-version-list__state">
-                    {version.id === currentVersionId ? "current" : compactId(version.id)}
-                  </span>
-                </button>
+                  {version.id === currentVersionId
+                    ? <Badge variant="secondary">current</Badge>
+                    : <span className="font-mono text-xs font-normal text-muted-foreground">{compactId(version.id)}</span>}
+                </Button>
                 {!canManage || version.id === currentVersionId ? null : (
                   <MakeCurrentControl
                     expectedCurrentVersionId={currentVersionId}
@@ -93,12 +126,50 @@ export function VersionsInspector({
                     version={version}
                   />
                 )}
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       </InspectorSection>
-    </div>
+    </InspectorStack>
+  );
+}
+
+function VersionSelect({
+  id,
+  items,
+  label,
+  onChange,
+  value,
+}: {
+  readonly id: string;
+  readonly items: readonly {readonly label: string; readonly value: string}[];
+  readonly label: string;
+  readonly onChange: (value: string) => void;
+  readonly value: string;
+}) {
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Select
+        items={items}
+        onValueChange={(next) => {
+          if (next !== null) onChange(next);
+        }}
+        value={value}
+      >
+        <SelectTrigger className="w-full" id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </Field>
   );
 }
 
@@ -123,31 +194,25 @@ export function MakeCurrentControl({
     setOpen(false);
   };
   return (
-    <Dialog.Root onOpenChange={setOpen} open={open}>
-      <Dialog.Trigger className="as-version-list__make-current">
+    <AlertDialog onOpenChange={setOpen} open={open}>
+      <AlertDialogTrigger render={<Button className="shrink-0" size="sm" variant="outline" />}>
         Make current
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="as-confirm-dialog__backdrop" />
-        <Dialog.Popup className="as-confirm-dialog">
-          <Dialog.Title>Make Version {version.number} current?</Dialog.Title>
-          <Dialog.Description>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Make Version {version.number} current?</AlertDialogTitle>
+          <AlertDialogDescription>
             The stable artifact link will point to Version {version.number}. No saved version is changed or duplicated.
-          </Dialog.Description>
-          <div className="as-confirm-dialog__actions">
-            <Dialog.Close className="as-button" disabled={pending}>Cancel</Dialog.Close>
-            <button
-              className="as-button as-button--primary"
-              disabled={pending}
-              onClick={() => void confirm()}
-              type="button"
-            >
-              {pending ? "Making current…" : "Make current"}
-            </button>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogAction disabled={pending} onClick={() => void confirm()} type="button">
+            {pending ? <Spinner data-icon="inline-start" /> : null}
+            {pending ? "Making current…" : "Make current"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
-
