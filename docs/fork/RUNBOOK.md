@@ -8,42 +8,38 @@ The examples use `artifacts.example.internal` for the application host, `http://
 
 Do these steps once.
 
-1. Disable the upstream release workflow. It fires on every `v*` tag and pushes to `ghcr.io/plannotator`, which fails in the fork. Select **Tagged Release** on the fork's Actions page and choose **Disable workflow**, or run this command.
-
-   ```sh
-   gh workflow disable release.yml --repo duyet/artifact-server
-   ```
-
-2. Create the bucket `artifact-server` on the gateway and an access key limited to it. Create the key with the gateway's own tools.
+1. Create the bucket `artifact-server` on the gateway and an access key limited to it. Create the key with the gateway's own tools.
 
    ```sh
    aws --endpoint-url http://s3.example.internal:7070 s3api create-bucket --bucket artifact-server
    ```
 
-3. Create the database and role in the CloudNativePG cluster. Two replicas with a pool of 10, plus the migration and cleanup jobs, use 22 connections. A rolling update briefly runs a third pod, so the role needs a limit of at least 32.
+2. Create the database and role in the CloudNativePG cluster. Two replicas with a pool of 10, plus the migration and cleanup jobs, use 22 connections. A rolling update briefly runs a third pod, so the role needs a limit of at least 32.
 
    ```sql
    CREATE ROLE artifact_server LOGIN PASSWORD '<password>' CONNECTION LIMIT 32;
    CREATE DATABASE artifact_server OWNER artifact_server;
    ```
 
-4. Pick the installation ID, for example `artifacts-internal`. The bucket prefix is the SHA-256 of this string, so a different ID points at different data. Never change it.
-5. If the cluster restricts egress, allow the pods to reach the gateway port (7070) and Postgres.
-6. Run the checks in [Contract test against the real gateway](#contract-test-against-the-real-gateway).
+3. Pick the installation ID, for example `artifacts-internal`. The bucket prefix is the SHA-256 of this string, so a different ID points at different data. Never change it.
+4. If the cluster restricts egress, allow the pods to reach the gateway port (7070) and Postgres.
+5. Run the checks in [Contract test against the real gateway](#contract-test-against-the-real-gateway).
 
 ## Release
 
-Push an annotated tag named `v<upstream version>-fork.<n>`.
+Push an annotated tag named `v<major>.<minor>.<patch>`.
 
 ```sh
-git tag --annotate v0.1.2-fork.1 --message "Fork release 0.1.2-fork.1"
-git push origin v0.1.2-fork.1
+git tag --annotate v0.2.0 --message "Release 0.2.0"
+git push origin v0.2.0
 ```
 
-The **Fork Release** workflow runs on tags that match `v*-fork.*`. It fails on any tag that is not `v<major>.<minor>.<patch>-fork.<n>`. It publishes two packages.
+The **Release** workflow (`fork-release.yml`) runs on tags that match `v*.*.*`. It fails on any tag that is not exactly `v<major>.<minor>.<patch>`, so the old `v0.1.2-fork.<n>` form is rejected. It publishes two packages.
 
-- The image `ghcr.io/duyet/artifact-server:0.1.2-fork.1` for `linux/amd64`, with BuildKit provenance and SBOM attestations.
-- The chart `oci://ghcr.io/duyet/charts/artifact-server` at version `0.1.2-fork.1`. Its `values.yaml` sets `image.repository` and `image.digest` to the image above. `appVersion` stays the upstream version.
+- The image `ghcr.io/duyet/artifact-server:0.2.0` for `linux/amd64`, with BuildKit provenance and SBOM attestations.
+- The chart `oci://ghcr.io/duyet/charts/artifact-server` at version `0.2.0` with `appVersion` `0.2.0`. Its `values.yaml` sets `image.repository` and `image.digest` to the image above.
+
+The upstream `release.yml` is deleted, so no other workflow runs on these tags.
 
 Open the run in the Actions tab. The summary lists the image digest and the chart digest. Pin the chart digest. The chart already carries the image digest, so one pin fixes both. Check that the chart holds the image digest.
 
@@ -52,7 +48,7 @@ helm show values oci://ghcr.io/duyet/charts/artifact-server@sha256:<chart digest
   | sed -n '/^image:/,/^$/p'
 ```
 
-Never move or reuse a tag. If a run fails, fix the cause and push the next number, for example `v0.1.2-fork.2`.
+Never move or reuse a tag. If a run fails, fix the cause and push the next patch version, for example `v0.2.1`.
 
 ### After the first release
 
