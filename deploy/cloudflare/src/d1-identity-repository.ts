@@ -265,6 +265,11 @@ export function createD1IdentityRepository(
     },
 
     createApplicationSession: async (command: CreateApplicationSessionRecord) => {
+      if (command.subject.kind === "api_key") {
+        // The Worker always requires an OIDC or WorkOS browser login, so API-key
+        // sign-in (login kind none) never reaches this repository.
+        throw new Error("Cloudflare D1 does not store API-key browser sessions.");
+      }
       await database.prepare(`
         INSERT INTO application_sessions (
           id, installation_id, member_id, token_digest, csrf_digest,
@@ -273,7 +278,7 @@ export function createD1IdentityRepository(
       `).bind(
         command.id,
         command.installationId,
-        command.memberId,
+        command.subject.memberId,
         command.tokenDigest,
         command.csrfDigest,
         command.createdAt,
@@ -555,17 +560,20 @@ async function findApplicationSession(
     expiresAt: parsed.expiresAt,
     id: parsed.id,
     installationId: parsed.installationId,
-    member: {
-      createdAt: parsed.memberCreatedAt,
-      displayName: parsed.memberDisplayName,
-      email: parsed.memberEmail,
-      id: parsed.memberId,
-      installationId: parsed.installationId,
-      role: parsed.memberRole,
-      status: parsed.memberStatus,
-      updatedAt: parsed.memberUpdatedAt,
-    },
     revokedAt: parsed.revokedAt,
+    subject: {
+      kind: "member",
+      member: {
+        createdAt: parsed.memberCreatedAt,
+        displayName: parsed.memberDisplayName,
+        email: parsed.memberEmail,
+        id: parsed.memberId,
+        installationId: parsed.installationId,
+        role: parsed.memberRole,
+        status: parsed.memberStatus,
+        updatedAt: parsed.memberUpdatedAt,
+      },
+    },
     tokenDigest: parsed.tokenDigest,
   };
 }

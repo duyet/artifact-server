@@ -19,6 +19,7 @@ import type {
   IdentityRepositoryFailure,
   LoginAttemptRejected,
 } from "../core/errors.js";
+import type {CreateApplicationSessionRecord} from "../core/identity-ports.js";
 import {
   type ApplicationSession,
   type ExternalIdentity,
@@ -68,15 +69,7 @@ export interface InstallationIdentityRepository {
     key: StoredManagedApiKey,
   ) => Effect.Effect<ManagedApiKey, IdentityRepositoryFailure>;
   readonly createApplicationSession: (
-    command: {
-      readonly createdAt: string;
-      readonly csrfDigest: string;
-      readonly expiresAt: string;
-      readonly id: string;
-      readonly installationId: string;
-      readonly memberId: string;
-      readonly tokenDigest: string;
-    },
+    command: CreateApplicationSessionRecord,
   ) => Effect.Effect<ApplicationSession, IdentityRepositoryFailure>;
   readonly consumeLoginAttempt: (
     stateDigest: string,
@@ -280,6 +273,13 @@ export interface InstallationAccessOperations {
     IssuedApplicationSession,
     IdentityConflict | IdentityRepositoryFailure
   >;
+  /** Issue a browser session that acts as the presented managed API key. */
+  readonly loginWithApiKey: (
+    credential: Redacted.Redacted,
+  ) => Effect.Effect<
+    IssuedApplicationSession,
+    AuthenticationRequired | IdentityRepositoryFailure
+  >;
   readonly revokeApiKey: (
     principal: Principal,
     keyId: string,
@@ -330,23 +330,33 @@ function makeInstallationAccessService(
 
   const issueSession = Effect.fn(
     "InstallationAccessService.issueSession",
-  )(function*(member: InstallationMember) {
-    const now = dependencies.clock.now();
+  )(function*(
+    subject: CreateApplicationSessionRecord["subject"],
+    now: Date,
+    expiresAt: Date,
+  ) {
     const token = dependencies.secrets.issue();
     const csrfToken = dependencies.secrets.issue();
     const session = yield* dependencies.repository.createApplicationSession({
       createdAt: now.toISOString(),
       csrfDigest: dependencies.secrets.digest(csrfToken),
-      expiresAt: new Date(
-        now.getTime() + dependencies.sessionLifetimeMilliseconds,
-      ).toISOString(),
+      expiresAt: expiresAt.toISOString(),
       id: dependencies.ids.sessionId(),
       installationId: dependencies.installationId,
-      memberId: member.id,
+      subject,
       tokenDigest: dependencies.secrets.digest(token),
     });
     return {csrfToken, session, token};
   });
+
+  const issueMemberSession = (member: InstallationMember) => {
+    const now = dependencies.clock.now();
+    return issueSession(
+      {kind: "member", memberId: member.id},
+      now,
+      new Date(now.getTime() + dependencies.sessionLifetimeMilliseconds),
+    );
+  };
 
   const requireLocalBootstrap = Effect.fn(
     "InstallationAccessService.requireLocalBootstrap",
@@ -418,7 +428,7 @@ function makeInstallationAccessService(
         message: "The configured local administrator is not an administrator.",
       }));
     }
-    return yield* issueSession(member);
+    return yield* issueMemberSession(member);
   });
 
   const loginWithLocalBrowserToken = Effect.fn(
@@ -436,7 +446,7 @@ function makeInstallationAccessService(
     "InstallationAccessService.completeExternalIdentity",
   )(function*(identity: ExternalIdentity) {
     const member = yield* resolveExternalMember(identity);
-    return yield* issueSession(member);
+    return yield* issueMemberSession(member);
   });
 
   const resolveExternalMember = Effect.fn(
@@ -530,7 +540,7 @@ function makeInstallationAccessService(
     const authenticated: AuthenticatedApplicationSession = {
       csrfDigest: session.csrfDigest,
       expiresAt: session.expiresAt,
-      principal: humanPrincipal(session.member),
+      principal: sessionPrincipal(session.subject),
     };
     sessionCache?.set(
       cacheKey(tokenDigest),
@@ -541,14 +551,29 @@ function makeInstallationAccessService(
     return authenticated;
   });
 
+  const verifyManagedApiKey = Effect.fn(
+    "InstallationAccessService.verifyManagedApiKey",
+  )(function*(raw: string, presentedDigest: string, requestTime: Date) {
+    const keyId = managedApiKeyCredentialPattern.exec(raw)?.[1];
+    if (keyId === undefined) return yield* invalidApiKey();
+    const key = yield* dependencies.repository.findApiKey(
+      dependencies.installationId,
+      keyId,
+    );
+    if (
+      key === null || key.revokedAt !== null ||
+      key.expiresAt <= requestTime.toISOString() ||
+      !identitySecretsEqual(presentedDigest, key.secretDigest)
+    ) {
+      return yield* invalidApiKey();
+    }
+    return key;
+  });
+
   const authenticateManagedApiKey = Effect.fn(
     "InstallationAccessService.authenticateManagedApiKey",
   )(function*(credential: Redacted.Redacted) {
     const raw = Redacted.value(credential);
-    const parsed = managedApiKeyCredentialPattern.exec(raw);
-    if (parsed === null || parsed[1] === undefined) {
-      return yield* invalidApiKey();
-    }
     const presentedDigest = dependencies.secrets.digest(raw);
     const requestTime = dependencies.clock.now();
     const cached = apiKeyCache?.get(
@@ -556,26 +581,8 @@ function makeInstallationAccessService(
       requestTime.getTime(),
     );
     if (cached !== undefined) return cached;
-    const key = yield* dependencies.repository.findApiKey(
-      dependencies.installationId,
-      parsed[1],
-    );
-    const now = requestTime.toISOString();
-    if (
-      key === null || key.revokedAt !== null || key.expiresAt <= now ||
-      !identitySecretsEqual(presentedDigest, key.secretDigest)
-    ) {
-      return yield* invalidApiKey();
-    }
-    const principal: Principal = {
-      authorizedByPrincipalId: key.authorizedByPrincipalId,
-      capabilities: key.capabilities,
-      displayName: key.name,
-      id: key.principalId,
-      installationId: key.installationId,
-      kind: key.principalKind,
-      membershipRole: membershipRoles.member,
-    };
+    const key = yield* verifyManagedApiKey(raw, presentedDigest, requestTime);
+    const principal = apiKeyPrincipal(key);
     apiKeyCache?.set(
       cacheKey(presentedDigest),
       principal,
@@ -583,6 +590,27 @@ function makeInstallationAccessService(
       new Date(key.expiresAt).getTime(),
     );
     return principal;
+  });
+
+  const loginWithApiKey = Effect.fn(
+    "InstallationAccessService.loginWithApiKey",
+  )(function*(credential: Redacted.Redacted) {
+    const raw = Redacted.value(credential);
+    const now = dependencies.clock.now();
+    const key = yield* verifyManagedApiKey(
+      raw,
+      dependencies.secrets.digest(raw),
+      now,
+    );
+    const expiresAt = Math.min(
+      now.getTime() + dependencies.sessionLifetimeMilliseconds,
+      new Date(key.expiresAt).getTime(),
+    );
+    return yield* issueSession(
+      {apiKeyId: key.id, kind: "api_key"},
+      now,
+      new Date(expiresAt),
+    );
   });
 
   const admitMember = Effect.fn(
@@ -702,9 +730,10 @@ function makeInstallationAccessService(
       keyId,
       dependencies.clock.now().toISOString(),
     );
-    // Key entries are keyed by presented-credential digest, not key id, so
-    // this rare administrative mutation clears the cache instead of indexing.
+    // Key and key-session entries are keyed by credential digest, not key
+    // id, so this rare administrative mutation clears both caches.
     apiKeyCache?.clear();
+    sessionCache?.clear();
     return revoked;
   });
 
@@ -746,6 +775,7 @@ function makeInstallationAccessService(
       now.toISOString(),
     );
     apiKeyCache?.clear();
+    sessionCache?.clear();
     return {apiKey, token};
   });
 
@@ -774,11 +804,35 @@ function makeInstallationAccessService(
     loginAsLocalOwner,
     listApiKeys,
     listMembers,
+    loginWithApiKey,
     loginWithLocalBrowserToken,
     revokeApiKey,
     revokeSession,
     rotateApiKey,
   });
+}
+
+function sessionPrincipal(subject: ApplicationSession["subject"]): Principal {
+  switch (subject.kind) {
+    case "member":
+      return humanPrincipal(subject.member);
+    case "api_key":
+      return apiKeyPrincipal(subject.apiKey);
+    default:
+      return subject satisfies never;
+  }
+}
+
+function apiKeyPrincipal(key: ManagedApiKey): Principal {
+  return {
+    authorizedByPrincipalId: key.authorizedByPrincipalId,
+    capabilities: key.capabilities,
+    displayName: key.name,
+    id: key.principalId,
+    installationId: key.installationId,
+    kind: key.principalKind,
+    membershipRole: membershipRoles.member,
+  };
 }
 
 function humanPrincipal(member: InstallationMember): Principal {

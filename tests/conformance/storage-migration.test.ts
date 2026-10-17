@@ -340,7 +340,7 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 13});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 14});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'artifacts_live_path'",
       ).get()).toEqual({name: "artifacts_live_path"});

@@ -76,6 +76,14 @@ const sessionRowSchema = z.object({
   revokedAt: z.string().nullable(),
   tokenDigest: z.string(),
 });
+const apiKeySessionRowSchema = z.object({
+  sessionCreatedAt: z.string(),
+  sessionCsrfDigest: z.string(),
+  sessionExpiresAt: z.string(),
+  sessionId: z.string(),
+  sessionRevokedAt: z.string().nullable(),
+  sessionTokenDigest: z.string(),
+});
 const apiKeyRowSchema = z.object({
   authorizedByPrincipalId: z.string(),
   capabilitiesJson: z.string(),
@@ -342,15 +350,18 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
   async createApplicationSession(
     command: CreateApplicationSessionRecord,
   ): Promise<ApplicationSession> {
+    const [table, subjectColumn, subjectId] = command.subject.kind === "member"
+      ? ["application_sessions", "member_id", command.subject.memberId]
+      : ["api_key_sessions", "api_key_id", command.subject.apiKeyId];
     this.#database.prepare(`
-      INSERT INTO application_sessions (
-        id, installation_id, member_id, token_digest, csrf_digest,
+      INSERT INTO ${table} (
+        id, installation_id, ${subjectColumn}, token_digest, csrf_digest,
         created_at, expires_at, revoked_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
     `).run(
       command.id,
       command.installationId,
-      command.memberId,
+      subjectId,
       command.tokenDigest,
       command.csrfDigest,
       command.createdAt,
@@ -398,7 +409,9 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
       requestTime,
       memberStatuses.active,
     );
-    if (row === undefined) return null;
+    if (row === undefined) {
+      return this.#findApiKeySession(installationId, tokenDigest, requestTime);
+    }
     const parsed = sessionRowSchema.parse(row);
     return {
       createdAt: parsed.createdAt,
@@ -406,18 +419,73 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
       expiresAt: parsed.expiresAt,
       id: parsed.id,
       installationId: parsed.installationId,
-      member: {
-        createdAt: parsed.memberCreatedAt,
-        displayName: parsed.memberDisplayName,
-        email: parsed.memberEmail,
-        id: parsed.memberId,
-        installationId: parsed.installationId,
-        role: parsed.memberRole,
-        status: parsed.memberStatus,
-        updatedAt: parsed.memberUpdatedAt,
-      },
       revokedAt: parsed.revokedAt,
+      subject: {
+        kind: "member",
+        member: {
+          createdAt: parsed.memberCreatedAt,
+          displayName: parsed.memberDisplayName,
+          email: parsed.memberEmail,
+          id: parsed.memberId,
+          installationId: parsed.installationId,
+          role: parsed.memberRole,
+          status: parsed.memberStatus,
+          updatedAt: parsed.memberUpdatedAt,
+        },
+      },
       tokenDigest: parsed.tokenDigest,
+    };
+  }
+
+  #findApiKeySession(
+    installationId: string,
+    tokenDigest: string,
+    requestTime: string,
+  ): ApplicationSession | null {
+    const row = this.#database.prepare(`
+      SELECT
+        session.id AS sessionId,
+        session.token_digest AS sessionTokenDigest,
+        session.csrf_digest AS sessionCsrfDigest,
+        session.created_at AS sessionCreatedAt,
+        session.expires_at AS sessionExpiresAt,
+        session.revoked_at AS sessionRevokedAt,
+        api_key.id,
+        api_key.installation_id AS installationId,
+        api_key.name,
+        api_key.prefix,
+        api_key.secret_digest AS secretDigest,
+        api_key.principal_id AS principalId,
+        api_key.principal_kind AS principalKind,
+        api_key.capabilities_json AS capabilitiesJson,
+        api_key.authorized_by_principal_id AS authorizedByPrincipalId,
+        api_key.created_at AS createdAt,
+        api_key.expires_at AS expiresAt,
+        api_key.revoked_at AS revokedAt,
+        api_key.rotated_from_id AS rotatedFromId
+      FROM api_key_sessions AS session
+      JOIN managed_api_keys AS api_key
+        ON api_key.installation_id = session.installation_id
+        AND api_key.id = session.api_key_id
+      WHERE
+        session.installation_id = ? AND session.token_digest = ? AND
+        session.revoked_at IS NULL AND session.expires_at > ? AND
+        api_key.revoked_at IS NULL AND api_key.expires_at > ?
+    `).get(installationId, tokenDigest, requestTime, requestTime);
+    if (row === undefined) return null;
+    const session = apiKeySessionRowSchema.parse(row);
+    return {
+      createdAt: session.sessionCreatedAt,
+      csrfDigest: session.sessionCsrfDigest,
+      expiresAt: session.sessionExpiresAt,
+      id: session.sessionId,
+      installationId,
+      revokedAt: session.sessionRevokedAt,
+      subject: {
+        apiKey: withoutSecretDigest(parseApiKey(row)),
+        kind: "api_key",
+      },
+      tokenDigest: session.sessionTokenDigest,
     };
   }
 
@@ -426,11 +494,13 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     tokenDigest: string,
     revokedAt: string,
   ): Promise<void> {
-    this.#database.prepare(`
-      UPDATE application_sessions
-      SET revoked_at = COALESCE(revoked_at, ?)
-      WHERE installation_id = ? AND token_digest = ?
-    `).run(revokedAt, installationId, tokenDigest);
+    for (const table of ["application_sessions", "api_key_sessions"]) {
+      this.#database.prepare(`
+        UPDATE ${table}
+        SET revoked_at = COALESCE(revoked_at, ?)
+        WHERE installation_id = ? AND token_digest = ?
+      `).run(revokedAt, installationId, tokenDigest);
+    }
   }
 
   async createApiKey(key: StoredManagedApiKey): Promise<ManagedApiKey> {
@@ -529,17 +599,37 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     keyId: string,
     revokedAt: string,
   ): Promise<ManagedApiKey> {
-    const result = this.#database.prepare(`
-      UPDATE managed_api_keys
-      SET revoked_at = COALESCE(revoked_at, ?)
-      WHERE installation_id = ? AND id = ?
-    `).run(revokedAt, installationId, keyId);
-    if (result.changes !== 1) {
-      throw new IdentityNotFound({message: "The API key does not exist."});
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const result = this.#database.prepare(`
+        UPDATE managed_api_keys
+        SET revoked_at = COALESCE(revoked_at, ?)
+        WHERE installation_id = ? AND id = ?
+      `).run(revokedAt, installationId, keyId);
+      if (result.changes !== 1) {
+        throw new IdentityNotFound({message: "The API key does not exist."});
+      }
+      this.#revokeApiKeySessions(installationId, keyId, revokedAt);
+      const key = this.#findApiKey(installationId, keyId);
+      if (key === null) throw new Error("The revoked API key disappeared.");
+      this.#database.exec("COMMIT;");
+      return withoutSecretDigest(key);
+    } catch (cause) {
+      this.#database.exec("ROLLBACK;");
+      throw cause;
     }
-    const key = await this.findApiKey(installationId, keyId);
-    if (key === null) throw new Error("The revoked API key disappeared.");
-    return withoutSecretDigest(key);
+  }
+
+  #revokeApiKeySessions(
+    installationId: string,
+    keyId: string,
+    revokedAt: string,
+  ): void {
+    this.#database.prepare(`
+      UPDATE api_key_sessions
+      SET revoked_at = COALESCE(revoked_at, ?)
+      WHERE installation_id = ? AND api_key_id = ?
+    `).run(revokedAt, installationId, keyId);
   }
 
   async rotateApiKey(
@@ -564,6 +654,7 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
           message: "A revoked API key cannot be rotated.",
         });
       }
+      this.#revokeApiKeySessions(installationId, previousKeyId, revokedAt);
       this.#insertApiKey(replacement);
       this.#database.exec("COMMIT;");
       return withoutSecretDigest(replacement);
@@ -715,6 +806,19 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         rotated_from_id TEXT REFERENCES managed_api_keys(id),
         UNIQUE (installation_id, prefix)
       );
+
+      CREATE TABLE IF NOT EXISTS api_key_sessions (
+        id TEXT PRIMARY KEY,
+        installation_id TEXT NOT NULL,
+        api_key_id TEXT NOT NULL REFERENCES managed_api_keys(id),
+        token_digest TEXT NOT NULL UNIQUE,
+        csrf_digest TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS api_key_sessions_key_idx
+        ON api_key_sessions(installation_id, api_key_id);
 
       CREATE TABLE IF NOT EXISTS login_attempts (
         state_digest TEXT PRIMARY KEY,
