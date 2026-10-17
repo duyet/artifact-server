@@ -79,6 +79,9 @@ const heatmapLevelClasses = {
   },
 } satisfies Record<ActivityMetric, Record<HeatmapLevel, string>>;
 
+/** Weekday labels sit beside their row; Sunday is row 0. */
+const weekdayLabels = [[1, "Mon"], [3, "Wed"], [5, "Fri"]] as const;
+
 const chartColors = {
   uploads: "var(--chart-3)",
   views: "var(--chart-2)",
@@ -227,7 +230,14 @@ function ActivityChart({
             <CartesianGrid vertical={false} />
             <XAxis dataKey="date" hide />
             <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
-            <Bar dataKey={metric} fill={`var(--color-${metric})`} radius={2} />
+            <Bar
+              dataKey={metric}
+              fill={`var(--color-${metric})`}
+              // The mount animation grows each bar from zero height, so a tab
+              // whose animation frames are throttled shows an empty chart.
+              isAnimationActive={false}
+              radius={2}
+            />
           </BarChart>
         </ChartContainer>
         <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
@@ -281,47 +291,46 @@ function ActivityHeatmap({
           role="region"
           tabIndex={0}
         >
-          <div className="flex w-max flex-col gap-1">
-            <div
-              aria-hidden="true"
-              className="grid gap-0.5 pl-8 text-[10px] leading-3 text-muted-foreground"
-              style={{gridTemplateColumns: `repeat(${heatmap.weeks.length}, 0.75rem)`}}
-            >
-              {heatmap.months.map((month) => (
-                <span
-                  className="overflow-visible whitespace-nowrap"
-                  key={month.week}
-                  style={{gridColumnStart: month.week + 1}}
-                >
-                  {month.label}
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              <div
+          <div
+            className="grid min-w-[46rem] gap-0.5"
+            style={{gridTemplateColumns: `1.75rem repeat(${heatmap.weeks.length}, minmax(0, 1fr))`}}
+          >
+            {heatmap.months.map((month) => (
+              <span
                 aria-hidden="true"
-                className="grid w-7 grid-rows-7 gap-0.5 text-[10px] leading-3 text-muted-foreground"
+                className="overflow-visible whitespace-nowrap pb-1 text-[10px] leading-3 text-muted-foreground"
+                key={month.week}
+                style={{gridColumn: month.week + 2, gridRow: 1}}
               >
-                <span />
-                <span>Mon</span>
-                <span />
-                <span>Wed</span>
-                <span />
-                <span>Fri</span>
-                <span />
-              </div>
-              <div className="grid grid-flow-col grid-rows-7 gap-0.5" role="img"
-                aria-label={`${formatCount(heatmap.total)} ${unit} per day over the last 12 months`}>
-                {heatmap.weeks.flat().map((cell) => cell.value === null
-                  ? <span aria-hidden="true" className="size-3" key={cell.day} />
-                  : (
-                    <span
-                      className={cn("size-3 rounded-[3px]", levelClasses[cell.level])}
-                      key={cell.day}
-                      title={`${formatDayLong(cell.day)}: ${cell.value} ${unit}`}
-                    />
-                  ))}
-              </div>
+                {month.label}
+              </span>
+            ))}
+            {weekdayLabels.map(([row, label]) => (
+              <span
+                aria-hidden="true"
+                className="flex items-center text-[10px] leading-3 text-muted-foreground"
+                key={label}
+                style={{gridColumn: 1, gridRow: row + 2}}
+              >
+                {label}
+              </span>
+            ))}
+            <div
+              aria-label={`${formatCount(heatmap.total)} ${unit} per day over the last 12 months`}
+              className="grid grid-cols-subgrid grid-rows-subgrid"
+              role="img"
+              style={{gridColumn: "2 / -1", gridRow: "2 / span 7"}}
+            >
+              {heatmap.weeks.map((week, weekIndex) => week.map((cell, dayIndex) => cell.value === null
+                ? null
+                : (
+                  <span
+                    className={cn("aspect-square rounded-[3px]", levelClasses[cell.level])}
+                    key={cell.day}
+                    style={{gridColumn: weekIndex + 1, gridRow: dayIndex + 1}}
+                    title={`${formatDayLong(cell.day)}: ${cell.value} ${unit}`}
+                  />
+                )))}
             </div>
           </div>
         </div>
