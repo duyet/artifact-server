@@ -188,7 +188,7 @@ function DailyChart({
             <CartesianGrid vertical={false} />
             <XAxis dataKey="day" hide />
             <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
-            <Bar dataKey="views" fill="var(--color-views)" radius={2} />
+            <Bar dataKey="views" fill="var(--color-views)" isAnimationActive={false} radius={2} />
           </BarChart>
         </ChartContainer>
         <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
