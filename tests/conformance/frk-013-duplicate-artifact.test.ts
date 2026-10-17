@@ -177,7 +177,7 @@ describe("duplicate artifact", () => {
     expect(progress.at(-1)).toEqual({copiedFiles: 4, phase: "committing", totalFiles: 4});
   });
 
-  test("FRK-013-B: retrying the same action with the same idempotency key returns the first copy instead of creating a second", async () => {
+  test("retrying the same action with the same idempotency key returns the first copy instead of creating a second", async () => {
     const source = await publishSource();
     const details = await readDetails(source.artifact.id);
     const input = {
@@ -223,7 +223,7 @@ describe("duplicate artifact", () => {
     expect((await listArtifacts()).map((artifact) => artifact.name)).toEqual(["Quarterly dashboard"]);
   });
 
-  test("FRK-013-F: a manifest entry the source version does not hold fails loudly and creates no artifact", async () => {
+  test("a manifest entry the source version does not hold fails loudly and creates no artifact", async () => {
     const source = await publishSource();
     const details = await readDetails(source.artifact.id);
     const missing = {
@@ -253,7 +253,7 @@ describe("duplicate artifact", () => {
     expect((await listArtifacts()).map((artifact) => artifact.name)).toEqual(["Quarterly dashboard"]);
   });
 
-  test("FRK-013-B: the copy name stays inside the 200-character name bound", () => {
+  test("the copy name stays inside the 200-character name bound", () => {
     expect(duplicateName("Report")).toBe("Report (copy)");
     const long = duplicateName("x".repeat(250));
     expect(long).toBe(`${"x".repeat(193)} (copy)`);

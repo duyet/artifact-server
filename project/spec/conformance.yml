@@ -5082,3 +5082,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server, including the schema-14 upgrade. The Postgres migration 0015 and its owner filter run only in CI with Docker, the D1 columns and filter compile and pass the existing Cloudflare runtime suite but no D1 test asserts the owner or the backfill, and no deployed run exists.
     depends_on: [FRK-008, PUB-001]
     evidence: []
+
+  - id: FRK-013
+    kind: behavior
+    behavior: The review application duplicates one exact version into a new private artifact owned by the caller, named "<name> (copy)" with the same tags, by replaying the staged upload pipeline with bytes it has verified against the source manifest.
+    owner: web-application
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-013-B, description: "Duplicate a multi-file version that holds a binary file and observe a new private artifact whose files are byte-identical to the source, named '<name> (copy)', with the same tags, while the source artifact is unchanged."}
+      failure: {id: FRK-013-F, description: "A source file whose bytes do not match the manifest fingerprint aborts the duplicate before commit and creates no artifact."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against SQLite over a real server through the browser helper with real fetch, including idempotent replay and a missing source file. No browser test drives the dialog, and no Postgres or deployed run exists.
+    depends_on: [PUB-001, VER-001, FRK-010]
+    evidence: []

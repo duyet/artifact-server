@@ -25,7 +25,7 @@ function entry(path: string, mediaType: string, size = 10) {
 }
 
 describe("upload plan", () => {
-  test("FRK-013-B: sha256Hex matches the published digests of known inputs", async () => {
+  test("sha256Hex matches the published digests of known inputs", async () => {
     expect(await sha256Hex(new Uint8Array())).toBe(
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     );
@@ -34,7 +34,7 @@ describe("upload plan", () => {
     );
   });
 
-  test("EDT-001-B: an edit plan declares exactly the edited file with its size, digest, and media type", async () => {
+  test("an edit plan declares exactly the edited file with its size, digest, and media type", async () => {
     const plan = await buildUploadPlan({
       entryPath: "docs/readme.md",
       files: [{
@@ -57,7 +57,7 @@ describe("upload plan", () => {
     });
   });
 
-  test("FRK-013-B: a duplicate plan is read from the manifest, keeping entry page and routing mode", () => {
+  test("a duplicate plan is read from the manifest, keeping entry page and routing mode", () => {
     const plan = planFromManifest({
       entries: [
         entry("index.html", "text/html; charset=utf-8", 120),
@@ -79,7 +79,7 @@ describe("upload plan", () => {
 });
 
 describe("editable entries", () => {
-  test("EDT-003-B: text, JSON, JavaScript, SVG, and structured-suffix media types are editable regardless of parameters", () => {
+  test("text, JSON, JavaScript, SVG, and structured-suffix media types are editable regardless of parameters", () => {
     const editable = [
       "text/html; charset=utf-8",
       "text/markdown",
@@ -96,7 +96,7 @@ describe("editable entries", () => {
     expect(editable.filter((mediaType) => !isEditableMediaType(mediaType))).toEqual([]);
   });
 
-  test("EDT-003-F: binary media types are not editable", () => {
+  test("binary media types are not editable", () => {
     const binary = [
       "image/png",
       "application/octet-stream",
@@ -109,11 +109,11 @@ describe("editable entries", () => {
     expect(binary.filter((mediaType) => isEditableMediaType(mediaType))).toEqual([]);
   });
 
-  test("EDT-003-F: the mirrored size bound is 1 MiB", () => {
+  test("the mirrored size bound is 1 MiB", () => {
     expect(maximumEditableBytes).toBe(1_048_576);
   });
 
-  test("EDT-001-B: the editor lists only text entries and opens the entry page first when it is text", () => {
+  test("the editor lists only text entries and opens the entry page first when it is text", () => {
     const entries = [
       entry("assets/logo.png", "image/png"),
       entry("style.css", "text/css; charset=utf-8"),
