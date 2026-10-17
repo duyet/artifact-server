@@ -249,6 +249,11 @@ function ActivityChart({
   );
 }
 
+/** The newest weeks sit at the right edge, so a narrow screen opens on them. */
+function scrollToEnd(element: HTMLElement | null): void {
+  if (element !== null) element.scrollLeft = element.scrollWidth;
+}
+
 function ActivityHeatmap({
   daily,
   today,
@@ -287,6 +292,7 @@ function ActivityHeatmap({
         <div
           aria-label="Activity heatmap"
           className="overflow-x-auto pb-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          ref={scrollToEnd}
           // A scroll container has to be reachable by keyboard.
           role="region"
           tabIndex={0}
