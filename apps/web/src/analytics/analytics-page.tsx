@@ -37,7 +37,7 @@ import {
 import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 import {cn} from "@/lib/utils";
 
-import {readAnalytics, type AnalyticsReport} from "./analytics-client.js";
+import {api, type ProjectAnalytics as AnalyticsReport} from "../api/client.js";
 import {
   activeDays,
   buildHeatmap,
@@ -103,7 +103,7 @@ export function AnalyticsPage({projectId}: {readonly projectId: string}) {
     let cancelled = false;
     const loadReport = async () => {
       try {
-        const report = await readAnalytics(projectId);
+        const report = await api.analytics(projectId);
         if (!cancelled) setLoad({projectId, report, status: "ready"});
       } catch (cause) {
         if (!cancelled) {
