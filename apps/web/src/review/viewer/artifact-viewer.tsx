@@ -20,6 +20,7 @@ import {
 } from "@/artifact-actions";
 import {Alert, AlertDescription} from "@/components/ui/alert";
 import {Button} from "@/components/ui/button";
+import {Spinner} from "@/components/ui/spinner";
 import {useSidebar} from "@/components/ui/sidebar";
 import type {CatalogItem} from "../catalog/use-artifact-catalog.ts";
 import {DeleteArtifactDialog} from "../inspectors/details-inspector.tsx";
@@ -492,14 +493,17 @@ export function ArtifactViewer({
                     ? "No version selected"
                     : `${selectedVersion.manifest.entries.length} file${selectedVersion.manifest.entries.length === 1 ? "" : "s"} · ${selectedVersion.version.routingMode.toUpperCase()}`}
                 </span>
+                {/* Stays enabled while comments load: they load on every
+                    artifact switch, and a reload mid-load just supersedes it. */}
                 <Button
-                  disabled={comments.loading || selectedVersion === null}
+                  aria-busy={comments.loading}
+                  disabled={selectedVersion === null}
                   onClick={() => void (commentsInspectorRef.current?.reload() ?? comments.reload())}
                   size="xs"
                   variant="ghost"
                 >
-                  <IconRefresh data-icon="inline-start" />
-                  {comments.loading ? "Loading…" : "Reload"}
+                  {comments.loading ? <Spinner data-icon="inline-start" /> : <IconRefresh data-icon="inline-start" />}
+                  Reload
                 </Button>
               </div>
             </footer>
