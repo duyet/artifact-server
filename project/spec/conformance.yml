@@ -14,17 +14,13 @@ source:
 # names that deployment is verified with evidence from that deployment.
 deployment_sets:
   all: &all
-    [local, single_server, kubernetes, cloudflare, aws, gcp]
+    [local, single_server, kubernetes]
   external_storage: &external_storage
-    [single_server, kubernetes, cloudflare, aws, gcp]
+    [single_server, kubernetes]
   replicated: &replicated
-    [kubernetes, cloudflare, aws, gcp]
-  hosted: &hosted
-    [cloudflare]
-  direct_clouds: &direct_clouds
-    [aws, gcp]
+    [kubernetes]
   plannotator_capable: &plannotator_capable
-    [single_server, kubernetes, cloudflare, aws, gcp]
+    [single_server, kubernetes]
 
 allowed_statuses:
   - specified
@@ -95,8 +91,8 @@ required_source_sections:
   deployment: [DEP-001, DEP-002, DEP-003, DEP-004]
   safety: [SEC-001, SEC-002, SEC-003, SEC-004]
   scope: [SCP-001, SCP-002, SCP-003]
-  implementation: [REL-001, REL-002, REL-003, REL-004]
-  decisions: [GATE-001, GATE-002, GATE-003]
+  implementation: [REL-001, REL-002]
+  decisions: [GATE-001, GATE-002]
 
 requirements:
   - id: PRD-001
@@ -660,21 +656,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
-      - deployment: cloudflare
-        tests: [PUB-009-B]
-        result: pass
-        run: project/evidence/cloudflare-phase11-qualification.json
-        recorded_at: "2026-08-16T17:44:26Z"
-      - deployment: aws
-        tests: [PUB-009-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [PUB-009-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
 
   - id: PUB-010
     kind: security
@@ -918,21 +899,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
-      - deployment: aws
-        tests: [CNT-007-B, CNT-007-F]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [CNT-007-B, CNT-007-F]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
-      - deployment: cloudflare
-        tests: [CNT-007-B, CNT-007-F]
-        result: pass
-        run: project/evidence/cloudflare-phase11-content.json
-        recorded_at: "2026-08-16T17:44:26.049Z"
 
   - id: CNT-008
     kind: security
@@ -1976,48 +1942,6 @@ requirements:
     depends_on: [AUTH-008]
     evidence: []
 
-  - id: MCP-010
-    kind: security
-    behavior: Hosted remote MCP advertises protected-resource metadata, challenges unauthenticated clients, and uses WorkOS AuthKit for browser approval and resource-bound credentials.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-010-B, description: "Add only the hosted /mcp URL in supported clients and complete discovery, browser approval, callback, token use, refresh, revoke, and reconnect."}
-      failure: {id: MCP-010-F, description: "Missing, wrong-issuer, wrong-audience, expired, revoked, malformed, and web-session tokens are rejected with correct challenge behavior."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: Live staging covers selected WorkOS and named-client flows, but the complete supported-client discovery, callback, refresh, revoke, reconnect, and hostile-token matrix is not attached as MCP-010 behavior and failure evidence.
-    depends_on: [MCP-001, AUTH-017]
-    evidence: []
-
-  - id: MCP-011
-    kind: security
-    behavior: Hosted MCP tokens are verified for signature, allowed algorithm, exact issuer, exact /mcp audience, expiry, and subject using rotation-safe cached keys. The exact resource-bound audience grants MCP access; WorkOS does not issue a separate product scope.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-011-B, description: "Verify valid tokens before and after signing-key rotation and map them to an internal provider-neutral principal."}
-      failure: {id: MCP-011-F, description: "Reject algorithm confusion, unknown keys, multiple-resource confusion, missing subject, invalid time, issuer, or audience."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: Local verifier tests cover selected issuer, audience, expiry, and key failures, but there is no hosted MCP-011 run that includes signing-key rotation and the complete algorithm, key, resource, subject, time, issuer, and audience hostile matrix.
-    depends_on: [MCP-010]
-    evidence: []
-
-  - id: MCP-012
-    kind: security
-    behavior: WorkOS owns hosted authorization, consent, codes, client registration, access credentials, refresh, and revocation; bearer credentials never reach storage, workers, sites, files, or logs.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-012-B, description: "Trace a hosted authorization and tool call and confirm that Artifact Server receives only the bearer at its verification boundary and emits a redacted internal principal."}
-      failure: {id: MCP-012-F, description: "Authorization codes, refresh tokens, cookies, ID tokens, bearer values, and credential-bearing URLs never appear downstream or in logs."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: The live authorization record proves selected grant flows, but no MCP-012 trace demonstrates that every listed credential form is absent from storage, Worker, content, file, and log boundaries.
-    depends_on: [MCP-011]
-    evidence: []
-
   - id: MCP-013
     kind: behavior
     behavior: Local mode connects through artifactserver connect and a stdio bridge without browser OAuth or a human-visible secret; self-hosted mode uses browser OAuth when compatible authorization is configured and otherwise uses administration-issued scoped API keys. A generic OIDC issuer is compatible authorization when it signs verifiable access-token JWTs, binds the exact <origin>/mcp audience, and offers a client registration path its clients can use; the installation registers that client and never runs an authorization server of its own.
@@ -2026,7 +1950,7 @@ requirements:
     acceptance:
       behavior: {id: MCP-013-B, description: "Connect locally through the stdio bridge with no visible credential, connect to a private OAuth server through browser approval including a generic OIDC issuer whose access token names the exact /mcp resource, and connect to a no-OAuth server using an administration-issued revocable API key."}
       failure: {id: MCP-013-F, description: "Startup logs, diagnostics, project files, generic OIDC ID tokens, browser login cookies, and wrong-resource tokens cannot expose or substitute for a valid MCP credential."}
-    deployments: [local, single_server, kubernetes, aws, gcp]
+    deployments: [local, single_server, kubernetes]
     status: implementing
     proof_gap: Local stdio, API-key, and generic OIDC access-token paths are implemented and covered by the local conformance suite and the real Keycloak harness, but the combined private OAuth, no-OAuth, local, wrong-credential, and credential-leak matrix has no deployment-specific MCP-013 evidence. The Keycloak harness obtains its MCP access tokens through the password grant; no MCP client has yet completed browser approval (authorization code with S256 PKCE, client registration, and the RFC 8707 resource parameter) against a generic OIDC issuer, so the browser-approval half of MCP-013-B is unproved for OIDC.
     depends_on: [AUTH-009]
@@ -2040,9 +1964,9 @@ requirements:
     acceptance:
       behavior: {id: MCP-014-B, description: "Pass the full hosted hostile and client matrix using the embedded provider before advertising it."}
       failure: {id: MCP-014-F, description: "Self-hosted deployments remain usable through API keys and compatible external issuers when embedded OAuth is absent."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
-    depends_on: [MCP-010, MCP-013]
+    depends_on: [MCP-013]
     evidence: []
 
   - id: MCP-015
@@ -2077,19 +2001,6 @@ requirements:
     depends_on: [MCP-002, MCP-009, MCP-013, OPS-008]
     evidence: []
 
-  - id: MCP-017
-    kind: release_gate
-    behavior: The supported hosted interactive MCP path is add or select the exact /mcp address, complete browser sign-in and approval, and return to a connected client with automatic credential renewal.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-017-B, description: "In every advertised remote client, add only the server address and pass discovery, browser approval, callback, tool use, renewal after access-token expiry, revoke, disconnect, and reconnect from fresh and stale client state."}
-      failure: {id: MCP-017-F, description: "Wrong issuer, audience, callback, network boundary, revoked grant, stale registration, and unadmitted user fail clearly without accepting a browser cookie or changing firewall or VPN access."}
-    deployments: *hosted
-    status: specified
-    depends_on: [MCP-010, MCP-011, MCP-012]
-    evidence: []
-
   - id: MCP-018
     kind: release_gate
     behavior: Self-hosted fallback and unattended MCP access use scoped user or service API keys issued through an administration interface or administrator CLI and stored through the client or deployment secret manager.
@@ -2113,7 +2024,7 @@ requirements:
       failure: {id: MCP-019-F, description: "A host with missing transport, protocol, authorization, installation, upgrade, or stale-state evidence is omitted from the supported-client list rather than inferred to work."}
     deployments: *all
     status: specified
-    depends_on: [MCP-016, MCP-017, MCP-018]
+    depends_on: [MCP-016, MCP-018]
     evidence: []
 
   - id: MCP-020
@@ -3704,48 +3615,6 @@ requirements:
         run: project/evidence/helm-kubernetes.json
         recorded_at: "2026-08-17T03:12:42.551Z"
 
-  - id: DEP-007
-    kind: deployment
-    behavior: The Cloudflare target uses Workers, D1 for metadata, R2 for file bytes, Alchemy for provisioning, WorkOS for hosted MCP authorization, and an off-by-default Cloudflare Artifacts binding for Git handoff.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: deployment}
-    acceptance:
-      behavior: {id: DEP-007-B, description: "Provision a clean Cloudflare deployment and pass publish, delivery, private access, MCP OAuth, backup, failure, and optional-history tests."}
-      failure: {id: DEP-007-F, description: "D1 never stores artifact file bytes, optional history failure never blocks primary storage, and a missing optional provider leaves core behavior intact."}
-    deployments: [cloudflare]
-    status: implementing
-    proof_gap: Selected live D1, R2, WorkOS, routing, cleanup, and recovery probes exist, but no DEP-007 run covers the complete clean provision, publish, delivery, private access, OAuth, backup, failure, optional-history, and optional-provider failure matrix.
-    depends_on: [DEP-021, MCP-010, GIT-007, GATE-003]
-    evidence: []
-
-  - id: DEP-008
-    kind: deployment
-    behavior: The default AWS target is a direct Pulumi project that creates ECS Fargate, RDS PostgreSQL, S3, workload identity, secrets, networking, DNS, TLS, telemetry, and required support outputs.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: deployment}
-    acceptance:
-      behavior: {id: DEP-008-B, description: "Create, upgrade, roll back, recover state, back up, restore, and delete the AWS target with native S3 and private-network options."}
-      failure: {id: DEP-008-F, description: "A failed update cannot orphan durable data, expose private content, or require Pulumi Cloud."}
-    deployments: [aws]
-    status: implementing
-    proof_gap: Mocked Pulumi tests prove configuration and the resource graph, and live reports cover selected public-stack lifecycle probes; the complete native-S3, private-network, failed-update, state, backup/restore, and no-Pulumi-Cloud acceptance run is absent.
-    depends_on: [DEP-003, DEP-021, OPS-003]
-    evidence: []
-
-  - id: DEP-009
-    kind: deployment
-    behavior: The default GCP target is a direct Pulumi project that creates Cloud Run, Cloud SQL PostgreSQL, native Google Cloud Storage, workload identity, secrets, networking, DNS, TLS, telemetry, and required support outputs.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: deployment}
-    acceptance:
-      behavior: {id: DEP-009-B, description: "Create, upgrade, roll back, recover state, back up, restore, and delete the GCP target with native GCS and private-network options."}
-      failure: {id: DEP-009-F, description: "The supported path cannot depend on an S3 compatibility shim, lose durable state during replacement, or require Pulumi Cloud."}
-    deployments: [gcp]
-    status: implementing
-    proof_gap: Mocked Pulumi tests prove configuration and the resource graph, and live reports cover selected public-stack lifecycle probes; the acceptance still names a private-network option that is not advertised, and complete native-GCS, replacement, state, backup/restore, and no-Pulumi-Cloud proof is absent.
-    depends_on: [DEP-003, DEP-021, OPS-003]
-    evidence: []
-
   - id: DEP-011
     kind: constraint
     behavior: The external runtime consumes one provider-neutral factory with immutable blob, staging, readiness, and shutdown capabilities; supported factories cover S3-compatible storage, native Google Cloud Storage, and Worker R2 without cloud SDK types entering product or protocol code. A native Azure Blob factory is available as preview and does not imply a supported Azure deployment.
@@ -3775,20 +3644,6 @@ requirements:
     deployments: *all
     status: specified
     depends_on: [DEP-002]
-    evidence: []
-
-  - id: DEP-021
-    kind: deployment
-    behavior: Every cloud package accepts the shared installation, domain, ingress, capacity, database, backup, deletion, identity, telemetry, state, and secret-reference inputs and returns the shared URL, digest, provider-resource, identity, network, log, state, and support-manifest outputs without returning a secret.
-    owner: deployment
-    source: {file: cloud-deployment-contract.md, anchor: shared-operator-inputs}
-    acceptance:
-      behavior: {id: DEP-021-B, description: "Validate one minimal and one fully configured stack for each cloud, apply it, and verify every required runtime value and machine-readable output against the shared contract."}
-      failure: {id: DEP-021-F, description: "Reject unpinned images, equal application and content domains, invalid capacity, missing production deletion protection, missing public DNS, unknown inputs, secret outputs, and a main stack that creates its own state backend."}
-    deployments: [cloudflare, aws, gcp]
-    status: implementing
-    proof_gap: Shared contract parsing and mocked package graphs cover many inputs and outputs, but no minimal and fully configured live apply for all three clouds verifies every required runtime value, output, and hostile input under DEP-021.
-    depends_on: [DEP-002, DEP-003, DEP-012, DEP-014, DEP-016]
     evidence: []
 
   - id: DEP-022
@@ -3831,14 +3686,10 @@ requirements:
       behavior: {id: DEP-014-B, description: "Resolve and validate application and unique version hosts through supported DNS, TLS, proxy, and localhost configurations."}
       failure: {id: DEP-014-F, description: "A same-site application subdomain, invalid certificate, untrusted forwarded host, or path-only alias cannot be advertised as the supported isolation boundary."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
     depends_on: [CNT-003, CNT-004]
-    evidence:
-      - deployment: cloudflare
-        tests: [DEP-014-B]
-        result: pass
-        run: project/evidence/cloudflare-phase11-content.json
-        recorded_at: "2026-08-16T17:44:26.049Z"
+    evidence: []
 
   - id: DEP-015
     kind: deployment
@@ -3848,7 +3699,7 @@ requirements:
     acceptance:
       behavior: {id: DEP-015-B, description: "Build and run both architectures, execute compact and external-storage workflows from the released image, replace the container, and verify the image digest and secret-free support manifest."}
       failure: {id: DEP-015-F, description: "The image cannot require root, a writable root filesystem, source files, development packages, floating tags, or undeclared container-local durable state."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [DEP-005, DEP-006, DEP-012]
     evidence: []
@@ -3861,7 +3712,7 @@ requirements:
     acceptance:
       behavior: {id: DEP-016-B, description: "Start Compose and Kubernetes packages with mounted secret files behind a configured TLS proxy and resolve both the application and unique content hosts."}
       failure: {id: DEP-016-F, description: "Conflicting direct and file credentials, unreadable secret files, untrusted forwarded hosts, invalid wildcard DNS or certificates, and incomplete provider configuration fail before the process reports ready."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [DEP-014, SEC-004]
     evidence: []
@@ -3892,7 +3743,7 @@ requirements:
     acceptance:
       behavior: {id: DEP-018-B, description: "Verify image and chart signatures, provenance, SBOM contents, pinned dependencies, source revision, and compatibility metadata from a clean release download."}
       failure: {id: DEP-018-F, description: "A release with a floating image, unverifiable origin, missing dependency inventory, embedded test credential, or undocumented compatibility range cannot be published."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [DEP-012, DEP-015]
     evidence: []
@@ -3963,21 +3814,6 @@ requirements:
         result: pass
         run: project/evidence/compact-compose.json
         recorded_at: "2026-08-17T03:10:29.404Z"
-      - deployment: cloudflare
-        tests: [OPS-003-B]
-        result: pass
-        run: project/evidence/cloudflare-phase11-qualification.json
-        recorded_at: "2026-08-16T17:44:26Z"
-      - deployment: aws
-        tests: [OPS-003-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-003-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
 
   - id: OPS-004
     kind: behavior
@@ -3988,19 +3824,10 @@ requirements:
       behavior: {id: OPS-004-B, description: "Scan a valid installation and report all manifests, fingerprints, sizes, paths, and blobs consistent."}
       failure: {id: OPS-004-F, description: "Detect missing blobs, digest mismatches, invalid paths, orphaned current pointers, and cross-installation references without repairing them silently."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
     depends_on: [MAN-001, MAN-006]
-    evidence:
-      - deployment: aws
-        tests: [OPS-004-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-004-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
+    evidence: []
 
   - id: OPS-005
     kind: release_gate
@@ -4011,19 +3838,10 @@ requirements:
       behavior: {id: OPS-005-B, description: "Follow only the published operator procedure on a populated deployment and obtain a verified clean restore."}
       failure: {id: OPS-005-F, description: "A target lacking repeatable backup, restore, integrity, and recovery evidence cannot be marked team-ready or supported."}
     deployments: *external_storage
-    status: behavior_verified
+    status: implementing
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
     depends_on: [OPS-003, OPS-004]
-    evidence:
-      - deployment: aws
-        tests: [OPS-005-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-005-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
+    evidence: []
 
   - id: OPS-006
     kind: constraint
@@ -4043,21 +3861,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
-      - deployment: cloudflare
-        tests: [OPS-006-F]
-        result: pass
-        run: project/evidence/cloudflare-phase11-qualification.json
-        recorded_at: "2026-08-16T17:44:26Z"
-      - deployment: aws
-        tests: [OPS-006-F]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-006-F]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
 
   - id: OPS-007
     kind: release_gate
@@ -4111,7 +3914,7 @@ requirements:
     acceptance:
       behavior: {id: OPS-010-B, description: "Terminate idle, reading, uploading, and committing containers during Compose and Kubernetes replacement and observe the documented durable result for every request."}
       failure: {id: OPS-010-F, description: "A draining process cannot remain ready, accept unbounded new work, exceed the termination deadline, leak providers, or return a successful publish that disappears after exit."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [OPS-001, PUB-003, PUB-004]
     evidence: []
@@ -4153,32 +3956,6 @@ requirements:
     deployments: [single_server, kubernetes]
     status: specified
     depends_on: [AUTH-025, AUTH-026, AUTH-027, AUTH-028, DEP-005, DEP-006, GATE-002, MCP-018, MCP-019, OPS-005, REL-006]
-    evidence: []
-
-  - id: REL-003
-    kind: release_gate
-    behavior: The optional Cloudflare deployment includes Workers, D1, R2, browser login, WorkOS MCP authorization, public CDN delivery, trusted installation routing, tenant isolation, audit, and recovery; artifactserver.com service-operator policy is not a core OSS release gate.
-    owner: product-core
-    source: {file: artifact-server-product-spec.html, anchor: implementation}
-    acceptance:
-      behavior: {id: REL-003-B, description: "Pass the complete Cloudflare technical requirement set under provider failure, OAuth, restore, and cross-installation tests."}
-      failure: {id: REL-003-F, description: "The Cloudflare package cannot be called supported until its tenant-isolation, recovery, authorization, and deployment gates have passing evidence; optional service policy cannot block the core OSS release."}
-    deployments: [cloudflare]
-    status: specified
-    depends_on: [DEP-007, MCP-017, MCP-019, REL-006]
-    evidence: []
-
-  - id: REL-004
-    kind: release_gate
-    behavior: Each direct-cloud release includes its official installer, native object storage, private-network option, upgrades, rollback, state recovery, backup, restore, deletion, and the external-storage Helm alternative.
-    owner: product-core
-    source: {file: artifact-server-product-spec.html, anchor: implementation}
-    acceptance:
-      behavior: {id: REL-004-B, description: "Independently pass create-to-delete and full product conformance on AWS and GCP and publish per-target evidence."}
-      failure: {id: REL-004-F, description: "Success on one cloud cannot stand in for evidence on another, and a target with incomplete lifecycle or native-storage tests remains unsupported."}
-    deployments: *direct_clouds
-    status: specified
-    depends_on: [DEP-008, DEP-009, MCP-018, MCP-019, REL-006]
     evidence: []
 
   - id: REL-005
@@ -4329,48 +4106,6 @@ requirements:
     depends_on: [PRJ-003, AUTH-001, AUTH-006, PLN-004]
     evidence: []
 
-  - id: HOST-001
-    kind: security
-    behavior: Public hosting enforces measured per-installation and per-principal quotas, rate limits, upload limits, version limits, and egress controls before artifactserver.com public links launch.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: HOST-001-B, description: "Exercise documented default and maximum limits under normal and burst load and observe clear retry and quota responses without cross-installation impact."}
-      failure: {id: HOST-001-F, description: "Oversized, excessive, parallel, distributed, and retry-amplified workloads cannot bypass limits, exhaust another installation's allowance, or create unbounded spend."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: Hosted quotas and spend controls are optional artifactserver.com operating policy, not a core OSS first-release requirement; retain this candidate only for traceability until a hosted service has an owner and launch plan.
-    depends_on: [PUB-008, GATE-009]
-    evidence: []
-
-  - id: HOST-002
-    kind: security
-    behavior: Public hosting has an executable-file policy and documented malware, phishing, copyright, report, suspension, deletion, appeal, and domain-reputation procedures.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: HOST-002-B, description: "Run a tabletop and staging exercise from report intake through containment, audit, communication, deletion or restoration, and domain-reputation monitoring."}
-      failure: {id: HOST-002-F, description: "A malicious or disputed artifact cannot remain publicly reachable because the system lacks project and actor lookup, suspension, evidence preservation, or deletion controls."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: Malware, copyright, appeal, and reputation operations belong to an optional artifactserver.com service policy, not the core OSS implementation; retain this candidate only for traceability.
-    depends_on: [AUTH-012, AUD-001]
-    evidence: []
-
-  - id: HOST-003
-    kind: security
-    behavior: Hosted customer controls explicitly define encryption, regional placement, audit export, legal hold, permanent deletion, backup frequency, restore target, acceptable data-loss window, availability, and support tier before regulated-team sales.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: HOST-003-B, description: "Map every published promise to configuration, enforcement, monitoring, backup, restore, deletion, audit, and support evidence."}
-      failure: {id: HOST-003-F, description: "Marketing, contract, or user-interface claims cannot exceed measured and tested technical behavior for the selected region and tier."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: Regulated-enterprise promises and sales controls are outside the simple OSS first release and must not drive speculative product features; retain this candidate only for traceability.
-    depends_on: [OPS-003, OPS-008, GATE-010, GATE-011]
-    evidence: []
-
   - id: GATE-001
     kind: release_gate
     behavior: Private multi-file delivery must prove both top-level raw-content sessions and exact-version embedded Review leases in supported browsers before the private-team release.
@@ -4398,19 +4133,6 @@ requirements:
     depends_on: [DEP-014]
     evidence: []
 
-  - id: GATE-003
-    kind: release_gate
-    behavior: The hosted service begins with one D1 database only after load and failure tests, and chooses a tested installation-directory rollout or external Postgres control plane before a second database is required.
-    owner: database-adapters
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-003-B, description: "Measure D1 latency, contention, growth, backup, restore, and failure limits and record the threshold and tested second-database design."}
-      failure: {id: GATE-003-F, description: "Adding bindings, accepting a request-supplied installation ID, or manually moving data cannot be presented as automatic sharding or a supported control plane."}
-    deployments: *hosted
-    status: specified
-    depends_on: [DEP-013]
-    evidence: []
-
   - id: GATE-004
     kind: release_gate
     behavior: The off-by-default Cloudflare Artifacts adapter is advertised only after current access, pricing, repository and rate limits, token behavior, Git compatibility, project selection, estimate and budget behavior, namespace isolation, bounded live-test cleanup, failure containment, deletion, jurisdiction, cost, and recovery are verified.
@@ -4424,20 +4146,6 @@ requirements:
     depends_on: [GIT-007, GIT-012, GIT-013, GIT-014]
     evidence: []
 
-  - id: GATE-005
-    kind: release_gate
-    behavior: Hosted WorkOS MCP authorization ships only after live consent, token lifetime, refresh rotation, revocation, claims, audience, CIMD, DCR, callback, and stale-client probes pass.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-005-B, description: "Run fresh and stale-state browser authorization, refresh, revoke, disconnect, and reconnect tests in Codex, Claude Code, claude.ai where reachable, and compatibility clients."}
-      failure: {id: GATE-005-F, description: "Wrong issuer, audience, callback, PKCE, registration, revoked grant, stale token, or cross-tenant object access cannot authorize an MCP tool."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: Codex and Claude Code staging flows cover selected consent, refresh, revoke, CIMD, and DCR behavior, but the fresh/stale named-client matrix and every callback, PKCE, registration, revoked, stale, and cross-tenant denial are incomplete.
-    depends_on: [MCP-010, MCP-011, MCP-012]
-    evidence: []
-
   - id: GATE-006
     kind: release_gate
     behavior: Embedded Better Auth MCP OAuth is not supported until its beta path passes interoperability, security, migration, durable-state, refresh, revoke, recovery, CIMD, and DCR tests.
@@ -4449,33 +4157,6 @@ requirements:
     deployments: *external_storage
     status: specified
     depends_on: [MCP-014]
-    evidence: []
-
-  - id: GATE-007
-    kind: release_gate
-    behavior: AWS and GCP remain unsupported until their default managed-container projects independently pass create, upgrade, rollback, state recovery, backup, restore, workload-identity, delete, and every advertised ingress-mode test; the direct GCP target advertises public ingress only, while private GCP teams use the qualified Helm path on GKE; Azure is not a direct target and uses the qualified Helm path on AKS.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-007-B, description: "Publish a complete signed evidence run for the full lifecycle on each cloud and each advertised runtime variant."}
-      failure: {id: GATE-007-F, description: "Documentation, code generation, success on another cloud, or a create-only smoke test cannot qualify a deployment as supported."}
-    deployments: *direct_clouds
-    status: specified
-    depends_on: [DEP-008, DEP-009]
-    evidence: []
-
-  - id: GATE-008
-    kind: release_gate
-    behavior: Public artifactserver.com links do not launch until abuse, executable-file, malware, phishing, copyright, reputation, suspension, and deletion policy is both decided and exercised.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-008-B, description: "Complete policy approval and operational exercises for every public-hosting abuse path with responsible teams and response evidence."}
-      failure: {id: GATE-008-F, description: "A public-link launch is blocked when any report, containment, deletion, appeal, or domain-reputation path has no responsible team or working control."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: This is an optional artifactserver.com launch-policy gate, not an OSS release gate; core content isolation and authorization safety remain covered by the technical requirements.
-    depends_on: [HOST-002]
     evidence: []
 
   - id: GATE-009
