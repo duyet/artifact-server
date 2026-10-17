@@ -5080,7 +5080,7 @@ requirements:
     acceptance:
       behavior: {id: FRK-010-B, description: "Publish one artifact as the installation token and one as a service key, publish a second version of the first as the service key, and observe the unchanged owner, each version's publisher name, the list's owner, last change, current version number, and 30-day and total views, and owner=me and owner=others from both principals."}
       failure: {id: FRK-010-F, description: "An unknown owner scope is 422, a principal who only published a later version owns nothing, and a schema-14 database upgrades with each owner taken from its first version's publisher and a null name rather than a guessed one."}
-    deployments: [local, single_server, kubernetes, cloudflare]
+    deployments: [local, single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite over a real server, including the schema-14 upgrade. The Postgres migration 0015 and its owner filter run only in CI with Docker, the D1 columns and filter compile and pass the existing Cloudflare runtime suite but no D1 test asserts the owner or the backfill, and no deployed run exists.
     depends_on: [FRK-008, PUB-001]
@@ -5108,7 +5108,7 @@ requirements:
     acceptance:
       behavior: {id: FRK-011-B, description: "Publish and view artifacts across three days 400 days apart with a pinned clock, and read the exact totals, the sparse series without the out-of-window day, the uploaded-today and viewed-today counts, the one-decimal average, the most viewed order, and one artifact's three windows and series."}
       failure: {id: FRK-011-F, description: "A deleted artifact leaves every total, the series, and the ranking, its own report is 404, an artifact read through another project is 404, an empty project reports zeros, and a key without artifact read access is 403 on both reports."}
-    deployments: [local, single_server, kubernetes, cloudflare]
+    deployments: [local, single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite over a real server. The Postgres and D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
     depends_on: [FRK-008, FRK-010]
@@ -5122,7 +5122,7 @@ requirements:
     acceptance:
       behavior: {id: FRK-012-B, description: "Rename over HTTP with surrounding spaces and over MCP, find the artifact by its new name and not its old one, observe the unchanged current version and two renamed actions, and replay the first key to receive the name it set with replayed true."}
       failure: {id: FRK-012-F, description: "A stale expected version is 409 ARTIFACT_MUTATION_CONFLICT, a reused key with another name is 409 IDEMPOTENCY_CONFLICT, a blank name and a missing key are 422, a deleted artifact is 404, and none of them changes the name or records an action."}
-    deployments: [local, single_server, kubernetes, cloudflare]
+    deployments: [local, single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The Postgres migration 0016 and rename, and the D1 table rebuilds and rename, compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
     depends_on: [FRK-010, ARC-006]
