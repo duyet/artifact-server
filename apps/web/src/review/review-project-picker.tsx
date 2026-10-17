@@ -1,11 +1,4 @@
-import {
-  Add01Icon,
-  ArrowDown01Icon,
-  FolderManagementIcon,
-  Settings02Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
-import {HugeiconsIcon} from "@hugeicons/react";
+import { IconCheck, IconChevronDown, IconFolderCog, IconPlus, IconSettings } from "@tabler/icons-react";
 import {type FormEvent, useMemo, useState} from "react";
 
 import {type Project} from "@/api/client";
@@ -101,7 +94,7 @@ export function ReviewProjectPicker({
         className="as-project-trigger"
       >
         <span>{selectedProject?.name ?? "Select project"}</span>
-        <HugeiconsIcon aria-hidden="true" icon={ArrowDown01Icon} strokeWidth={2} />
+        <IconChevronDown aria-hidden="true" stroke={2} />
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -132,7 +125,7 @@ export function ReviewProjectPicker({
                           : <span className="as-project-option__status">Archived</span>}
                       </span>
                       {selected
-                        ? <HugeiconsIcon aria-hidden="true" icon={Tick02Icon} strokeWidth={2} />
+                        ? <IconCheck aria-hidden="true" stroke={2} />
                         : null}
                     </button>
                   );
@@ -148,7 +141,7 @@ export function ReviewProjectPicker({
                         href={projectSettingsHref(selectedProject.id)}
                         onClick={() => setPickerOpen(false)}
                       >
-                        <HugeiconsIcon aria-hidden="true" icon={Settings02Icon} strokeWidth={2} />
+                        <IconSettings aria-hidden="true" stroke={2} />
                         <span>Project settings</span>
                       </a>
                     )}
@@ -157,7 +150,7 @@ export function ReviewProjectPicker({
                       href="/review/settings/projects"
                       onClick={() => setPickerOpen(false)}
                     >
-                      <HugeiconsIcon aria-hidden="true" icon={FolderManagementIcon} strokeWidth={2} />
+                      <IconFolderCog aria-hidden="true" stroke={2} />
                       <span>Manage projects</span>
                     </a>
                     <button
@@ -165,7 +158,7 @@ export function ReviewProjectPicker({
                       onClick={showCreateForm}
                       type="button"
                     >
-                      <HugeiconsIcon aria-hidden="true" icon={Add01Icon} strokeWidth={2} />
+                      <IconPlus aria-hidden="true" stroke={2} />
                       <span>New project</span>
                     </button>
                   </div>

@@ -1,15 +1,4 @@
-import {
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  Cancel01Icon,
-  Copy01Icon,
-  File01Icon,
-  Globe02Icon,
-  SecurityLockIcon,
-  Share01Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { IconCheck, IconChevronLeft, IconChevronRight, IconCopy, IconFile, IconLock, IconShare, IconWorld, IconX } from "@tabler/icons-react";
 import { Popover } from "@base-ui/react/popover";
 import { useEffect, useRef, useState } from "react";
 
@@ -189,7 +178,7 @@ export function ReviewShareControl({
           />
         )}
       >
-        <HugeiconsIcon aria-hidden="true" icon={Share01Icon} strokeWidth={1.8} />
+        <IconShare aria-hidden="true" stroke={1.8} />
         <span className="as-button__label">Share</span>
       </Popover.Trigger>
       <Popover.Portal>
@@ -199,7 +188,7 @@ export function ReviewShareControl({
             {screen === "overview" ? (
               <header className="as-share-popover__header as-share-popover__header--artifact">
                 <span aria-hidden="true" className="as-share-destination__icon">
-                  <HugeiconsIcon icon={File01Icon} strokeWidth={1.8} />
+                  <IconFile stroke={1.8} />
                 </span>
                 <div>
                   <h2>{details?.artifact.name ?? "Artifact"}</h2>
@@ -212,7 +201,7 @@ export function ReviewShareControl({
                   onClick={() => updateOpen(false)}
                   type="button"
                 >
-                  <HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} strokeWidth={1.8} />
+                  <IconX aria-hidden="true" stroke={1.8} />
                 </button>
               </header>
             ) : (
@@ -224,7 +213,7 @@ export function ReviewShareControl({
                   onClick={() => setScreen("overview")}
                   type="button"
                 >
-                  <HugeiconsIcon aria-hidden="true" icon={ArrowLeft01Icon} strokeWidth={1.8} />
+                  <IconChevronLeft aria-hidden="true" stroke={1.8} />
                 </button>
                 <div>
                   <h2>{screen === "access" ? "Artifact access" : "Connect MCP"}</h2>
@@ -237,7 +226,7 @@ export function ReviewShareControl({
                   onClick={() => updateOpen(false)}
                   type="button"
                 >
-                  <HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} strokeWidth={1.8} />
+                  <IconX aria-hidden="true" stroke={1.8} />
                 </button>
               </header>
             )}
@@ -254,22 +243,14 @@ export function ReviewShareControl({
                       onClick={() => void copyReviewLink()}
                       type="button"
                     >
-                      <HugeiconsIcon
-                        aria-hidden="true"
-                        icon={copiedTarget === "review-link" ? Tick02Icon : Copy01Icon}
-                        strokeWidth={1.8}
-                      />
+                      {copiedTarget === "review-link" ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
                       {copiedTarget === "review-link" ? "Copied" : "Copy Review link"}
                     </button>
                   </div>
                 </section>
 
                 <div className="as-share-access-summary">
-                  <HugeiconsIcon
-                    aria-hidden="true"
-                    icon={publicArtifact ? Globe02Icon : SecurityLockIcon}
-                    strokeWidth={1.8}
-                  />
+                  {publicArtifact ? <IconWorld aria-hidden="true" stroke={1.8} /> : <IconLock aria-hidden="true" stroke={1.8} />}
                   <p>
                     People with access to this Artifact Server can review this exact version.
                     {publicArtifact ? " The latest raw artifact is public." : ""}
@@ -332,11 +313,7 @@ export function ReviewShareControl({
                       <span>
                         {copiedTarget === "agent-prompt" ? "Prompt copied" : "Copy review prompt"}
                       </span>
-                      <HugeiconsIcon
-                        aria-hidden="true"
-                        icon={copiedTarget === "agent-prompt" ? Tick02Icon : Copy01Icon}
-                        strokeWidth={1.8}
-                      />
+                      {copiedTarget === "agent-prompt" ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
                     </button>
                     <button
                       className="as-share-agent__setup"
@@ -348,7 +325,7 @@ export function ReviewShareControl({
                       type="button"
                     >
                       Connect MCP
-                      <HugeiconsIcon aria-hidden="true" icon={ArrowRight01Icon} strokeWidth={1.8} />
+                      <IconChevronRight aria-hidden="true" stroke={1.8} />
                     </button>
                   </div>
                 </section>
@@ -546,11 +523,7 @@ function CopyableAgentValue({
     <div className="as-share-agent-value">
       <code title={value}>{value}</code>
       <button aria-label={label} onClick={onCopy} type="button">
-        <HugeiconsIcon
-          aria-hidden="true"
-          icon={copied ? Tick02Icon : Copy01Icon}
-          strokeWidth={1.8}
-        />
+        {copied ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
       </button>
     </div>
   );
@@ -583,11 +556,7 @@ function ShareSecondaryLink({
         onClick={onCopy}
         type="button"
       >
-        <HugeiconsIcon
-          aria-hidden="true"
-          icon={copied ? Tick02Icon : Copy01Icon}
-          strokeWidth={1.8}
-        />
+        {copied ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
       </button>
     </div>
   );

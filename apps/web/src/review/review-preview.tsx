@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLinkIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { IconExternalLink } from "@tabler/icons-react";
 
 import {
   api,
@@ -591,7 +590,7 @@ function TerminalPreviewState({
           onClick={actions.onOpenRawArtifact}
           type="button"
         >
-          <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+          <IconExternalLink aria-hidden="true" stroke={1.8} />
           {actions.opening ? "Opening…" : "Open raw artifact"}
         </button>
         {actions.downloadUrl === null ? null : (

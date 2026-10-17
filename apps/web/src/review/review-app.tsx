@@ -8,33 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  ArrowShrinkIcon,
-  BookOpen01Icon,
-  Cancel01Icon,
-  Comment01Icon,
-  Download04Icon,
-  Edit02Icon,
-  ExternalLinkIcon,
-  File01Icon,
-  FilterIcon,
-  FullScreenIcon,
-  GithubIcon,
-  Home01Icon,
-  KeyboardIcon,
-  LayoutLeftIcon,
-  Link01Icon,
-  Moon02Icon,
-  PanelRightIcon,
-  RefreshIcon,
-  Search01Icon,
-  Settings02Icon,
-  Sun03Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { IconArrowsMinimize, IconBook, IconBrandGithub, IconCheck, IconChevronLeft, IconChevronRight, IconDownload, IconExternalLink, IconFile, IconFilter, IconHome, IconKeyboard, IconLayoutSidebar, IconLayoutSidebarRight, IconLink, IconMaximize, IconMessage, IconMoon, IconPencil, IconRefresh, IconSearch, IconSettings, IconSun, IconX } from "@tabler/icons-react";
 import {Dialog} from "@base-ui/react/dialog";
 import {Popover} from "@base-ui/react/popover";
 import {motion} from "motion/react";
@@ -195,7 +169,7 @@ function CatalogFilters({
           />
         )}
       >
-        <HugeiconsIcon aria-hidden="true" icon={FilterIcon} strokeWidth={1.8} />
+        <IconFilter aria-hidden="true" stroke={1.8} />
         <span>{triggerLabel}</span>
         {activeFilterCount === 0 ? null : (
           <span aria-hidden="true" className="as-catalog-filter-trigger__count">
@@ -241,7 +215,7 @@ function CatalogFilters({
                   />
                   <span>{label}</span>
                   {commentFilter === value ? (
-                    <HugeiconsIcon aria-hidden="true" icon={Tick02Icon} strokeWidth={2} />
+                    <IconCheck aria-hidden="true" stroke={2} />
                   ) : null}
                 </label>
               ))}
@@ -257,7 +231,7 @@ function CatalogFilters({
               >
                 <span>Any tag</span>
                 {tagFilters.length === 0 ? (
-                  <HugeiconsIcon aria-hidden="true" icon={Tick02Icon} strokeWidth={2} />
+                  <IconCheck aria-hidden="true" stroke={2} />
                 ) : null}
               </button>
               {tags.length === 0 ? (
@@ -273,7 +247,7 @@ function CatalogFilters({
                   />
                   <span>{tag}</span>
                   {tagFilters.includes(tag) ? (
-                    <HugeiconsIcon aria-hidden="true" icon={Tick02Icon} strokeWidth={2} />
+                    <IconCheck aria-hidden="true" stroke={2} />
                   ) : null}
                 </label>
               ))}
@@ -298,7 +272,7 @@ function ReviewKeyboardShortcuts() {
           />
         )}
       >
-        <HugeiconsIcon aria-hidden="true" icon={KeyboardIcon} strokeWidth={1.8} />
+        <IconKeyboard aria-hidden="true" stroke={1.8} />
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner
@@ -1327,7 +1301,7 @@ function ArtifactReview({
               className="as-icon-button as-home-overlay__close"
               title="Close Artifact Server home"
             >
-              <HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} strokeWidth={1.8} />
+              <IconX aria-hidden="true" stroke={1.8} />
             </Dialog.Close>
             <div className="as-home-overlay__content">
             <img
@@ -1344,13 +1318,13 @@ function ArtifactReview({
                   target="_blank"
                 >
                   <span className="as-home-resources__icon">
-                    <HugeiconsIcon aria-hidden="true" icon={GithubIcon} strokeWidth={1.8} />
+                    <IconBrandGithub aria-hidden="true" stroke={1.8} />
                   </span>
                   <span className="as-home-resources__identity">
                     <strong>GitHub</strong>
                     <span>Source and releases</span>
                   </span>
-                  <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+                  <IconExternalLink aria-hidden="true" stroke={1.8} />
                 </a>
                 <a
                   className="as-home-resources__link"
@@ -1359,13 +1333,13 @@ function ArtifactReview({
                   target="_blank"
                 >
                   <span className="as-home-resources__icon">
-                    <HugeiconsIcon aria-hidden="true" icon={Home01Icon} strokeWidth={1.8} />
+                    <IconHome aria-hidden="true" stroke={1.8} />
                   </span>
                   <span className="as-home-resources__identity">
                     <strong>Homepage</strong>
                     <span>Product overview</span>
                   </span>
-                  <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+                  <IconExternalLink aria-hidden="true" stroke={1.8} />
                 </a>
                 <a
                   className="as-home-resources__link"
@@ -1374,13 +1348,13 @@ function ArtifactReview({
                   target="_blank"
                 >
                   <span className="as-home-resources__icon">
-                    <HugeiconsIcon aria-hidden="true" icon={BookOpen01Icon} strokeWidth={1.8} />
+                    <IconBook aria-hidden="true" stroke={1.8} />
                   </span>
                   <span className="as-home-resources__identity">
                     <strong>Docs</strong>
                     <span>Install and deploy</span>
                   </span>
-                  <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+                  <IconExternalLink aria-hidden="true" stroke={1.8} />
                 </a>
                 {/* TODO(open-source-launch): publish the dedicated agent-connection guide at this canonical route. */}
                 <a
@@ -1399,7 +1373,7 @@ function ArtifactReview({
                     <strong>Connect agents</strong>
                     <span>MCP and client setup</span>
                   </span>
-                  <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+                  <IconExternalLink aria-hidden="true" stroke={1.8} />
                 </a>
               </nav>
             </div>
@@ -1443,7 +1417,7 @@ function ArtifactReview({
               label={theme === "moon" ? "Use light theme" : "Use dark theme"}
               onClick={onThemeChange}
             >
-              <HugeiconsIcon icon={theme === "moon" ? Sun03Icon : Moon02Icon} strokeWidth={1.8} />
+              {theme === "moon" ? <IconSun stroke={1.8} /> : <IconMoon stroke={1.8} />}
             </IconButton>
             <a
               aria-label="Open settings"
@@ -1453,7 +1427,7 @@ function ArtifactReview({
                 : `/review/settings/projects/${encodeURIComponent(selectedProject.id)}`}
               title="Open settings"
             >
-              <HugeiconsIcon icon={Settings02Icon} strokeWidth={1.8} />
+              <IconSettings stroke={1.8} />
             </a>
             <IconButton
               keyShortcuts="["
@@ -1461,7 +1435,7 @@ function ArtifactReview({
               onClick={() => setCatalogOpen(false)}
               title="Collapse artifact catalog ([)"
             >
-              <HugeiconsIcon icon={LayoutLeftIcon} strokeWidth={1.8} />
+              <IconLayoutSidebar stroke={1.8} />
             </IconButton>
           </div>
         </header>
@@ -1470,7 +1444,7 @@ function ArtifactReview({
           <div className="as-search-group">
             <label className="as-search">
               <span className="as-visually-hidden">Search artifacts</span>
-              <HugeiconsIcon aria-hidden="true" icon={Search01Icon} strokeWidth={1.8} />
+              <IconSearch aria-hidden="true" stroke={1.8} />
               <input
                 onChange={(event) => setQuery(event.currentTarget.value)}
                 placeholder="Search artifacts…"
@@ -1479,7 +1453,7 @@ function ArtifactReview({
               />
               {query === "" ? null : (
                 <button aria-label="Clear search" onClick={() => setQuery("")} type="button">
-                  <HugeiconsIcon icon={Cancel01Icon} strokeWidth={1.8} />
+                  <IconX stroke={1.8} />
                 </button>
               )}
             </label>
@@ -1555,7 +1529,7 @@ function ArtifactReview({
                   </span>
                   <span className="as-artifact-card__counts">
                     <span>
-                      <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
+                      <IconMessage aria-hidden="true" stroke={1.8} />
                       {displayedCommentCount} comment{displayedCommentCount === 1 ? "" : "s"}
                     </span>
                   </span>
@@ -1576,12 +1550,7 @@ function ArtifactReview({
             title="Refresh artifacts published by agents, the CLI, or other sessions"
             type="button"
           >
-            <HugeiconsIcon
-              aria-hidden="true"
-              className="as-catalog-refresh__icon"
-              icon={catalogRefreshState === "complete" ? Tick02Icon : RefreshIcon}
-              strokeWidth={1.8}
-            />
+            {catalogRefreshState === "complete" ? <IconCheck aria-hidden="true" className="as-catalog-refresh__icon" stroke={1.8} /> : <IconRefresh aria-hidden="true" className="as-catalog-refresh__icon" stroke={1.8} />}
             <span>
               {catalogRefreshState === "loading"
                 ? "Refreshing…"
@@ -1655,7 +1624,7 @@ function ArtifactReview({
                         : "Interact mode: links and controls work normally. Select text or turn annotation mode back on to comment."}
                       type="button"
                     >
-                      <HugeiconsIcon aria-hidden="true" icon={Edit02Icon} strokeWidth={1.8} />
+                      <IconPencil aria-hidden="true" stroke={1.8} />
                       {htmlAnnotateModeActive ? "Annotate mode" : "Interact mode"}
                     </button>
                   ) : null}
@@ -1670,7 +1639,7 @@ function ArtifactReview({
                     title="Toggle comments (])"
                     type="button"
                   >
-                    <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
+                    <IconMessage aria-hidden="true" stroke={1.8} />
                     Comments
                     <span className="as-focus-controls__count">{openCommentCount}</span>
                   </button>
@@ -1693,7 +1662,7 @@ function ArtifactReview({
                     title="Exit full screen (F)"
                     type="button"
                   >
-                    <HugeiconsIcon aria-hidden="true" icon={ArrowShrinkIcon} strokeWidth={1.8} />
+                    <IconArrowsMinimize aria-hidden="true" stroke={1.8} />
                     Exit full screen
                   </button>
                   <button
@@ -1703,7 +1672,7 @@ function ArtifactReview({
                     title="Hide viewer controls"
                     type="button"
                   >
-                    <HugeiconsIcon aria-hidden="true" icon={ArrowRight01Icon} strokeWidth={1.8} />
+                    <IconChevronRight aria-hidden="true" stroke={1.8} />
                   </button>
                 </div>
                 <button
@@ -1717,7 +1686,7 @@ function ArtifactReview({
                   title="Show viewer controls (Command/Control + \\)"
                   type="button"
                 >
-                  <HugeiconsIcon aria-hidden="true" icon={ArrowLeft01Icon} strokeWidth={1.8} />
+                  <IconChevronLeft aria-hidden="true" stroke={1.8} />
                 </button>
               </div>
               <aside
@@ -1730,7 +1699,7 @@ function ArtifactReview({
               >
                 <header className="as-focus-comments__header">
                   <div>
-                    <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
+                    <IconMessage aria-hidden="true" stroke={1.8} />
                     <h2 id="review-focus-comments-title">Comments</h2>
                     <span>{openCommentCount}</span>
                   </div>
@@ -1740,7 +1709,7 @@ function ArtifactReview({
                     onClick={() => setFocusCommentsOpen(false)}
                     title="Close comments (] or Esc)"
                   >
-                    <HugeiconsIcon icon={Cancel01Icon} strokeWidth={1.8} />
+                    <IconX stroke={1.8} />
                   </IconButton>
                 </header>
                 <div className="as-focus-comments__body">
@@ -1765,7 +1734,7 @@ function ArtifactReview({
                   onClick={() => setCatalogOpen(true)}
                   title="Open artifact catalog ([)"
                 >
-                  <HugeiconsIcon icon={LayoutLeftIcon} strokeWidth={1.8} />
+                  <IconLayoutSidebar stroke={1.8} />
                 </IconButton>
               ) : null}
               <h1>{details?.artifact.name ?? selectedItem?.artifact.name ?? "Artifact Server"}</h1>
@@ -1779,7 +1748,7 @@ function ArtifactReview({
                     : "Interact mode: links and controls work normally. Select text or turn annotation mode back on to comment."}
                   onClick={() => setHtmlAnnotateModeActive((active) => !active)}
                 >
-                  <HugeiconsIcon icon={Edit02Icon} strokeWidth={1.8} />
+                  <IconPencil stroke={1.8} />
                 </IconButton>
               ) : null}
               <button
@@ -1789,7 +1758,7 @@ function ArtifactReview({
                 onClick={() => void openRawArtifact()}
                 type="button"
               >
-                <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
+                <IconExternalLink aria-hidden="true" stroke={1.8} />
                 <span className="as-button__label">
                   {opening ? "Opening…" : "Open raw artifact"}
                 </span>
@@ -1815,7 +1784,7 @@ function ArtifactReview({
                 title="Full screen (F)"
                 type="button"
               >
-                <HugeiconsIcon aria-hidden="true" icon={FullScreenIcon} strokeWidth={1.8} />
+                <IconMaximize aria-hidden="true" stroke={1.8} />
                 <span className="as-button__label">Full screen</span>
               </button>
               {!inspectorOpen ? (
@@ -1825,7 +1794,7 @@ function ArtifactReview({
                   onClick={() => setInspectorOpen(true)}
                   title="Open inspector (])"
                 >
-                  <HugeiconsIcon icon={PanelRightIcon} strokeWidth={1.8} />
+                  <IconLayoutSidebarRight stroke={1.8} />
                 </IconButton>
               ) : null}
             </div>
@@ -1909,7 +1878,7 @@ function ArtifactReview({
                 }}
                 title="Previous artifact (K or ↑)"
               >
-                <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={1.8} />
+                <IconChevronLeft stroke={1.8} />
               </IconButton>
               <span className="as-tabular">
                 {selectedIndex < 0 ? "0" : selectedIndex + 1} / {catalogItems.length}
@@ -1926,7 +1895,7 @@ function ArtifactReview({
                 }}
                 title="Next artifact (J or ↓)"
               >
-                <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} />
+                <IconChevronRight stroke={1.8} />
               </IconButton>
             </div>
             <div className="as-preview-footer__status">
@@ -1943,7 +1912,7 @@ function ArtifactReview({
                 )}
                 type="button"
               >
-                <HugeiconsIcon aria-hidden="true" icon={RefreshIcon} strokeWidth={1.8} />
+                <IconRefresh aria-hidden="true" stroke={1.8} />
                 {comments.loading ? "Loading…" : "Reload"}
               </button>
             </div>
@@ -1987,7 +1956,7 @@ function ArtifactReview({
               onClick={() => setInspectorOpen(false)}
               title="Close inspector (])"
             >
-              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={1.8} />
+              <IconX stroke={1.8} />
             </IconButton>
           </header>
           <div
@@ -2095,7 +2064,7 @@ function ReviewDownloadControl({
   if (download === null) {
     return (
       <button aria-label="Download" className={className} disabled type="button">
-        <HugeiconsIcon aria-hidden="true" icon={Download04Icon} strokeWidth={1.8} />
+        <IconDownload aria-hidden="true" stroke={1.8} />
         <span className="as-button__label">Download</span>
       </button>
     );
@@ -2108,7 +2077,7 @@ function ReviewDownloadControl({
       href={download.href}
       title={download.title}
     >
-      <HugeiconsIcon aria-hidden="true" icon={Download04Icon} strokeWidth={1.8} />
+      <IconDownload aria-hidden="true" stroke={1.8} />
       <span className="as-button__label">Download</span>
     </a>
   );
@@ -2302,7 +2271,7 @@ function FilesInspector({
                 onClick={() => onSelect(entry.path)}
                 type="button"
               >
-                <span className="as-file-list__icon"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} /></span>
+                <span className="as-file-list__icon"><IconFile stroke={1.8} /></span>
                 <span className="as-file-list__identity">
                   <code>{entry.path}</code>
                   <small>{entry.mediaType}</small>
@@ -2708,7 +2677,7 @@ function PreviewWelcome({
 }) {
   return (
     <div className="as-preview-welcome">
-      <span aria-hidden="true"><HugeiconsIcon icon={Link01Icon} strokeWidth={1.4} /></span>
+      <span aria-hidden="true"><IconLink stroke={1.4} /></span>
       <p>Immutable artifact workspace</p>
       <h2>{title}</h2>
       <small>{description}</small>

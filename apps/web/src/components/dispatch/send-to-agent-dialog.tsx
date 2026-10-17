@@ -1,8 +1,7 @@
 import {useEffect, useId, useRef, useState} from "react";
 import {z} from "zod";
 
-import {ArrowDown01Icon} from "@hugeicons/core-free-icons";
-import {HugeiconsIcon} from "@hugeicons/react";
+import { IconChevronDown } from "@tabler/icons-react";
 
 import {api, type AgentDispatch, type AgentPresence} from "@/api/client";
 import type {DispatchBundle} from "@/components/dispatch/dispatch-bundle";
@@ -408,7 +407,7 @@ export function SendToAgentControl({
               />
             )}
           >
-            <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.8} />
+            <IconChevronDown stroke={1.8} />
           </PopoverTrigger>
           <PopoverContent align="end" className="w-80 gap-2 p-2">
             {menuAgents.length === 0 ? null : (

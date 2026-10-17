@@ -1,5 +1,4 @@
-import {Copy01Icon, Tick02Icon} from "@hugeicons/core-free-icons";
-import {HugeiconsIcon} from "@hugeicons/react";
+import { IconCheck, IconCopy } from "@tabler/icons-react";
 import {useEffect, useRef, useState} from "react";
 
 import {PageHeader} from "@/components/product";
@@ -182,11 +181,7 @@ function CopyableValue({
         type="button"
         variant="outline"
       >
-        <HugeiconsIcon
-          aria-hidden="true"
-          icon={copied ? Tick02Icon : Copy01Icon}
-          strokeWidth={1.8}
-        />
+        {copied ? <IconCheck aria-hidden="true" stroke={1.8} /> : <IconCopy aria-hidden="true" stroke={1.8} />}
         {copied ? "Copied" : "Copy"}
       </Button>
     </div>

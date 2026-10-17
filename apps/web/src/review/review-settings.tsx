@@ -1,5 +1,4 @@
-import {ArrowLeft01Icon, Moon02Icon, Sun03Icon} from "@hugeicons/core-free-icons";
-import {HugeiconsIcon} from "@hugeicons/react";
+import { IconChevronLeft, IconMoon, IconSun } from "@tabler/icons-react";
 
 import {api, type Project, type Session} from "@/api/client";
 import {StatePanel} from "@/components/product";
@@ -57,10 +56,10 @@ export function ReviewSettings({
               title={theme === "moon" ? "Use light theme" : "Use dark theme"}
               type="button"
             >
-              <HugeiconsIcon icon={theme === "moon" ? Sun03Icon : Moon02Icon} strokeWidth={1.8} />
+              {theme === "moon" ? <IconSun stroke={1.8} /> : <IconMoon stroke={1.8} />}
             </button>
             <ButtonLink href={reviewHref} size="sm" variant="outline">
-              <HugeiconsIcon data-icon="inline-start" icon={ArrowLeft01Icon} strokeWidth={1.8} />
+              <IconChevronLeft data-icon="inline-start" stroke={1.8} />
               Back to review
             </ButtonLink>
             <Button
