@@ -40,10 +40,10 @@ A server with a content domain refuses `--path` with `CAPABILITY_UNAVAILABLE`.
 
 ## Use a remote server
 
-Sign in once, save a named profile, and use it when publishing:
+Save a named profile with an API key from an administrator, and use it when publishing. Pipe the key on standard input so it stays out of shell history:
 
 ```sh
-artifactserver auth login https://artifacts.example.com --name team
+artifactserver auth login https://artifacts.example.com --name team --api-key-stdin < key.txt
 artifactserver publish ./dist --profile team
 ```
 

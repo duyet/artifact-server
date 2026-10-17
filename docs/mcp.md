@@ -38,9 +38,13 @@ Add the exact MCP address to the client:
 https://artifacts.example.com/mcp
 ```
 
-The client opens the configured identity provider. Complete browser authorization, then return to the client.
+Send an API key as a bearer token with every request:
 
-The access token is valid for that exact `/mcp` resource. A token for another installation or application resource does not qualify.
+```text
+Authorization: Bearer <key>
+```
+
+An administrator creates keys under Settings › API keys. A key from another installation does not work.
 
 ## Publish from an agent
 
