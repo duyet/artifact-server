@@ -115,6 +115,11 @@ curl --fail https://artifacts.example.internal/ready
 
 To upgrade, run the same command with the digest of a newer release.
 
+The release that removes OIDC and WorkOS needs two checks before the upgrade:
+
+- Delete any `identity:` block from `artifact-server-values.yaml`. The chart schema rejects unknown keys, so the upgrade fails with it present.
+- Postgres migration `0017_drop_external_identities` drops the `external_identities` table. Run `SELECT count(*) FROM external_identities;` first. It should be 0 on a deployment that never used a browser identity provider. If it is not, back up the table before upgrading, because the drop cannot be undone.
+
 ## The API key
 
 Generate the key once, on a trusted machine.
