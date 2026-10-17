@@ -13,6 +13,8 @@ artifactserver publish ./report.pdf
 artifactserver publish ./dist --public --name "Product prototype" --tag prototype
 ```
 
+Without `--public` or `--private`, the server picks the access setting: public on a server with browser login off, sign-in required otherwise. `--private` requires sign-in either way.
+
 Publication returns JSON with three browser links:
 
 | Link | Purpose |
@@ -57,6 +59,6 @@ artifactserver publish ./dist \
   --expected-version ver_example
 ```
 
-The expected version prevents an old client from replacing a newer current pointer. `--name`, `--path`, `--public`, and `--tag` apply only when creating an artifact, so this command refuses them. A new version keeps the artifact's path.
+The expected version prevents an old client from replacing a newer current pointer. `--name`, `--path`, `--public`, `--private`, and `--tag` apply only when creating an artifact, so this command refuses them. A new version keeps the artifact's path.
 
 Run `artifactserver --help` or `artifactserver <command> --help` for the complete command reference.

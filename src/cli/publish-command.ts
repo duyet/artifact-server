@@ -26,6 +26,7 @@ interface PublishOptions {
   readonly expectedVersion?: string;
   readonly name?: string;
   readonly path?: string;
+  readonly private: boolean;
   readonly public: boolean;
   readonly project?: string;
   readonly profile?: string;
@@ -81,6 +82,11 @@ export function configurePublishCommand(
       ),
     )
     .addOption(new Option("--public", "allow the link to open without sign-in").default(false))
+    .addOption(
+      new Option("--private", "require sign-in to open the link, even where public is the default")
+        .conflicts("public")
+        .default(false),
+    )
     .addOption(
       new Option("--tag <tag>", "tag for a new artifact; repeat for more tags")
         .argParser(collectTag)
@@ -140,10 +146,11 @@ function publicationCommand(
       options.name !== undefined
       || options.path !== undefined
       || options.public
+      || options.private
       || options.tag.length > 0
     ) {
       throw new Error(
-        "--name, --path, --public, and --tag apply only when creating a new artifact.",
+        "--name, --path, --public, --private, and --tag apply only when creating a new artifact.",
       );
     }
     return withEntryPath({
@@ -156,7 +163,11 @@ function publicationCommand(
     }, options.entry);
   }
 
-  const access = options.public ? {accessSetting: "public_link" as const} : {};
+  const access = options.public
+    ? {accessSetting: "public_link" as const}
+    : options.private
+      ? {accessSetting: "account_required" as const}
+      : {};
   const named = options.name === undefined
     ? {
       ...access,

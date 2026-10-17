@@ -231,7 +231,7 @@ async function callMcpTool<Result extends z.ZodType>(
 async function publishOverCli(
   {installation, server, workDirectory}: Deployment,
   name: string,
-  withPublicFlag: boolean,
+  accessFlag?: "--private" | "--public",
 ): Promise<Published> {
   const siteDirectory = path.join(workDirectory, randomUUID());
   await mkdir(siteDirectory);
@@ -244,7 +244,7 @@ async function publishOverCli(
     name,
     "--profile-data",
     path.join(workDirectory, "profiles"),
-    ...(withPublicFlag ? ["--public"] : []),
+    ...(accessFlag === undefined ? [] : [accessFlag]),
   ], {
     ...process.env,
     ARTIFACT_SERVER_API_TOKEN: installation.apiToken,
@@ -293,7 +293,11 @@ async function publishThreeWays(
 ): Promise<readonly Published[]> {
   const http = await publishOverHttp(deployment, `${label} over HTTP`, explicit);
   const mcp = await publishOverMcp(deployment, `${label} over MCP`, explicit);
-  const cli = await publishOverCli(deployment, `${label} over CLI`, explicit !== undefined);
+  const cli = await publishOverCli(
+    deployment,
+    `${label} over CLI`,
+    explicit === undefined ? undefined : "--public",
+  );
   return [http, mcp, cli];
 }
 
@@ -350,12 +354,29 @@ describe("the default access setting of a new artifact", () => {
     await withDeployment(privateTeamBrowserAccess(browserLoginKinds.none), async (deployment) => {
       const http = await publishOverHttp(deployment, "No login private over HTTP", "account_required");
       const mcp = await publishOverMcp(deployment, "No login private over MCP", "account_required");
-      expect([http.accessSetting, mcp.accessSetting]).toEqual([
+      const cli = await publishOverCli(deployment, "No login private over CLI", "--private");
+      expect([http.accessSetting, mcp.accessSetting, cli.accessSetting]).toEqual([
+        "account_required",
         "account_required",
         "account_required",
       ]);
-      const refused = await Promise.all([http, mcp].map(readWithoutCredentials));
-      expect(refused.map(({status}) => status)).toEqual([401, 401]);
+      const refused = await Promise.all([http, mcp, cli].map(readWithoutCredentials));
+      expect(refused.map(({status}) => status)).toEqual([401, 401, 401]);
+
+      const conflicting = await runCli([
+        "publish",
+        path.join(deployment.workDirectory, "unused.html"),
+        "--public",
+        "--private",
+      ], {
+        ...process.env,
+        ARTIFACT_SERVER_API_TOKEN: deployment.installation.apiToken,
+        ARTIFACT_SERVER_URL: deployment.server.baseUrl,
+      });
+      expect({
+        exitCode: conflicting.exitCode,
+        refusesBoth: conflicting.stderr.includes("--private") && conflicting.stderr.includes("--public"),
+      }).toEqual({exitCode: 1, refusesBoth: true});
     });
   });
 });
