@@ -24,20 +24,7 @@ import { LocalBlobStore } from "../storage/local-blob-store.js";
 import { LocalStagingStore } from "../storage/local-staging-store.js";
 import { SqliteArtifactRepository } from "../storage/sqlite-artifact-repository.js";
 import { SqliteIdentityRepository } from "../storage/sqlite-identity-repository.js";
-import {
-  createLocalApplicationLayer,
-  type LinkedApplicationAdapters,
-} from "./create-local-application-layer.js";
-import {
-  canonicalizeLinkPath,
-  canonicalizeLinkRoots,
-  captureSource,
-  checkLinkRoots,
-  checkSelfProtection,
-  openVerifiedSource,
-  refreshFreshness,
-} from "./linked-source-engine.js";
-import { mediaTypeForPath } from "../client/file-publication-client.js";
+import { createLocalApplicationLayer } from "./create-local-application-layer.js";
 import type {RuntimeLifecycle} from "../lifecycle/runtime-readiness.js";
 import {
   defaultStagingCleanupPolicy,
@@ -105,10 +92,6 @@ export interface LocalRuntimeConfig {
   readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
   /** Complete provider seam for conformance tests; production composes REST and Git. */
   readonly gitHistoryProvider?: GitHistoryProvider;
-  /** Linked-artifact capability switch; absent or "off" leaves it disabled. */
-  readonly linkedFiles?: "off" | "on";
-  /** Canonical roots linked source paths must resolve inside. */
-  readonly linkRoots?: readonly string[];
   readonly localBootstrapToken?: string;
   readonly observability?: boolean;
   readonly runtimeLifecycle?: RuntimeLifecycle;
@@ -184,34 +167,6 @@ export async function createLocalRuntime(
     repository.close();
     throw cause;
   }
-  const linkedFilesEnabled = config.linkedFiles === "on";
-  const selfProtectedPaths = {
-    databasePath,
-    dataDirectory: config.dataDirectory,
-  };
-  const linkedAdapters: LinkedApplicationAdapters | undefined =
-    linkedFilesEnabled
-      ? {
-        bindings: repository,
-        configuration: {
-          linkRoots: config.linkRoots ?? [],
-          spoolDirectory: path.join(config.dataDirectory, "capture-spool"),
-        },
-        engine: {
-          canonicalizeLinkPath,
-          canonicalizeLinkRoots,
-          captureSource: (canonicalPath, spoolDirectory) =>
-            captureSource(canonicalPath, spoolDirectory),
-          checkLinkRoots,
-          checkSelfProtection: (canonicalPath) =>
-            checkSelfProtection(canonicalPath, selfProtectedPaths),
-          mediaTypeForPath,
-          openVerifiedSource: (canonicalPath) =>
-            openVerifiedSource(canonicalPath),
-          refreshFreshness,
-        },
-      }
-      : undefined;
   const resourceLayer = Layer.effectDiscard(
     Effect.acquireRelease(
       Effect.succeed({
@@ -226,7 +181,7 @@ export async function createLocalRuntime(
       }),
     ),
   );
-  let applicationAdapters: Parameters<typeof createLocalApplicationLayer>[0] = {
+  const applicationAdapters: Parameters<typeof createLocalApplicationLayer>[0] = {
     apiToken: config.browserAccess.mode === browserAccessModes.localOwner
       ? apiToken
       : null,
@@ -254,9 +209,6 @@ export async function createLocalRuntime(
   };
   if (gitHistoryProvider !== null) {
     Object.assign(applicationAdapters, {gitHistoryProvider});
-  }
-  if (linkedAdapters !== undefined) {
-    applicationAdapters = {...applicationAdapters, linked: linkedAdapters};
   }
   const applicationLayer = createLocalApplicationLayer(applicationAdapters);
   const telemetryLayer = config.observability === true
@@ -310,7 +262,6 @@ export async function createLocalRuntime(
       contentDomain: config.contentDomain,
       gitHistory: gitHistoryMonitor?.reader ??
         fixedGitHistoryCapabilityReader(gitHistory.capability),
-      linkedArtifacts: linkedFilesEnabled,
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),
     };

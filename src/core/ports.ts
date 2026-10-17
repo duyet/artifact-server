@@ -38,8 +38,6 @@ import type {
   RegisteredAgentKind,
   RegisteredAgentPresence,
   RegisteredAgentRecord,
-  SourceBindingRecord,
-  SourceFreshness,
   StagedUpload,
   VersionRecord,
   VersionContent,
@@ -142,7 +140,7 @@ export interface CommitArtifactVersion {
   readonly artifactId: string;
   readonly contentToken: string;
   readonly createdAt: string;
-  /** Null for an ordinary publish or capture. */
+  /** Null for an ordinary publish. */
   readonly edit: ArtifactEditCommit | null;
   readonly expectedCurrentVersionId: string;
   readonly idempotencyKey: string;
@@ -404,74 +402,6 @@ export interface CommentRepository {
     versionId: string,
     path: string,
   ): Promise<boolean>;
-}
-
-/** Binding values persisted when linking, capturing, or relinking one source file. */
-export interface SourceBindingWrite {
-  /** `device:inode:size:mtimeNs:ctimeNs` verified on the capturing descriptor. */
-  readonly fingerprint: string;
-  /** Canonicalized absolute path that already passed the section 4.3 ladder. */
-  readonly path: string;
-  readonly verifiedAt: string;
-}
-
-/**
- * Values used to atomically create one linked artifact together with its
- * source binding and its initial captured version.
- */
-export interface CommitLinkedArtifact extends CommitNewArtifact {
-  readonly binding: SourceBindingWrite;
-}
-
-/**
- * Values used to atomically commit one captured version while refreshing the
- * binding's fingerprint and freshness in the same transaction.
- */
-export interface CommitCapturedVersion
-  extends Omit<CommitArtifactVersion, "edit"> {
-  readonly binding: SourceBindingWrite;
-}
-
-/** Values used to record one lazily observed source freshness state. */
-export interface RecordSourceFreshness {
-  readonly artifactId: string;
-  readonly freshness: SourceFreshness;
-  readonly projectId: string;
-  readonly verifiedAt: string;
-}
-
-/** Values used to re-point one binding at a moved source file. */
-export interface RelinkSourceBinding {
-  readonly artifactId: string;
-  readonly authorizedByPrincipalId: string | null;
-  readonly binding: SourceBindingWrite;
-  readonly createdAt: string;
-  readonly idempotencyKey: string;
-  readonly inputDigest: string;
-  readonly principalId: string;
-  readonly projectId: string;
-}
-
-/**
- * Persistent linked-artifact binding operations, implemented only by the
- * local SQLite backend. Link and capture commits keep binding state and
- * version state consistent in one transaction; the relink mutation appends
- * its attributed action record in the same transaction; freshness recording
- * is a lazy observation that never touches versions.
- */
-export interface SourceBindingRepository {
-  commitCapturedVersion(
-    command: CommitCapturedVersion,
-  ): Promise<PublishedVersion>;
-  commitLinkedArtifact(command: CommitLinkedArtifact): Promise<PublishedVersion>;
-  findSourceBinding(
-    projectId: string,
-    artifactId: string,
-  ): Promise<SourceBindingRecord | null>;
-  recordSourceFreshness(
-    command: RecordSourceFreshness,
-  ): Promise<SourceBindingRecord>;
-  relinkSource(command: RelinkSourceBinding): Promise<SourceBindingRecord>;
 }
 
 /** Values used to register or refresh one live agent connection. */

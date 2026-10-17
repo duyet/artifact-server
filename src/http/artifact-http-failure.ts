@@ -83,18 +83,6 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
       return {code: errorCodes.uploadNotFound, message: failure.message, status: 404};
     case "VersionNotFound":
       return {code: errorCodes.versionNotFound, message: failure.message, status: 404};
-    case "InvalidLinkPath":
-      return {code: errorCodes.invalidLinkPath, message: failure.message, status: 422};
-    case "LinkPathOutsideRoots":
-      return {code: errorCodes.linkPathOutsideRoots, message: failure.message, status: 403};
-    case "LinkPathProtected":
-      return {code: errorCodes.linkPathProtected, message: failure.message, status: 403};
-    case "SourceDrifted":
-      return {code: errorCodes.sourceDrifted, message: failure.message, status: 409};
-    case "SourceMissing":
-      return {code: errorCodes.sourceMissing, message: failure.message, status: 409};
-    case "SourceUnreadable":
-      return {code: errorCodes.sourceUnreadable, message: failure.message, status: 409};
     case "CapabilityUnavailable":
       return {
         code: errorCodes.capabilityUnavailable,

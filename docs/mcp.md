@@ -84,8 +84,6 @@ opens its raw immutable content. Agents should hand people the Review URL.
 | Comments | `comment_list`, `comment_get`, `comment_create`, `comment_reply`, `comment_update`, `comment_resolve`, `comment_delete` |
 | Git history planning | `project_git_history_status`, `project_git_history_estimate` |
 
-Linked-artifact tools appear only when the deployment enables linked artifacts.
-
 `project_set_git_history` enables one project only after an authorized caller confirms a fresh estimate. Provider configuration alone copies nothing. Agents should report the returned project state and must not describe `waiting`, `degraded`, or `budget-limited` history as ready.
 
 ## Install the Artifact Server skill

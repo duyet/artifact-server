@@ -63,7 +63,6 @@ const deploymentCapabilitiesSchema = z.object({
   /** The largest text file one edit may save, as the server enforces it. */
   editing: z.object({maximumTextFileBytes: z.number().int().positive()}),
   gitHistory: gitHistoryCapabilitySchema.default(disabledGitHistoryCapability),
-  linkedArtifacts: z.boolean(),
 });
 
 const sessionSchema = z.object({
@@ -82,20 +81,6 @@ const accessContextSchema = z.discriminatedUnion("accessMode", [
     login: z.object({kind: z.enum(["none", "oidc", "workos"])}),
   }),
 ]);
-
-const sourceFreshnessSchema = z.enum([
-  "in-sync",
-  "missing",
-  "modified",
-  "unreadable",
-]);
-
-/** The linked file behind an artifact, as the local deployment reports it. */
-const sourceBindingSchema = z.object({
-  lastVerifiedAt: z.string(),
-  path: z.string(),
-  status: sourceFreshnessSchema,
-});
 
 const projectSchema = z.object({
   archivedAt: z.string().nullable(),
@@ -199,8 +184,6 @@ const noContentStatuses = new Set([204, 205]);
 
 export type AccessSetting = z.infer<typeof accessSettingSchema>;
 export type DeploymentCapabilities = z.infer<typeof deploymentCapabilitiesSchema>;
-export type SourceFreshness = z.infer<typeof sourceFreshnessSchema>;
-export type SourceBinding = z.infer<typeof sourceBindingSchema>;
 export type PrincipalCapability = z.infer<typeof capabilitySchema>;
 export type Principal = z.infer<typeof principalSchema>;
 export type Session = z.infer<typeof sessionSchema>;
@@ -301,17 +284,12 @@ export interface ArtifactDetails {
   readonly current: ArtifactVersion;
   readonly links: {
     readonly artifact: string;
-    /** The artifact's own live origin; present only for a linked artifact. */
-    readonly live?: string | undefined;
     readonly management: string;
   };
-  /** Present only on a local deployment that linked this artifact to a file. */
-  readonly sourceBinding?: SourceBinding | undefined;
 }
 
 export interface ArtifactAction {
   readonly action:
-    | "capture"
     | "change_access"
     | "change_tags"
     | "comment_create"
@@ -322,9 +300,7 @@ export interface ArtifactAction {
     | "comment_update"
     | "delete"
     | "edited"
-    | "link"
     | "publish"
-    | "relink"
     | "renamed"
     | "restore";
   readonly artifactId: string;
@@ -442,30 +418,12 @@ const artifactDetailsSchema: z.ZodType<ArtifactDetails> = z.object({
   current: artifactVersionSchema,
   links: z.object({
     artifact: z.url(),
-    live: z.url().optional(),
     management: z.url(),
   }),
-  sourceBinding: sourceBindingSchema.optional(),
 });
-
-/** The link and capture answer: a published version plus the binding it read. */
-const linkedPublicationSchema = z.object({
-  artifact: artifactSchema,
-  links: z.object({
-    artifact: z.url(),
-    live: z.url().optional(),
-    version: z.url(),
-  }),
-  replayed: z.boolean(),
-  sourceBinding: sourceBindingSchema,
-  version: versionSchema,
-});
-
-export type LinkedPublication = z.infer<typeof linkedPublicationSchema>;
 
 const actionSchema: z.ZodType<ArtifactAction> = z.object({
   action: z.enum([
-    "capture",
     "change_access",
     "change_tags",
     "comment_create",
@@ -476,9 +434,7 @@ const actionSchema: z.ZodType<ArtifactAction> = z.object({
     "comment_update",
     "delete",
     "edited",
-    "link",
     "publish",
-    "relink",
     "renamed",
     "restore",
   ]),
@@ -1196,35 +1152,6 @@ export const api = {
       headers: mutationHeaders(idempotencyKey),
       method: "DELETE",
     },
-  ),
-  /**
-   * Save the linked file's current bytes as a new immutable version. Capturing
-   * a binding that is already in sync replays the current version instead of
-   * committing a second identical one.
-   */
-  captureArtifact: (
-    projectId: string,
-    artifactId: string,
-    expectedCurrentVersionId: string,
-    idempotencyKey: string,
-  ) => request(
-    linkedPublicationSchema,
-    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/capture?${projectQuery(projectId)}`,
-    {
-      body: JSON.stringify({ expectedCurrentVersionId }),
-      headers: mutationHeaders(idempotencyKey),
-      method: "POST",
-    },
-  ),
-  /**
-   * Enter the artifact's live origin: the answer is a one-use bootstrap URL
-   * that exchanges itself for the content cookie, exactly like a version's
-   * content session, and then streams the file's current bytes.
-   */
-  liveSession: (projectId: string, artifactId: string) => request(
-    z.object({ bootstrapUrl: z.url(), expiresAt: z.string() }),
-    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/live-sessions?${projectQuery(projectId)}`,
-    { headers: mutationHeaders(), method: "POST" },
   ),
   contentSession: (
     projectId: string,

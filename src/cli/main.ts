@@ -16,10 +16,6 @@ import {
   writeLocalServiceRecord,
 } from "../local/local-service-record.js";
 import {startLocalServer} from "../local/start-local-server.js";
-import {
-  parseLinkRoots,
-  parseLinkedFilesMode,
-} from "../lifecycle/runtime-configuration.js";
 import {loadNodeGitHistoryConfiguration} from
   "../git-history/node-git-history-configuration.js";
 import {defaultCompletedRequestLogSampleRate} from
@@ -28,7 +24,6 @@ import {runCliEffect} from "./run-cli-effect.js";
 import {localOwnerBrowserAccess} from "../core/browser-access.js";
 import {configureLifecycleCommands} from "./lifecycle-commands.js";
 import {configureCliAuthCommands} from "./cli-auth-commands.js";
-import {configureLinkCommand} from "./link-command.js";
 import {configurePublishCommand} from "./publish-command.js";
 import {configureGitHistoryCommands} from "./git-history-commands.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
@@ -74,9 +69,6 @@ configurePublishCommand(program, {
 configureGitHistoryCommands(program, {
   defaultProfileDirectory: defaultUserDataDirectory,
 });
-configureLinkCommand(program, {
-  defaultProfileDirectory: defaultUserDataDirectory,
-});
 configureOpenManagementCommand(program, defaultUserDataDirectory);
 configureDirectLocalStart(program);
 configureLifecycleCommands(program, {build: productBuild});
@@ -118,8 +110,6 @@ function configureDirectLocalStart(programToConfigure: Command): void {
         loadNodeGitHistoryConfiguration(process.env),
       );
       writeGitHistoryConfigurationWarnings(gitHistory);
-      const linkedFiles = await runCliEffect(parseLinkedFilesMode(process.env));
-      const linkRoots = await runCliEffect(parseLinkRoots(process.env));
       const developmentProxyCredential =
         process.env["ARTIFACT_SERVER_DEVELOPMENT_PROXY_CREDENTIAL"];
       const localServerConfig = {
@@ -132,8 +122,6 @@ function configureDirectLocalStart(programToConfigure: Command): void {
           observability.ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE,
         dataDirectory,
         gitHistory,
-        linkedFiles,
-        linkRoots,
         localBootstrapToken: browserBootstrapToken,
         port,
         serviceVersion: packageMetadata.version,

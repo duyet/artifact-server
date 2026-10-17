@@ -10,7 +10,6 @@ import type { ArtifactCommentService } from "./artifact-comments.js";
 import type { ArtifactManagementService } from "./artifact-management.js";
 import type { CompareArtifactService } from "./compare-artifact.js";
 import type { InstallationAccessService } from "./installation-access.js";
-import type { LinkedArtifactService } from "./linked-artifacts.js";
 import type {ProjectManagementService} from "./project-management.js";
 import type {ProjectGitHistoryService} from "./project-git-history.js";
 import type {ExpiredStagingCleanupService} from "./expired-staging-cleanup.js";
@@ -33,7 +32,6 @@ export type ApplicationServices =
   | ExpiredStagingCleanupService
   | GitHistoryAccessService
   | InstallationAccessService
-  | LinkedArtifactService
   | PublishArtifactService
   | ProjectManagementService
   | ProjectAnalyticsService

@@ -1,6 +1,5 @@
 import {useCallback, useEffect, useState} from "react";
 
-import {useCommentPoll} from "@/components/comments/comment-poll";
 import {
   api,
   ApiError,
@@ -14,10 +13,9 @@ import type {VersionListItem} from "../inspectors/versions-inspector.tsx";
 
 interface ArtifactViewerOptions {
   readonly artifactId: string;
-  readonly linkedArtifacts: boolean;
   /** The artifact record changed (tags, access, name, current version). */
   readonly onArtifactChanged: (artifact: Artifact) => void;
-  /** The viewer chose a version on its own: the current one, or a capture. */
+  /** The viewer chose the current version on its own. */
   readonly onVersionResolved: (versionId: string) => void;
   readonly projectId: string;
   readonly versionId: string | null;
@@ -29,7 +27,6 @@ export interface ArtifactViewer {
   readonly actions: readonly ArtifactAction[];
   readonly activityError: Error | null;
   readonly activityLoading: boolean;
-  readonly captureLinkedArtifact: () => Promise<void>;
   readonly changeTags: (tags: readonly string[]) => Promise<void>;
   readonly clearError: () => void;
   readonly compareVersions: (fromVersionId: string, toVersionId: string) => Promise<boolean>;
@@ -41,7 +38,6 @@ export interface ArtifactViewer {
   readonly loadActions: (cursor: string | null) => Promise<void>;
   readonly loading: boolean;
   readonly makeVersionCurrent: (versionId: string, expectedCurrentVersionId: string) => Promise<boolean>;
-  readonly openLinkedArtifact: () => Promise<void>;
   readonly openRawArtifact: () => Promise<void>;
   readonly opening: boolean;
   readonly reload: () => Promise<void>;
@@ -54,7 +50,6 @@ export interface ArtifactViewer {
 /** Load one artifact, its history, and the selected version, and act on it. */
 export function useArtifactViewer({
   artifactId,
-  linkedArtifacts,
   onArtifactChanged,
   onVersionResolved,
   projectId,
@@ -137,15 +132,6 @@ export function useArtifactViewer({
     };
   }, [artifactId, details, projectId, versionId]);
 
-  const refreshLinkedDetails = useCallback(async (): Promise<void> => {
-    try {
-      setDetails(await api.artifact(projectId, artifactId));
-    } catch {
-      // Ambient freshness never replaces the last readable artifact state.
-    }
-  }, [artifactId, projectId]);
-  useCommentPoll(refreshLinkedDetails, linkedArtifacts && details?.sourceBinding !== undefined);
-
   const updateArtifact = useCallback((artifact: Artifact): void => {
     setDetails((current) => current?.artifact.id === artifact.id ? {...current, artifact} : current);
     onArtifactChanged(artifact);
@@ -208,11 +194,6 @@ export function useArtifactViewer({
     }
   };
 
-  const openLinkedArtifact = (): Promise<void> => openInNewTab(
-    () => api.liveSession(projectId, artifactId),
-    "Live artifact opening failed.",
-  );
-
   const changeTags = async (tags: readonly string[]): Promise<void> => {
     if (details === null) return;
     const changed = await api.changeTags(
@@ -273,26 +254,6 @@ export function useArtifactViewer({
     }
   };
 
-  const captureLinkedArtifact = async (): Promise<void> => {
-    if (details === null) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const captured = await api.captureArtifact(
-        projectId,
-        artifactId,
-        details.artifact.currentVersionId,
-        crypto.randomUUID(),
-      );
-      await reload();
-      onVersionResolved(captured.version.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught : new Error("Linked artifact capture failed."));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const tombstoneArtifact = async (): Promise<boolean> => {
     if (details === null) return false;
     setError(null);
@@ -315,7 +276,6 @@ export function useArtifactViewer({
     actions,
     activityError,
     activityLoading,
-    captureLinkedArtifact,
     changeTags,
     clearError: () => setError(null),
     compareVersions,
@@ -327,7 +287,6 @@ export function useArtifactViewer({
     loadActions,
     loading,
     makeVersionCurrent,
-    openLinkedArtifact,
     openRawArtifact,
     opening,
     reload,

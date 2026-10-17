@@ -2269,7 +2269,7 @@ requirements:
 
   - id: CMT-015
     kind: behavior
-    behavior: Review routes use a dedicated artifact-first viewport shell; comments and version navigation are closed by default, exact-version and linked-source context stay compact, on-demand surfaces overlay rather than crush the artifact on narrow screens, sharing stays version-specific, and focus mode always has a visible exit.
+    behavior: Review routes use a dedicated artifact-first viewport shell; comments and version navigation are closed by default, exact-version context stays compact, on-demand surfaces overlay rather than crush the artifact on narrow screens, sharing stays version-specific, and focus mode always has a visible exit.
     owner: artifact-comments
     source: {file: artifact-comments-spec.md, anchor: conformance-requirements-to-add}
     acceptance:
@@ -2525,16 +2525,16 @@ requirements:
 
   - id: ADM-007
     kind: behavior
-    behavior: Before the legacy application is removed, canonical Review provides the existing browser operations for version comparison, action history, artifact tombstoning, linked-source freshness and capture, eligible live view, and comment dispatch with agent presence by reusing their established product contracts.
+    behavior: Before the legacy application is removed, canonical Review provides the existing browser operations for version comparison, action history, artifact tombstoning, and comment dispatch with agent presence by reusing their established product contracts.
     owner: web-application
     source: {file: single-application-administration-spec.md, anchor: legacy-capability-parity}
     acceptance:
-      behavior: {id: ADM-007-B, description: "In canonical Review, compare two versions, page action history, tombstone an artifact after confirmation, inspect and capture a drifted linked source, open its eligible live view, and send a comment to a connected agent while observing its stated presence."}
-      failure: {id: ADM-007-F, description: "Unavailable capabilities remain absent, destructive confirmation cannot be bypassed, linked operations cannot appear outside the qualified local deployment, dispatch authority and presence follow existing contracts, and deleting the legacy bundle cannot remove a still-specified browser operation."}
+      behavior: {id: ADM-007-B, description: "In canonical Review, compare two versions, page action history, tombstone an artifact after confirmation, and send a comment to a connected agent while observing its stated presence."}
+      failure: {id: ADM-007-F, description: "Unavailable capabilities remain absent, destructive confirmation cannot be bypassed, dispatch authority and presence follow existing contracts, and deleting the legacy bundle cannot remove a still-specified browser operation."}
     deployments: *all
     status: behavior_verified
-    proof_gap: Local browser evidence proves canonical comparison, action history, tombstoning, linked capture, dispatch, and presence through their existing contracts. Eligible live-view and equivalent team-deployment evidence remain unrecorded.
-    depends_on: [ART-006, AUD-001, DIF-001, LNK-003, LNK-004, LNK-007, DSP-010, PRS-004, PRS-006, ADM-001]
+    proof_gap: Local browser evidence proves canonical comparison, action history, tombstoning, dispatch, and presence through their existing contracts. Equivalent team-deployment evidence remains unrecorded.
+    depends_on: [ART-006, AUD-001, DIF-001, DSP-010, PRS-004, PRS-006, ADM-001]
     evidence:
       - deployment: local
         tests: [ADM-007-B, ADM-007-F]
@@ -4086,118 +4086,6 @@ requirements:
     depends_on: [PLN-014, PLN-015]
     evidence: []
 
-  - id: LNK-001
-    kind: constraint
-    behavior: Linked artifacts are off by default, exist only on the local deployment behind capability discovery, reference the file in place, and are created only by an explicit protocol call naming the path.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-001-B, description: "Enable linked artifacts on a local deployment, observe the advertised capability, link a file through the MCP tool and the HTTP endpoint, and verify the file stays at its original path and is never copied, moved, watched, or scanned into an artifact without that explicit call."}
-      failure: {id: LNK-001-F, description: "With the feature off or on any non-local deployment, the capability is absent, every linked-artifact route answers the stable capability-unavailable shape, and enabling the flag outside the local runtime fails startup; no file on disk becomes an artifact without an explicit link call."}
-    deployments: *all
-    status: implementing
-    proof_gap: The acceptance-ID tests prove the off-by-default 501 shape, capability discovery, reference-in-place linking over MCP and HTTP, and the absence of scanning on the local deployment, and a worker runtime test proves the Cloudflare absence; the single-server, kubernetes, aws, and gcp deployment suites do not yet assert the absence shape, and no recorded run is attached to these IDs yet.
-    depends_on: [ART-001, VER-001]
-    evidence: []
-
-  - id: LNK-007
-    kind: security
-    behavior: The live view streams the source's current disk bytes with no-store caching only to admitted members authenticated on the local deployment over the artifact's live origin; every other reader receives only captured immutable versions.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-007-B, description: "As an admitted local member, read a linked artifact's live view, edit the file on disk, re-read, and observe the current bytes with no-store caching while captured-version routes keep immutable caching."}
-      failure: {id: LNK-007-F, description: "Public-link possession, anonymous requests, non-member sessions, content-origin version routes, and every non-local deployment never receive a live disk byte, and a missing or unreadable source degrades the live view to the last captured version without an error."}
-    deployments: *all
-    status: implementing
-    proof_gap: The acceptance-ID tests prove no-store live delivery to an admitted local member, the 401 for anonymous and version-cookie callers, the captured-only public path under drift, and the degrade-to-captured behavior, and a worker runtime test proves the Cloudflare absence; the single-server, kubernetes, aws, and gcp deployment suites do not yet assert the absence, and no recorded run is attached to these IDs yet.
-    depends_on: [LNK-001, AUTH-008]
-    evidence: []
-
-  - id: LNK-008
-    kind: behavior
-    behavior: A comment thread on a linked artifact anchors to a captured version, and creating one on a drifted binding implicitly captures first, attributed to the commenting principal, in the same request.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-008-B, description: "Comment on an in-sync linked artifact and observe the thread on the current version with no new version; drift the file, comment again, and observe one implicit capture attributed to the commenter with the thread anchored to the new version."}
-      failure: {id: LNK-008-F, description: "An implicit capture aborted by a drift race fails the whole comment request with the retryable drift error and creates no thread, and no thread ever anchors to live bytes or to a version that was not durably captured."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove the in-sync anchor, the implicit capture attributed to the commenting principal, and that an aborted implicit capture creates no thread and no version; the abort is forced through the action ledger rather than a genuine mid-read drift race, so the retryable drift error on that race is unproved, and no recorded run is attached to these IDs yet.
-    depends_on: [LNK-004, CMT-001]
-    evidence: []
-
-  - id: LNK-002
-    kind: behavior
-    behavior: Linking a file creates an ordinary artifact with an initial captured version through the normal publish pipeline, so a linked artifact is never versionless.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-002-B, description: "Link one regular file and receive an artifact whose first version carries the file's verified bytes, canonical manifest, action record, and idempotency result."}
-      failure: {id: LNK-002-F, description: "Linking a directory, symlink, special file, missing path, or unreadable file creates no artifact and no version; replaying the same link idempotency key returns the original artifact."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests drive the HTTP link route and prove the first captured version, its canonical manifest, the link action record, the refusals for a directory, symlink, socket, missing, and unreadable path, and idempotent replay; the MCP and CLI link surfaces are not exercised by these IDs, and no recorded run is attached to them yet.
-    depends_on: [LNK-001, PUB-001]
-    evidence: []
-
-  - id: LNK-003
-    kind: behavior
-    behavior: External modification, removal, and unreadability of a linked source surface as binding freshness on metadata reads without creating, changing, or deleting any version.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-003-B, description: "Modify, remove, and restore the source file and observe the binding freshness move through modified, missing, and back while the version list and delivered bytes stay identical."}
-      failure: {id: LNK-003-F, description: "A freshness refresh cannot write a version, an action record, or any artifact mutation, and a failed stat degrades only the freshness field, never the read."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests observe freshness through the authenticated artifact read while the database refuses every version and action write, and they cover modification, replacement, removal, restoration, and a failed stat; freshness reported through the MCP read surface is not exercised by these IDs, and no recorded run is attached to them yet.
-    depends_on: [LNK-001]
-    evidence: []
-
-  - id: LNK-004
-    kind: behavior
-    behavior: Capture publishes the source's current bytes as a new immutable version using descriptor-verified fingerprint checks, an idempotency key, and the publish current-version conflict behavior.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-004-B, description: "Modify the source, capture, and receive a new version whose bytes hash-match the file read from one verified descriptor; capturing an in-sync binding replays the current version without a new one."}
-      failure: {id: LNK-004-F, description: "A file that changes between fingerprint checks aborts the capture with a retryable drift error and no version, and a stale expected current version returns the publish conflict shape with the actual current version."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove that captured bytes hash-match the file on disk, that an in-sync capture replays the current version under a fresh key, and that a stale expected current version returns the publish conflict naming the actual current version with no version written; a file that changes between the two fingerprint checks cannot be forced deterministically through the HTTP boundary, so the retryable drift abort is unproved, and no recorded run is attached to these IDs yet.
-    depends_on: [LNK-002, PUB-006]
-    evidence: []
-
-  - id: LNK-005
-    kind: behavior
-    behavior: Relink re-points a binding at a moved file under an expected content hash while preserving the artifact identity, versions, comments, and attachments.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-005-B, description: "Move the source file, relink with the expected hash, and observe the same artifact ID, version list, and comment threads with a healthy binding at the new path."}
-      failure: {id: LNK-005-F, description: "A relink whose target bytes do not match the expected hash is rejected and changes nothing, and a relink to a path outside the link roots or inside the data directory is refused."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove a moved file relinks under its expected hash with the same artifact ID, version list, and comment threads, and that a mismatched hash, a path outside every root, and a path inside the data directory each change nothing; artifact attachments are not exercised by these IDs, and no recorded run is attached to them yet.
-    depends_on: [LNK-002]
-    evidence: []
-
-  - id: LNK-006
-    kind: security
-    behavior: Link paths are canonicalized, restricted to configured link roots, denied for the server's own data and database files, accepted only from authorized principals over the loopback application origin, and never select storage or appear in public or content-origin responses.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-006-B, description: "Link inside a configured root as an admitted member over loopback and read the binding path back only through authenticated application-origin metadata."}
-      failure: {id: LNK-006-F, description: "Paths outside every root, the data directory, database files, symlink escapes, anonymous or public-link callers, and non-loopback origins are all refused; no public, content-origin, or log surface reveals a source path, and no request path ever resolves against the linked filesystem."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove root containment, dot-dot and symlink escape refusals, data-directory and database self-protection, anonymous and non-loopback refusals, path non-disclosure on every refusal body, and manifest-only delivery; no recorded run is attached to these IDs yet.
-    depends_on: [LNK-001, AUTH-008]
-    evidence: []
-
   - id: KAN-001
     kind: behavior
     behavior: Each project has exactly one Kanban board with the four fixed columns, created on first use.
@@ -4329,32 +4217,6 @@ requirements:
     status: implementing
     proof_gap: Proved locally against SQLite. Markdown, plain text at exactly the 1 MiB bound, and JSON commit with hash-matching bytes; binary, text over binary, and one byte over the bound are 422; MCP capabilities advertise the bound with no edit tool and artifact_commit_upload refuses an edit target against a real staged upload. Postgres, D1, and deployed runs are unproved.
     depends_on: [EDT-001, MAN-001]
-    evidence: []
-
-  - id: OPN-001
-    kind: behavior
-    behavior: Open-in launches only catalog applications on a verified linked-artifact source, as an argument vector with the server-resolved path, on the local deployment over the loopback application origin.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: OPN-001-B, description: "List the installed-application catalog and open one linked artifact's source in a chosen application, launched as an argument vector containing the server-resolved verified path."}
-      failure: {id: OPN-001-F, description: "An application ID outside the catalog, an artifact whose binding is missing or unreadable, and a launch attempt while the feature is disabled are each refused with no process started."}
-    deployments: [local]
-    status: specified
-    depends_on: [LNK-001]
-    evidence: []
-
-  - id: OPN-002
-    kind: security
-    behavior: Open-in never accepts a client-supplied path or argument, never launches for a non-linked artifact, and is refused entirely on non-local deployments and non-loopback origins.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: OPN-002-B, description: "Verify the launch request carries only an artifact ID and catalog application ID, with the path resolved server-side from the verified binding."}
-      failure: {id: OPN-002-F, description: "Requests carrying paths or extra arguments, requests for managed artifacts, anonymous and public-link callers, non-loopback origins, and every non-local deployment are refused, and no shell string is ever composed."}
-    deployments: *all
-    status: specified
-    depends_on: [OPN-001]
     evidence: []
 
   - id: PRV-001

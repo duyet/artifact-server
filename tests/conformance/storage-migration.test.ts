@@ -6,7 +6,7 @@ import {DatabaseSync} from "node:sqlite";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
-import {publishNew} from "../support/publishing.js";
+import {publishNew, publishVersion} from "../support/publishing.js";
 import {createManifest} from "../../src/manifest/create-manifest.js";
 import {defaultProjectId} from "../../src/core/model.js";
 import {
@@ -340,10 +340,110 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 15});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 16});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'artifacts_live_path'",
       ).get()).toEqual({name: "artifacts_live_path"});
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  test("foundation: a schema-15 database drops linked-source columns and keeps the history of its versions", async () => {
+    server = await startTestServer(installation);
+    const first = await publishNew(server, installation, {
+      accessSetting: "account_required",
+      content: "linked version one",
+      idempotencyKey: "schema-fifteen-linked-first",
+    });
+    const artifactId = first.body.artifact.id;
+    const second = await publishVersion(server, installation, {
+      artifactId,
+      content: "linked version two",
+      expectedCurrentVersionId: first.body.version.id,
+      idempotencyKey: "schema-fifteen-linked-second",
+    });
+    expect(second.response.status).toBe(201);
+    await server.stop();
+    server = null;
+
+    // Rebuild what a linked artifact left behind: the source columns, a link
+    // and a capture action for its two versions, and a relink action.
+    const databasePath = path.join(installation.dataDirectory, "artifact-server.db");
+    const previous = new DatabaseSync(databasePath);
+    try {
+      previous.exec(`
+        ALTER TABLE artifacts ADD COLUMN source_path TEXT;
+        ALTER TABLE artifacts ADD COLUMN source_fingerprint TEXT;
+        ALTER TABLE artifacts ADD COLUMN source_status TEXT CHECK (
+          source_status IS NULL
+          OR source_status IN ('in-sync', 'modified', 'missing', 'unreadable')
+        );
+        ALTER TABLE artifacts ADD COLUMN source_verified_at TEXT CHECK (
+          (source_path IS NULL AND source_fingerprint IS NULL
+            AND source_status IS NULL AND source_verified_at IS NULL)
+          OR (source_path IS NOT NULL AND source_fingerprint IS NOT NULL
+            AND source_status IS NOT NULL AND source_verified_at IS NOT NULL)
+        );
+        PRAGMA user_version = 15;
+      `);
+      previous.prepare(`
+        UPDATE artifacts SET source_path = '/home/me/notes.md',
+          source_fingerprint = '1:2:3:4:5', source_status = 'modified',
+          source_verified_at = '2026-08-01T00:00:00.000Z'
+        WHERE id = ?
+      `).run(artifactId);
+      previous.prepare("UPDATE actions SET action = 'link' WHERE version_id = ?")
+        .run(first.body.version.id);
+      previous.prepare("UPDATE actions SET action = 'capture' WHERE version_id = ?")
+        .run(second.body.version.id);
+      previous.prepare(`
+        INSERT INTO actions (
+          id, project_id, artifact_id, version_id, action, principal_id,
+          authorized_by_principal_id, idempotency_key, created_at
+        )
+        SELECT 'relink-action', project_id, artifact_id, version_id, 'relink',
+          principal_id, NULL, 'schema-fifteen-relink', created_at
+        FROM actions WHERE version_id = ?
+      `).run(second.body.version.id);
+    } finally {
+      previous.close();
+    }
+
+    const actionsSchema = z.object({
+      actions: z.array(z.object({action: z.string(), versionId: z.string()})),
+    });
+    const readAfterStart = async (): Promise<void> => {
+      server = await startTestServer(installation);
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/artifacts/${artifactId}/actions`,
+        {headers: {Authorization: `Bearer ${installation.apiToken}`}},
+      );
+      expect(response.status).toBe(200);
+      const {actions} = actionsSchema.parse(await response.json());
+      expect(actions.map(({action, versionId}) => [action, versionId])).toEqual([
+        ["publish", second.body.version.id],
+        ["publish", first.body.version.id],
+      ]);
+      const rendered = await fetch(
+        `${server.baseUrl}/api/v1/artifacts/${artifactId}`,
+        {headers: {Authorization: `Bearer ${installation.apiToken}`}},
+      );
+      expect(rendered.status).toBe(200);
+      expect(await rendered.json()).not.toHaveProperty("sourceBinding");
+      await server.stop();
+      server = null;
+    };
+    await readAfterStart();
+    // A second start finds nothing left to migrate and reads the same history.
+    await readAfterStart();
+
+    const upgraded = new DatabaseSync(databasePath, {readOnly: true});
+    try {
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 16});
+      const columns = upgraded.prepare("SELECT name FROM pragma_table_info('artifacts')").all()
+        .map((row) => z.object({name: z.string()}).parse(row).name);
+      expect(columns.filter((name) => name.startsWith("source_"))).toEqual([]);
     } finally {
       upgraded.close();
     }

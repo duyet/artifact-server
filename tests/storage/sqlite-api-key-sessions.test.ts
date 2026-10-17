@@ -174,7 +174,7 @@ describe("SQLite API-key browser sessions", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 15});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 16});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'api_key_sessions_key_idx'",
       ).get()).toEqual({name: "api_key_sessions_key_idx"});

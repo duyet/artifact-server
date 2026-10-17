@@ -96,9 +96,6 @@ export function ArtifactInspector({
           <DetailsInspector
             canManage={permissions.canManageArtifacts}
             details={details}
-            linkedArtifacts={session.capabilities.linkedArtifacts}
-            onCapture={viewer.captureLinkedArtifact}
-            onOpenLive={viewer.openLinkedArtifact}
             onTagsChange={viewer.changeTags}
             onTombstone={onTombstone}
             version={selectedVersion}

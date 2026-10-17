@@ -40,7 +40,6 @@ import {
   fileDispositions,
   parseStoredAgentCapabilities,
   routingModes,
-  sourceFreshnessStates,
   uploadStatuses,
   defaultProjectId,
   defaultProjectName,
@@ -78,7 +77,6 @@ import {
   type ProjectRecord,
   type RegisteredAgentPresence,
   type RegisteredAgentRecord,
-  type SourceBindingRecord,
   type StagedUpload,
   type StagedUploadFile,
   type VersionContent,
@@ -96,8 +94,6 @@ import type {
   CommentRepository,
   CreateAgentDispatch,
   CommitArtifactVersion,
-  CommitCapturedVersion,
-  CommitLinkedArtifact,
   CommitNewArtifact,
   ContentSessionRepository,
   CreateCommentReply,
@@ -121,9 +117,7 @@ import type {
   ReadProjectActivityDays,
   RenameArtifact,
   RecordAgentActivity,
-  RecordSourceFreshness,
   RegisterAgent,
-  RelinkSourceBinding,
   UpdateCommentReply,
   UpdateCommentThread,
   PublicationSource,
@@ -131,8 +125,6 @@ import type {
   RenameProject,
   RestoreArtifactVersion,
   SetProjectArchive,
-  SourceBindingRepository,
-  SourceBindingWrite,
   StagedUploadRepository,
 } from "../core/ports.js";
 import {
@@ -185,7 +177,6 @@ const uploadStatusSchema = z.enum([
 ]);
 const routingModeSchema = z.enum([routingModes.static, routingModes.spa]);
 const artifactActionKindSchema = z.enum([
-  artifactActionKinds.capture,
   artifactActionKinds.changeAccess,
   artifactActionKinds.changeTags,
   artifactActionKinds.commentCreate,
@@ -196,26 +187,10 @@ const artifactActionKindSchema = z.enum([
   artifactActionKinds.commentUpdate,
   artifactActionKinds.delete,
   artifactActionKinds.edited,
-  artifactActionKinds.link,
   artifactActionKinds.publish,
-  artifactActionKinds.relink,
   artifactActionKinds.renamed,
   artifactActionKinds.restore,
 ]);
-const sourceFreshnessSchema = z.enum([
-  sourceFreshnessStates.inSync,
-  sourceFreshnessStates.missing,
-  sourceFreshnessStates.modified,
-  sourceFreshnessStates.unreadable,
-]);
-const sourceBindingRowSchema = z.object({
-  artifactId: z.string(),
-  fingerprint: z.string(),
-  freshness: sourceFreshnessSchema,
-  lastVerifiedAt: z.string(),
-  path: z.string(),
-  projectId: z.string(),
-});
 const publishedRowSchema = z.object({
   accessSetting: accessSettingSchema,
   artifactCreatedAt: z.string(),
@@ -616,7 +591,6 @@ export class SqliteArtifactRepository implements
   ContentSessionRepository,
   GitHistoryMirrorStore,
   ProjectRepository,
-  SourceBindingRepository,
   StagedUploadRepository
 {
   readonly #database: DatabaseSync;
@@ -1263,119 +1237,17 @@ export class SqliteArtifactRepository implements
 
   commitNewArtifact(command: CommitNewArtifact): Promise<PublishedVersion> {
     return Promise.resolve().then(() =>
-      this.#transaction(() => this.#applyNewArtifactCommit(command, null)),
-    );
-  }
-
-  /**
-   * Create one linked artifact, its first captured version, and its source
-   * binding in a single transaction.
-   */
-  commitLinkedArtifact(command: CommitLinkedArtifact): Promise<PublishedVersion> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() =>
-        this.#applyNewArtifactCommit(command, command.binding)
-      ),
+      this.#transaction(() => this.#applyNewArtifactCommit(command)),
     );
   }
 
   commitVersion(command: CommitArtifactVersion): Promise<PublishedVersion> {
     return Promise.resolve().then(() =>
-      this.#transaction(() => this.#applyVersionCommit(command, null)),
+      this.#transaction(() => this.#applyVersionCommit(command)),
     );
   }
 
-  /**
-   * Commit one captured version through the ordinary publish path while the
-   * same transaction refreshes the artifact's source binding.
-   */
-  commitCapturedVersion(
-    command: CommitCapturedVersion,
-  ): Promise<PublishedVersion> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() =>
-        this.#applyVersionCommit({...command, edit: null}, command.binding)
-      ),
-    );
-  }
-
-  /** Read one artifact's source binding, or null when it is not linked. */
-  findSourceBinding(
-    projectId: string,
-    artifactId: string,
-  ): Promise<SourceBindingRecord | null> {
-    return Promise.resolve().then(() =>
-      this.#readSourceBindingOrNull(projectId, artifactId)
-    );
-  }
-
-  /**
-   * Record one lazily observed freshness state. The observation never changes
-   * versions, the stored capture fingerprint, or the action history.
-   */
-  recordSourceFreshness(
-    command: RecordSourceFreshness,
-  ): Promise<SourceBindingRecord> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() => {
-        const update = this.#database
-          .prepare(
-            `UPDATE artifacts
-             SET source_status = ?, source_verified_at = ?
-             WHERE project_id = ? AND id = ?
-               AND deleted_at IS NULL AND source_path IS NOT NULL`,
-          )
-          .run(
-            command.freshness,
-            command.verifiedAt,
-            command.projectId,
-            command.artifactId,
-          );
-        if (update.changes !== 1) throw missingSourceBinding();
-        return this.#readSourceBinding(command.projectId, command.artifactId);
-      }),
-    );
-  }
-
-  /**
-   * Re-point one binding at a moved source file, appending the attributed
-   * action record in the same transaction. Artifact identity, versions,
-   * comments, and attachments are untouched.
-   */
-  relinkSource(command: RelinkSourceBinding): Promise<SourceBindingRecord> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() => {
-        const artifact = this.#readArtifact(
-          command.projectId,
-          command.artifactId,
-        );
-        if (this.#hasRelinkAction(command)) {
-          return this.#readSourceBinding(command.projectId, command.artifactId);
-        }
-        this.#writeSourceBinding(
-          command.projectId,
-          command.artifactId,
-          command.binding,
-        );
-        this.#insertAction(
-          command.projectId,
-          command.artifactId,
-          artifact.currentVersionId,
-          command.idempotencyKey,
-          command.createdAt,
-          artifactActionKinds.relink,
-          command.principalId,
-          command.authorizedByPrincipalId,
-        );
-        return this.#readSourceBinding(command.projectId, command.artifactId);
-      }),
-    );
-  }
-
-  #applyNewArtifactCommit(
-    command: CommitNewArtifact,
-    binding: SourceBindingWrite | null,
-  ): PublishedVersion {
+  #applyNewArtifactCommit(command: CommitNewArtifact): PublishedVersion {
     const replayed = this.#findIdempotentResult(
       command.projectId,
       command.idempotencyKey,
@@ -1395,9 +1267,8 @@ export class SqliteArtifactRepository implements
         `INSERT INTO artifacts (
           id, project_id, name, search_name, access_setting,
           owner_principal_id, owner_display_name,
-          current_version_id, created_at, deleted_at, path,
-          source_path, source_fingerprint, source_status, source_verified_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
+          current_version_id, created_at, deleted_at, path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?)`,
       )
       .run(
         command.artifactId,
@@ -1409,10 +1280,6 @@ export class SqliteArtifactRepository implements
         command.principalDisplayName,
         command.createdAt,
         command.path,
-        binding === null ? null : binding.path,
-        binding === null ? null : binding.fingerprint,
-        binding === null ? null : sourceFreshnessStates.inSync,
-        binding === null ? null : binding.verifiedAt,
       );
 
     this.#replaceTags(command.artifactId, command.tags);
@@ -1437,7 +1304,7 @@ export class SqliteArtifactRepository implements
       command.versionId,
       command.idempotencyKey,
       command.createdAt,
-      binding === null ? artifactActionKinds.publish : artifactActionKinds.link,
+      artifactActionKinds.publish,
       command.principalId,
       command.authorizedByPrincipalId,
     );
@@ -1477,10 +1344,7 @@ export class SqliteArtifactRepository implements
     if (existing !== null) throw artifactPathTaken(path, existing.path);
   }
 
-  #applyVersionCommit(
-    command: CommitArtifactVersion,
-    binding: SourceBindingWrite | null,
-  ): PublishedVersion {
+  #applyVersionCommit(command: CommitArtifactVersion): PublishedVersion {
     const replayed = this.#findIdempotentResult(
       command.projectId,
       command.idempotencyKey,
@@ -1553,13 +1417,6 @@ export class SqliteArtifactRepository implements
         message: "The artifact changed during publication.",
       });
     }
-    if (binding !== null) {
-      this.#writeSourceBinding(
-        command.projectId,
-        command.artifactId,
-        binding,
-      );
-    }
 
     this.#insertAction(
       command.projectId,
@@ -1567,9 +1424,7 @@ export class SqliteArtifactRepository implements
       command.versionId,
       command.idempotencyKey,
       command.createdAt,
-      binding !== null
-        ? artifactActionKinds.capture
-        : command.edit === null
+      command.edit === null
         ? artifactActionKinds.publish
         : artifactActionKinds.edited,
       command.principalId,
@@ -1592,83 +1447,6 @@ export class SqliteArtifactRepository implements
     );
 
     return this.#readPublishedVersion(command.projectId, command.versionId, false);
-  }
-
-  // A binding write always sets the four columns together: the stored path and
-  // fingerprint describe exactly the bytes the same transaction captured, so
-  // the observed freshness is `in-sync` by construction.
-  #writeSourceBinding(
-    projectId: string,
-    artifactId: string,
-    binding: SourceBindingWrite,
-  ): void {
-    const update = this.#database
-      .prepare(
-        `UPDATE artifacts
-         SET source_path = ?,
-           source_fingerprint = ?,
-           source_status = ?,
-           source_verified_at = ?
-         WHERE project_id = ? AND id = ?
-           AND deleted_at IS NULL AND source_path IS NOT NULL`,
-      )
-      .run(
-        binding.path,
-        binding.fingerprint,
-        sourceFreshnessStates.inSync,
-        binding.verifiedAt,
-        projectId,
-        artifactId,
-      );
-    if (update.changes !== 1) throw missingSourceBinding();
-  }
-
-  #hasRelinkAction(command: RelinkSourceBinding): boolean {
-    const row = this.#database
-      .prepare(
-        `SELECT id
-         FROM actions
-         WHERE project_id = ? AND artifact_id = ?
-           AND idempotency_key = ? AND action = ?`,
-      )
-      .get(
-        command.projectId,
-        command.artifactId,
-        command.idempotencyKey,
-        artifactActionKinds.relink,
-      );
-    return z.object({id: z.string()}).nullable().parse(row ?? null) !== null;
-  }
-
-  #readSourceBinding(projectId: string, artifactId: string): SourceBindingRecord {
-    const binding = this.#readSourceBindingOrNull(projectId, artifactId);
-    if (binding === null) {
-      throw new Error(
-        "The source binding was not found after a successful write.",
-      );
-    }
-    return binding;
-  }
-
-  #readSourceBindingOrNull(
-    projectId: string,
-    artifactId: string,
-  ): SourceBindingRecord | null {
-    const row = this.#database
-      .prepare(
-        `SELECT
-          id AS artifactId,
-          project_id AS projectId,
-          source_fingerprint AS fingerprint,
-          source_status AS freshness,
-          source_verified_at AS lastVerifiedAt,
-          source_path AS path
-         FROM artifacts
-         WHERE project_id = ? AND id = ?
-           AND deleted_at IS NULL AND source_path IS NOT NULL`,
-      )
-      .get(projectId, artifactId);
-    return sourceBindingRowSchema.nullable().parse(row ?? null);
   }
 
   changeAccessSetting(
@@ -5343,7 +5121,7 @@ export class SqliteArtifactRepository implements
     this.#addCommentTablesIfMissing();
     this.#addAgentDispatchTablesIfMissing();
     this.#widenRegisteredAgentsIfNeeded();
-    this.#addSourceBindingColumnsIfMissing();
+    this.#dropSourceBindingColumnsIfPresent();
     this.#addGitHistoryMirrorTablesIfMissing();
     this.#addArtifactPathIfMissing();
     this.#addArtifactOwnerIfMissing();
@@ -5473,8 +5251,7 @@ export class SqliteArtifactRepository implements
     `);
   }
 
-  // `path` is the readable URL path an artifact claims at creation. It is
-  // unrelated to `source_path`, the file a linked artifact reads from disk.
+  // `path` is the readable URL path an artifact claims at creation.
   // The index is created on every start rather than behind user_version,
   // because the identity repository stamps the same version.
   #addArtifactPathIfMissing(): void {
@@ -5578,33 +5355,20 @@ export class SqliteArtifactRepository implements
     });
   }
 
-  // One nullable column group on the artifact record carries every linked
-  // artifact's source binding. The group is all NULL for an ordinary artifact
-  // and completely populated for a linked one; SQLite cannot add a table check
-  // after the fact, so the last added column carries the group constraint.
-  #addSourceBindingColumnsIfMissing(): void {
-    if (this.#tableColumns("artifacts").includes("source_path")) return;
+  // Linked artifacts were removed. Their versions were ordinary publishes, so
+  // link and capture actions become publish actions; a relink created no
+  // version and has no remaining meaning. Columns go in reverse order because
+  // the last one carried the check that names the other three.
+  #dropSourceBindingColumnsIfPresent(): void {
+    if (!this.#tableColumns("artifacts").includes("source_path")) return;
     this.#transaction(() => {
       this.#database.exec(`
-        ALTER TABLE artifacts ADD COLUMN source_path TEXT;
-        ALTER TABLE artifacts ADD COLUMN source_fingerprint TEXT;
-        ALTER TABLE artifacts ADD COLUMN source_status TEXT CHECK (
-          source_status IS NULL
-          OR source_status IN ('in-sync', 'modified', 'missing', 'unreadable')
-        );
-        ALTER TABLE artifacts ADD COLUMN source_verified_at TEXT CHECK (
-          (
-            source_path IS NULL
-            AND source_fingerprint IS NULL
-            AND source_status IS NULL
-            AND source_verified_at IS NULL
-          ) OR (
-            source_path IS NOT NULL
-            AND source_fingerprint IS NOT NULL
-            AND source_status IS NOT NULL
-            AND source_verified_at IS NOT NULL
-          )
-        );
+        UPDATE actions SET action = 'publish' WHERE action IN ('link', 'capture');
+        DELETE FROM actions WHERE action = 'relink';
+        ALTER TABLE artifacts DROP COLUMN source_verified_at;
+        ALTER TABLE artifacts DROP COLUMN source_status;
+        ALTER TABLE artifacts DROP COLUMN source_fingerprint;
+        ALTER TABLE artifacts DROP COLUMN source_path;
       `);
     });
   }
@@ -6425,12 +6189,6 @@ function commentReplyFromRow(
 function missingComment(): CommentNotFound {
   return new CommentNotFound({
     message: "The comment thread or reply does not exist.",
-  });
-}
-
-function missingSourceBinding(): ArtifactNotFound {
-  return new ArtifactNotFound({
-    message: "The artifact does not have a source binding.",
   });
 }
 

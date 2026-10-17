@@ -218,8 +218,6 @@ The canonical application receives the smallest coherent version of each:
 | Compare two immutable versions. | A **Compare** action in Versions opens comparison results in the inspector. |
 | Read immutable action history. | An **Activity** inspector tab with bounded pagination. |
 | Tombstone an artifact. | A secondary destructive action in Details with typed-name confirmation. |
-| Read linked-source freshness and capture changed bytes. | A **Linked source** section in Details with **Capture now** when drifted. |
-| Open the local linked artifact's live view. | A capability-gated **Open live view** action in the same Linked source section. |
 | Send comment threads to connected agents and see presence. | Existing dispatch and presence controls integrated into Comments without changing the comment contract. |
 
 These moves reuse existing API client calls and shared components. They do not

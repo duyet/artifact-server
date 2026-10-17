@@ -7,10 +7,6 @@ import {
 } from "./authorization.js";
 import {parseIdempotencyKey} from "./idempotency-key.js";
 import {
-  type LinkedCommentCaptureFailure,
-  LinkedArtifactService,
-} from "./linked-artifacts.js";
-import {
   type ProjectManagementFailure,
   ProjectManagementService,
 } from "./project-management.js";
@@ -231,8 +227,7 @@ export type ArtifactCommentFailure =
   | InvalidIdempotencyKey
   | InvalidPagination
   | ProjectManagementFailure
-  | VersionNotFound
-  | LinkedCommentCaptureFailure;
+  | VersionNotFound;
 
 interface ArtifactCommentOperations {
   readonly clearThreads: (
@@ -275,20 +270,14 @@ export class ArtifactCommentService extends Context.Service<
   ): Layer.Layer<
     ArtifactCommentService,
     never,
-    AuthorizationService | LinkedArtifactService | ProjectManagementService
+    AuthorizationService | ProjectManagementService
   > =>
     Layer.effect(
       ArtifactCommentService,
       Effect.gen(function*() {
         const authorization = yield* AuthorizationService;
         const projects = yield* ProjectManagementService;
-        const linked = yield* LinkedArtifactService;
-        return makeArtifactCommentService(
-          dependencies,
-          authorization,
-          projects,
-          linked,
-        );
+        return makeArtifactCommentService(dependencies, authorization, projects);
       }),
     );
 }
@@ -297,7 +286,6 @@ function makeArtifactCommentService(
   dependencies: ArtifactCommentDependencies,
   authorization: AuthorizationOperations,
   projects: ProjectManagementService["Service"],
-  linked: LinkedArtifactService["Service"],
 ): ArtifactCommentOperations {
   const resolveProjectForRead = Effect.fn(
     "ArtifactCommentService.resolveProjectForRead",
@@ -531,19 +519,6 @@ function makeArtifactCommentService(
         command.path,
       );
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
-      // A thread must anchor to bytes that hold still: a drifted linked
-      // source is captured first, attributed to the commenting principal,
-      // and the thread lands on the resulting version (LNK-008). A capture
-      // failure aborts this whole request before any thread row exists. All
-      // caller-controlled fields are validated first so a rejected comment
-      // cannot leave behind a capture version as a side effect.
-      const captured = yield* linked.captureForComment({
-        artifactId: artifact.id,
-        idempotencyKey: command.idempotencyKey,
-        principal: command.principal,
-        projectId: project.id,
-      });
-      const versionId = captured?.versionId ?? requestedVersion.version.id;
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.createThread({
         anchor: command.anchor ?? null,
@@ -556,7 +531,7 @@ function makeArtifactCommentService(
         installationId: dependencies.installationId,
         path: command.path,
         projectId: project.id,
-        versionId,
+        versionId: requestedVersion.version.id,
       });
     },
   );

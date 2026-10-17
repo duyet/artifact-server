@@ -1,6 +1,5 @@
 import {constants} from "node:fs";
 import {access, readFile, stat} from "node:fs/promises";
-import {homedir} from "node:os";
 import path from "node:path";
 
 import {Effect, Option, Redacted, Schema} from "effect";
@@ -56,7 +55,6 @@ const requestLogSampleRateSchema = Schema.NumberFromString.check(
 const postgresUrlSchema = Schema.String.check(
   Schema.isPattern(/^postgres(?:ql)?:\/\/[^\s]+$/u),
 );
-const linkedFilesModeSchema = Schema.Literals(["off", "on"]);
 const urlStringSchema = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^\s]+$/u),
 );
@@ -85,8 +83,6 @@ export interface CompactRuntimeConfiguration {
   readonly hostname: string;
   readonly gitHistory: NodeGitHistoryConfiguration;
   readonly installation: CompactInstallationMetadata;
-  readonly linkedFiles: "off" | "on";
-  readonly linkRoots: readonly string[];
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -233,8 +229,6 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     gitHistory: yield* loadNodeGitHistoryConfiguration(input.environment),
     hostname: yield* parseHostname(input.hostname),
     installation,
-    linkedFiles: yield* parseLinkedFilesMode(input.environment),
-    linkRoots: yield* parseLinkRoots(input.environment),
     port: yield* parsePort(input.port),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
       input.environment,
@@ -269,7 +263,6 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
   );
   const contentDomain = yield* parseContentDomain(environment);
   yield* assertBrowserIsolation(applicationOrigin, contentDomain);
-  yield* assertLinkedFilesAreLocalOnly(yield* parseLinkedFilesMode(environment));
   const configuredObjectStorage = yield* parseObjectStorage(environment);
   const apiToken = yield* readSecret(
     environment,
@@ -645,43 +638,6 @@ function parsePostgresMaxConnections(
     );
   }
   return Effect.succeed(maxConnections);
-}
-
-/** Parse `ARTIFACT_SERVER_LINKED_FILES` for any local-server entry point. */
-export function parseLinkedFilesMode(
-  environment: NodeJS.ProcessEnv,
-): Effect.Effect<"off" | "on", RuntimeConfigurationError> {
-  return parseRequiredEnvironment(
-    "ARTIFACT_SERVER_LINKED_FILES",
-    environment["ARTIFACT_SERVER_LINKED_FILES"] ?? "off",
-    linkedFilesModeSchema,
-  );
-}
-
-function assertLinkedFilesAreLocalOnly(
-  linkedFiles: "off" | "on",
-): Effect.Effect<void, RuntimeConfigurationError> {
-  if (linkedFiles === "off") return Effect.void;
-  return invalidValue(
-    "ARTIFACT_SERVER_LINKED_FILES",
-    "ARTIFACT_SERVER_LINKED_FILES can only be enabled on the local deployment runtime; external-storage deployments must leave it off.",
-  );
-}
-
-/** Parse `ARTIFACT_SERVER_LINK_ROOTS` for any local-server entry point. */
-export function parseLinkRoots(
-  environment: NodeJS.ProcessEnv,
-): Effect.Effect<readonly string[], RuntimeConfigurationError> {
-  const field = "ARTIFACT_SERVER_LINK_ROOTS";
-  const value = environment[field];
-  if (value === undefined || value === "") return Effect.succeed([homedir()]);
-  const roots = value.split(":");
-  return roots.every((root) => root !== "" && path.isAbsolute(root))
-    ? Effect.succeed(roots)
-    : invalidValue(
-      field,
-      `${field} must be a colon-separated list of absolute directory paths.`,
-    );
 }
 
 function parseHostname(

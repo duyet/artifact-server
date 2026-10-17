@@ -20,17 +20,11 @@ export const errorCodes = {
   invalidComment: "INVALID_COMMENT",
   invalidDispatch: "INVALID_DISPATCH",
   invalidInput: "INVALID_INPUT",
-  invalidLinkPath: "INVALID_LINK_PATH",
   invalidManifestPath: "INVALID_MANIFEST_PATH",
-  linkPathOutsideRoots: "LINK_PATH_OUTSIDE_ROOTS",
-  linkPathProtected: "LINK_PATH_PROTECTED",
   methodNotAllowed: "METHOD_NOT_ALLOWED",
   mediaPreviewContextRequired: "MEDIA_PREVIEW_CONTEXT_REQUIRED",
   mediaPreviewTypeUnsupported: "MEDIA_PREVIEW_TYPE_UNSUPPORTED",
   capabilityUnavailable: "CAPABILITY_UNAVAILABLE",
-  sourceDrifted: "SOURCE_DRIFTED",
-  sourceMissing: "SOURCE_MISSING",
-  sourceUnreadable: "SOURCE_UNREADABLE",
   publishConflict: "PUBLISH_CONFLICT",
   rateLimited: "RATE_LIMITED",
   projectArchived: "PROJECT_ARCHIVED",
@@ -302,46 +296,6 @@ export class ContentNotPublic extends Schema.TaggedError<ContentNotPublic>()(
   messageField,
 ) {}
 
-/**
- * A presented link path cannot become a source binding. Messages never carry
- * the path itself, so surfaced or logged failures disclose no filesystem
- * layout.
- */
-export class InvalidLinkPath extends Schema.TaggedError<InvalidLinkPath>()(
-  "InvalidLinkPath",
-  messageField,
-) {}
-
-/** A canonicalized link path resolves outside every configured link root. */
-export class LinkPathOutsideRoots extends Schema.TaggedError<LinkPathOutsideRoots>()(
-  "LinkPathOutsideRoots",
-  messageField,
-) {}
-
-/** A canonicalized link path selects Artifact Server's own durable state. */
-export class LinkPathProtected extends Schema.TaggedError<LinkPathProtected>()(
-  "LinkPathProtected",
-  messageField,
-) {}
-
-/** A linked source changed while its bytes were being read; retry the read. */
-export class SourceDrifted extends Schema.TaggedError<SourceDrifted>()(
-  "SourceDrifted",
-  messageField,
-) {}
-
-/** A linked source file no longer exists at its bound canonical path. */
-export class SourceMissing extends Schema.TaggedError<SourceMissing>()(
-  "SourceMissing",
-  messageField,
-) {}
-
-/** A linked source file exists but cannot be opened as the bound regular file. */
-export class SourceUnreadable extends Schema.TaggedError<SourceUnreadable>()(
-  "SourceUnreadable",
-  messageField,
-) {}
-
 /** A deployment-gated capability is not available on this installation. */
 export class CapabilityUnavailable extends Schema.TaggedError<CapabilityUnavailable>()(
   "CapabilityUnavailable",
@@ -369,7 +323,6 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "createPreviewLease",
       "createStagedUpload",
       "exchangeContentBootstrap",
-      "linkedSource",
       "deleteCommentReply",
       "deleteCommentThread",
       "disconnectRegisteredAgent",
@@ -518,12 +471,6 @@ const artifactServerFailureSchema = Schema.Union([
   UploadNotFound,
   VersionNotFound,
   ContentNotPublic,
-  InvalidLinkPath,
-  LinkPathOutsideRoots,
-  LinkPathProtected,
-  SourceDrifted,
-  SourceMissing,
-  SourceUnreadable,
   CapabilityUnavailable,
   ArtifactRepositoryFailure,
   IdentityRepositoryFailure,

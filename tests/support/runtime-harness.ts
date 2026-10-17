@@ -92,8 +92,6 @@ export async function startTestServer(
     readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
     readonly gitHistoryProvider?: GitHistoryProvider;
     readonly hostname?: string;
-    readonly linkedFiles?: "off" | "on";
-    readonly linkRoots?: readonly string[];
     readonly observability?: boolean;
     readonly port?: number;
     readonly webAssetsRoot?: string;
@@ -160,12 +158,6 @@ export async function startTestServer(
   }
   if (options.hostname !== undefined) {
     config = {...config, hostname: options.hostname};
-  }
-  if (options.linkedFiles !== undefined) {
-    config = {...config, linkedFiles: options.linkedFiles};
-  }
-  if (options.linkRoots !== undefined) {
-    config = {...config, linkRoots: options.linkRoots};
   }
   if (options.webAssetsRoot !== undefined) {
     config = {...config, webAssetsRoot: options.webAssetsRoot};

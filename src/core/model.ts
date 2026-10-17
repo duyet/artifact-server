@@ -11,7 +11,6 @@ export type AccessSetting = (typeof accessSettings)[keyof typeof accessSettings]
 
 /** Artifact mutation kinds persisted in the standalone action history. */
 export const artifactActionKinds = {
-  capture: "capture",
   changeAccess: "change_access",
   changeTags: "change_tags",
   commentCreate: "comment_create",
@@ -22,9 +21,7 @@ export const artifactActionKinds = {
   commentUpdate: "comment_update",
   delete: "delete",
   edited: "edited",
-  link: "link",
   publish: "publish",
-  relink: "relink",
   renamed: "renamed",
   restore: "restore",
 } as const;
@@ -104,30 +101,6 @@ export interface ArtifactPathMatch {
 /** An artifact record whose deletion state is known to be committed. */
 export interface ArtifactTombstone extends ArtifactRecord {
   readonly deletedAt: string;
-}
-
-/** The observed relation between a linked source file and its last capture. */
-export type SourceFreshness = "in-sync" | "modified" | "missing" | "unreadable";
-
-/** Persisted source freshness states, named for storage and projection code. */
-export const sourceFreshnessStates = {
-  inSync: "in-sync",
-  missing: "missing",
-  modified: "modified",
-  unreadable: "unreadable",
-} as const satisfies Record<string, SourceFreshness>;
-
-/** One linked artifact's reference to a source file that stays on disk. */
-export interface SourceBindingRecord {
-  readonly artifactId: string;
-  /** `device:inode:size:mtimeNs:ctimeNs` observed at the last capture or relink. */
-  readonly fingerprint: string;
-  readonly freshness: SourceFreshness;
-  /** Instant the freshness was last observed against the source file. */
-  readonly lastVerifiedAt: string;
-  /** Canonicalized absolute path on the server's own machine. */
-  readonly path: string;
-  readonly projectId: string;
 }
 
 /** Stable keyset position used by bounded artifact and action queries. */

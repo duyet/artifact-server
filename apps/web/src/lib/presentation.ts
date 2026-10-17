@@ -1,4 +1,4 @@
-import { ApiError, type ArtifactAction, type SourceFreshness } from "@/api/client";
+import { ApiError, type ArtifactAction } from "@/api/client";
 
 /** Formats a stored ISO timestamp for the current browser locale. */
 export function formatTimestamp(value: string): string {
@@ -73,12 +73,6 @@ export function accessSettingLabel(value: "account_required" | "public_link"): s
 /** Converts one action kind into compact action-history text. */
 export function actionLabel(value: ArtifactAction["action"]): string {
   switch (value) {
-    case "capture":
-      return "Captured linked file";
-    case "link":
-      return "Linked source file";
-    case "relink":
-      return "Relinked source file";
     case "change_access":
       return "Changed access";
     case "change_tags":
@@ -111,60 +105,4 @@ export function actionLabel(value: ArtifactAction["action"]): string {
 
 function actionHandled(value: never): never {
   throw new Error(`Unhandled artifact action: ${String(value)}`);
-}
-
-/** Names one linked file's state against the last capture. */
-export function sourceFreshnessLabel(value: SourceFreshness): string {
-  switch (value) {
-    case "in-sync":
-      return "In sync";
-    case "missing":
-      return "File missing";
-    case "modified":
-      return "Modified on disk";
-    case "unreadable":
-      return "Unreadable";
-  }
-  return freshnessHandled(value);
-}
-
-/**
- * How loudly a freshness state reads. Drift is ordinary product state, so it
- * draws the eye without alarming; only a file this server can no longer read
- * is a failure worth the destructive tone.
- */
-export function sourceFreshnessTone(
-  value: SourceFreshness,
-): "danger" | "neutral" | "primary" {
-  switch (value) {
-    case "in-sync":
-      return "neutral";
-    case "modified":
-      return "primary";
-    case "missing":
-    case "unreadable":
-      return "danger";
-  }
-  return freshnessHandled(value);
-}
-
-/** One sentence saying what the drift means for what is on screen. */
-export function sourceDriftDescription(
-  value: SourceFreshness,
-  view: "captured" | "live",
-): string | null {
-  if (value === "missing") {
-    return "The linked file is missing from disk. The last captured version is what everyone reads.";
-  }
-  if (value === "unreadable") {
-    return "The linked file cannot be read right now. The last captured version is what everyone reads.";
-  }
-  if (value !== "modified") return null;
-  return view === "live"
-    ? "File changed on disk — showing live bytes."
-    : "A newer state exists on disk. Comments and shared links stay on the captured version.";
-}
-
-function freshnessHandled(value: never): never {
-  throw new Error(`Unhandled source freshness: ${String(value)}`);
 }

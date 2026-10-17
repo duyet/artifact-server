@@ -41,12 +41,6 @@ import {
 } from "../application/git-history-access.js";
 
 import {
-  disabledLinkedArtifactLayer,
-  type LinkedArtifactConfiguration,
-  type LinkedSourceEngineOperations,
-  LinkedArtifactService,
-} from "../application/linked-artifacts.js";
-import {
   type PublishArtifactDependencies,
   PublishArtifactService,
 } from "../application/publish-artifact.js";
@@ -125,7 +119,6 @@ import type {
   ContentSessionRepository,
   IdGenerator,
   ProjectRepository,
-  SourceBindingRepository,
   StagedUploadRepository,
   StagingStore,
 } from "../core/ports.js";
@@ -165,13 +158,6 @@ export interface ApplicationAdapters {
   readonly gitHistory?: GitHistoryCapabilityReader;
   /** Optional managed provider used only after application authorization. */
   readonly gitHistoryProvider?: GitHistoryProvider;
-  /**
-   * Linked-artifact adapters, present only on a local deployment that has
-   * enabled the capability. Absent, every runtime still provides the
-   * linked-artifact service through its disabled layer, which answers the
-   * stable capability-unavailable shape.
-   */
-  readonly linked?: LinkedApplicationAdapters;
   readonly localBootstrapCredential: Redacted.Redacted | null;
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: ArtifactRepository &
@@ -189,13 +175,6 @@ export interface ApplicationAdapters {
     readonly concurrency: number;
     readonly settleDelayMilliseconds: number;
   };
-}
-
-/** Node-only linked-artifact adapters supplied by the local deployment. */
-export interface LinkedApplicationAdapters {
-  readonly bindings: SourceBindingRepository;
-  readonly configuration: LinkedArtifactConfiguration;
-  readonly engine: LinkedSourceEngineOperations;
 }
 
 interface PublicLinkInventoryStore {
@@ -218,7 +197,6 @@ export function createApplicationLayer(
   | ExpiredStagingCleanupService
   | GitHistoryAccessService
   | InstallationAccessService
-  | LinkedArtifactService
   | PublishArtifactService
   | ProjectAnalyticsService
   | ProjectGitHistoryService
@@ -1028,86 +1006,9 @@ export function createApplicationLayer(
       Layer.mergeAll(authorizationLayer, identityLayer, projectLayer),
     ),
   );
-  const linked = adapters.linked;
-  const linkedLayer = linked === undefined
-    ? disabledLinkedArtifactLayer
-    : LinkedArtifactService.layer({
-      bindings: {
-        commitCapturedVersion: (command) =>
-          Effect.tryPromise({
-            try: () => linked.bindings.commitCapturedVersion(command),
-            catch: classifyCapturedCommitFailure,
-          }),
-        commitLinkedArtifact: (command) =>
-          Effect.tryPromise({
-            try: () => linked.bindings.commitLinkedArtifact(command),
-            catch: classifyLinkedCommitFailure,
-          }),
-        findSourceBinding: (projectId, artifactId) =>
-          Effect.tryPromise({
-            try: () => linked.bindings.findSourceBinding(projectId, artifactId),
-            catch: (cause) => repositoryFailure("linkedSource", cause),
-          }),
-        recordSourceFreshness: (command) =>
-          Effect.tryPromise({
-            try: () => linked.bindings.recordSourceFreshness(command),
-            catch: (cause) => repositoryFailure("linkedSource", cause),
-          }),
-        relinkSource: (command) =>
-          Effect.tryPromise({
-            try: () => linked.bindings.relinkSource(command),
-            catch: classifyRelinkFailure,
-          }),
-      },
-      blobs: publishDependencies.blobs,
-      clock,
-      configuration: linked.configuration,
-      engine: linked.engine,
-      ids: adapters.ids,
-      liveSessions: {
-        createContentBootstrap: (command) =>
-          contentDependencies.repository.createContentBootstrap(command),
-        findContentSession: (tokenDigest, contentToken, requestTime) =>
-          contentDependencies.repository.findContentSession(
-            tokenDigest,
-            contentToken,
-            requestTime,
-          ),
-      },
-      publication: {
-        assertPublicationSourceReady: (source, manifestDigest, commitTime) =>
-          publishDependencies.repository.assertPublicationSourceReady(
-            source,
-            manifestDigest,
-            commitTime,
-          ),
-        findCurrentVersion: (projectId, artifactId) =>
-          publishDependencies.repository.findCurrentVersion(
-            projectId,
-            artifactId,
-          ),
-        findIdempotentPublication: (projectId, idempotencyKey, inputDigest) =>
-          publishDependencies.repository.findIdempotentPublication(
-            projectId,
-            idempotencyKey,
-            inputDigest,
-          ),
-        findVersionRecord: (projectId, artifactId, versionId) =>
-          contentDependencies.repository.findVersionRecord(
-            projectId,
-            artifactId,
-            versionId,
-          ),
-      },
-      secrets: contentDependencies.secrets,
-    }).pipe(
-      Layer.provideMerge(
-        Layer.mergeAll(authorizationLayer, projectLayer, stagedLayer),
-      ),
-    );
   const commentLayer = ArtifactCommentService.layer(commentDependencies).pipe(
     Layer.provideMerge(
-      Layer.mergeAll(authorizationLayer, projectLayer, linkedLayer),
+      Layer.mergeAll(authorizationLayer, projectLayer),
     ),
   );
   const dispatchLayer = AgentDispatchService.layer(dispatchDependencies).pipe(
@@ -1129,7 +1030,6 @@ export function createApplicationLayer(
     stagedLayer,
     contentLayer,
     cleanupLayer,
-    linkedLayer,
     managementLayer,
     publicLinkAdministrationLayer,
     comparisonLayer,
@@ -1240,32 +1140,6 @@ function credentialsEqual(actualToken: string, expectedToken: string): boolean {
   const expected = Buffer.from(expectedToken);
   return actual.byteLength === expected.byteLength &&
     timingSafeEqual(actual, expected);
-}
-
-function classifyLinkedCommitFailure(cause: unknown) {
-  if (
-    cause instanceof IdempotencyConflict || cause instanceof ProjectArchived
-  ) return cause;
-  return repositoryFailure("linkedSource", cause);
-}
-
-function classifyCapturedCommitFailure(cause: unknown) {
-  if (
-    cause instanceof ArtifactNotFound ||
-    cause instanceof IdempotencyConflict ||
-    cause instanceof ProjectArchived ||
-    cause instanceof PublishConflict
-  ) {
-    return cause;
-  }
-  return repositoryFailure("linkedSource", cause);
-}
-
-function classifyRelinkFailure(cause: unknown) {
-  if (
-    cause instanceof ArtifactNotFound || cause instanceof IdempotencyConflict
-  ) return cause;
-  return repositoryFailure("linkedSource", cause);
 }
 
 function classifySourceReadinessFailure(cause: unknown) {

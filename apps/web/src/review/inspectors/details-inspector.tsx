@@ -15,7 +15,7 @@ import {Button} from "@/components/ui/button";
 import {Field, FieldDescription, FieldError, FieldLabel} from "@/components/ui/field";
 import {Input} from "@/components/ui/input";
 import {Spinner} from "@/components/ui/spinner";
-import {formatTimestamp, sourceDriftDescription, sourceFreshnessLabel} from "@/lib/presentation";
+import {formatTimestamp} from "@/lib/presentation";
 import {AccessBadge} from "../access-badge.tsx";
 import {principalLabel} from "../principal-name.ts";
 import {InspectorRow, InspectorSection, InspectorStack} from "./inspector-layout.tsx";
@@ -24,9 +24,6 @@ import {parseTagList} from "./inspector-model.ts";
 export function DetailsInspector({
   canManage,
   details,
-  linkedArtifacts,
-  onCapture,
-  onOpenLive,
   onTagsChange,
   onTombstone,
   version,
@@ -34,17 +31,11 @@ export function DetailsInspector({
 }: {
   readonly canManage: boolean;
   readonly details: ArtifactDetails;
-  readonly linkedArtifacts: boolean;
-  readonly onCapture: () => Promise<void>;
-  readonly onOpenLive: () => Promise<void>;
   readonly onTagsChange: (tags: readonly string[]) => Promise<void>;
   readonly onTombstone: () => Promise<boolean>;
   readonly version: ArtifactVersion;
   readonly viewerPrincipalId: string;
 }) {
-  const linkedDriftDescription = details.sourceBinding === undefined
-    ? null
-    : sourceDriftDescription(details.sourceBinding.status, "captured");
   return (
     <InspectorStack>
       <InspectorSection title="Artifact">
@@ -82,27 +73,6 @@ export function DetailsInspector({
         key={details.artifact.id}
         onChange={onTagsChange}
       />
-      {details.sourceBinding === undefined ? null : (
-        <InspectorSection title="Linked source">
-          <InspectorRow label="state" value={sourceFreshnessLabel(details.sourceBinding.status)} />
-          <InspectorRow label="path" mono value={details.sourceBinding.path} />
-          {linkedDriftDescription === null ? null : (
-            <p className="text-sm text-muted-foreground">{linkedDriftDescription}</p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {canManage && details.sourceBinding.status !== "in-sync" ? (
-              <Button onClick={() => void onCapture()} size="sm" type="button">
-                Capture current file
-              </Button>
-            ) : null}
-            {linkedArtifacts && details.links.live !== undefined ? (
-              <Button onClick={() => void onOpenLive()} size="sm" type="button" variant="outline">
-                Open live file
-              </Button>
-            ) : null}
-          </div>
-        </InspectorSection>
-      )}
       {canManage ? (
         <InspectorSection title="Danger zone">
           <TombstoneArtifactControl artifact={details.artifact} onConfirm={onTombstone} />

@@ -25,8 +25,7 @@ A middleware that runs before every application route reads the `Host` header (`
 
 1. `review-…` goes to `servePreviewLeaseContent`. The lease token in the host name is the credential.
 2. A `__artifact_bootstrap` query goes to `exchangeContentBootstrap` (`:3863`). It sets the HttpOnly, `SameSite=Strict` cookie `__Host-artifact_content` on that host (`:3937`).
-3. `live-…` goes to `serveLiveContent`. Linked sources work only on loopback.
-4. Any other label goes to `serveVersionContent` (`:3422`).
+3. Any other label goes to `serveVersionContent` (`:3422`).
 
 `serveVersionContent` turns the URL path into a manifest path (`manifestPathFromUrl`, `src/manifest/create-manifest.ts:73`) and calls `ContentAccessService.authorizeVersionContent` (`src/application/content-access.ts:357`). The repository maps (token, path) to one manifest entry. The service allows the read if the artifact is `public_link` and the version is current (`:367`). Otherwise it needs a content-session cookie bound to that token (`:373`). `serveStoredVersionContent` streams the blob (`src/http/create-http-app.ts:3501`). Content responses carry no CSP. The separate origin is the only isolation.
 
@@ -375,10 +374,9 @@ The operator is moving 29 static reports from `docs/artifacts/<yyyy>/<mm>/<slug>
 
 The path is a nullable column on the artifact row, not a separate table. Every reader that builds `links.artifact` already loads that row, so a column needs no join.
 
-- `ArtifactRecord` (`src/core/model.ts:72`) gains `path: string | null`. `CommitNewArtifact` (`src/core/ports.ts:104`) gains the same field. `CommitLinkedArtifact` extends it (`:377`), and linked artifacts pass `null`.
+- `ArtifactRecord` (`src/core/model.ts:72`) gains `path: string | null`. `CommitNewArtifact` (`src/core/ports.ts:104`) gains the same field.
 - A new version never writes the artifact row's name or tags (`CommitArtifactVersion`, `src/core/ports.ts:121`). It keeps the path the same way, with no new code.
 - The value is a plain string. The codebase has no branded types (no `Brand` anywhere in `src`), and one brand here would be the only one. Instead, `parseArtifactPath` is the only way a path enters the server (see "Validation and reserved segments").
-- The column is named `path`. In SQLite it sits next to `source_path`, which is the file-system path of a linked source. The migration's code comment says that the two are unrelated.
 
 Paths are prefix-free within an installation. No live path equals another, and no live path is a prefix of another at a `/` boundary. `2026/10/agent-console` and `2026/10/agent-console-v2` can both exist, but `2026/10` and `2026/10/agent-console` cannot. With nesting, the longer path would hide the shorter artifact's files under that subfolder, and nobody would notice until a reader got the wrong page. A prefix-free rule fails at publish time instead, and every request matches at most one artifact.
 

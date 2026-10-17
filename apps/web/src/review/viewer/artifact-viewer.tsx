@@ -123,7 +123,6 @@ export function ArtifactViewer({
   }, [go]);
   const viewer = useArtifactViewer({
     artifactId,
-    linkedArtifacts: session.capabilities.linkedArtifacts,
     onArtifactChanged,
     onVersionResolved: selectVersion,
     projectId,

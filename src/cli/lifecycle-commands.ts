@@ -397,8 +397,6 @@ async function startCompactServer(
     gitHistory: configuration.gitHistory,
     hostname: configuration.hostname,
     installationId: configuration.installation.installationId,
-    linkedFiles: configuration.linkedFiles,
-    linkRoots: configuration.linkRoots,
     port: configuration.port,
     readinessWithdrawalMilliseconds:
       configuration.readinessWithdrawalMilliseconds,
