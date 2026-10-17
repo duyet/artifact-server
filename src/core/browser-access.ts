@@ -6,20 +6,17 @@ export const browserAccessModes = {
   privateTeam: "private_team",
 } as const;
 
-/** Interactive login mechanisms disclosed to the management application. */
+/** Browser sign-in mechanisms disclosed to the management application. */
 export const browserLoginKinds = {
   localOwner: "local_owner",
   none: "none",
-  oidc: "oidc",
-  workOs: "workos",
 } as const;
 
 /**
  * Browser authentication policy fixed by the deployment composition root.
  *
- * The discriminated union prevents a local deployment from advertising a
- * remote provider and prevents a team deployment from enabling local-owner
- * access accidentally.
+ * The discriminated union prevents a team deployment from enabling
+ * local-owner access accidentally.
  */
 export type BrowserAccess =
   | {
@@ -27,10 +24,7 @@ export type BrowserAccess =
     readonly mode: typeof browserAccessModes.localOwner;
   }
   | {
-    readonly loginKind:
-      | typeof browserLoginKinds.none
-      | typeof browserLoginKinds.oidc
-      | typeof browserLoginKinds.workOs;
+    readonly loginKind: typeof browserLoginKinds.none;
     readonly mode: typeof browserAccessModes.privateTeam;
   };
 
@@ -42,36 +36,9 @@ export const localOwnerBrowserAccess: BrowserAccess = {
 
 /** Create the browser access policy for a remotely deployed private team. */
 export function privateTeamBrowserAccess(
-  loginKind:
-    | typeof browserLoginKinds.none
-    | typeof browserLoginKinds.oidc
-    | typeof browserLoginKinds.workOs,
+  loginKind: typeof browserLoginKinds.none,
 ): Extract<BrowserAccess, {readonly mode: "private_team"}> {
   return {loginKind, mode: browserAccessModes.privateTeam};
-}
-
-/**
- * Refuse a team server whose login kind and identity provider disagree: oidc
- * and workos need an interactive provider, and none must not have one.
- */
-export function assertTeamLoginMatchesProvider(
-  browserAccess: BrowserAccess,
-  hasInteractiveIdentityProvider: boolean,
-): void {
-  if (browserAccess.mode !== browserAccessModes.privateTeam) return;
-  if (browserAccess.loginKind === browserLoginKinds.none) {
-    if (hasInteractiveIdentityProvider) {
-      throw new Error(
-        "A private-team server with browser login kind none cannot configure a browser-login provider.",
-      );
-    }
-    return;
-  }
-  if (!hasInteractiveIdentityProvider) {
-    throw new Error(
-      "A private-team server requires exactly one OIDC or WorkOS browser-login provider.",
-    );
-  }
 }
 
 /** The access setting a new artifact gets when its publisher names none. */

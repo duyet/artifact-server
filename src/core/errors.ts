@@ -15,11 +15,8 @@ export const errorCodes = {
   contentBootstrapRejected: "CONTENT_BOOTSTRAP_REJECTED",
   contentNotPublic: "CONTENT_NOT_PUBLIC",
   idempotencyConflict: "IDEMPOTENCY_CONFLICT",
-  identityAdmissionDenied: "IDENTITY_ADMISSION_DENIED",
   identityConflict: "IDENTITY_CONFLICT",
   identityNotFound: "IDENTITY_NOT_FOUND",
-  identityProviderFailure: "IDENTITY_PROVIDER_FAILURE",
-  interactiveLoginUnavailable: "INTERACTIVE_LOGIN_UNAVAILABLE",
   invalidComment: "INVALID_COMMENT",
   invalidDispatch: "INVALID_DISPATCH",
   invalidInput: "INVALID_INPUT",
@@ -77,12 +74,6 @@ export class AuthenticationRequired extends Schema.TaggedError<AuthenticationReq
   messageField,
 ) {}
 
-/** A verified external identity is not admitted to this installation. */
-export class IdentityAdmissionDenied extends Schema.TaggedError<IdentityAdmissionDenied>()(
-  "IdentityAdmissionDenied",
-  messageField,
-) {}
-
 /** An identity-management command conflicts with current installation state. */
 export class IdentityConflict extends Schema.TaggedError<IdentityConflict>()(
   "IdentityConflict",
@@ -95,19 +86,7 @@ export class IdentityNotFound extends Schema.TaggedError<IdentityNotFound>()(
   messageField,
 ) {}
 
-/** Interactive browser login is not configured for this installation. */
-export class InteractiveLoginUnavailable extends Schema.TaggedError<InteractiveLoginUnavailable>()(
-  "InteractiveLoginUnavailable",
-  messageField,
-) {}
-
-/** A configured external identity provider could not complete its operation. */
-export class IdentityProviderFailure extends Schema.TaggedError<IdentityProviderFailure>()(
-  "IdentityProviderFailure",
-  messageField,
-) {}
-
-/** An interactive login attempt is invalid, expired, or already consumed. */
+/** A local browser login attempt is invalid, expired, or already consumed. */
 export class LoginAttemptRejected extends Schema.TaggedError<LoginAttemptRejected>()(
   "LoginAttemptRejected",
   messageField,
@@ -459,14 +438,12 @@ export class IdentityRepositoryFailure extends Schema.TaggedError<IdentityReposi
     cause: Schema.Defect(),
     operation: Schema.Literals([
       "admitMember",
-      "bindExternalIdentity",
       "consumeLoginAttempt",
       "createApiKey",
       "createApplicationSession",
       "createLoginAttempt",
       "deactivateMember",
       "findActiveMemberByEmail",
-      "findActiveMemberByExternalIdentity",
       "findMember",
       "findApiKey",
       "findApplicationSession",
@@ -510,11 +487,8 @@ const artifactServerFailureSchema = Schema.Union([
   DispatchStateConflict,
   InvalidComment,
   InvalidDispatch,
-  IdentityAdmissionDenied,
   IdentityConflict,
   IdentityNotFound,
-  IdentityProviderFailure,
-  InteractiveLoginUnavailable,
   LoginAttemptRejected,
   AuthorizationDenied,
   ContentBootstrapRejected,

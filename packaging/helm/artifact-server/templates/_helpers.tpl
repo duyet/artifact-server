@@ -60,23 +60,6 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if ne $hasAccessKey $hasSecretKey -}}
 {{- fail "secret.keys.s3AccessKeyId and secret.keys.s3SecretAccessKey must be configured together" -}}
 {{- end -}}
-{{- $hasWorkosClient := ne .Values.identity.workosClientId "" -}}
-{{- $hasWorkosIssuer := ne .Values.identity.workosIssuer "" -}}
-{{- $hasWorkosKey := ne .Values.secret.keys.workosApiKey "" -}}
-{{- if not (or (and (not $hasWorkosClient) (not $hasWorkosIssuer) (not $hasWorkosKey)) (and $hasWorkosClient $hasWorkosIssuer $hasWorkosKey)) -}}
-{{- fail "identity.workosClientId, identity.workosIssuer, and secret.keys.workosApiKey must be configured together" -}}
-{{- end -}}
-{{- $hasOidcClient := ne .Values.identity.oidcClientId "" -}}
-{{- $hasOidcIssuer := ne .Values.identity.oidcIssuer "" -}}
-{{- if ne $hasOidcClient $hasOidcIssuer -}}
-{{- fail "identity.oidcClientId and identity.oidcIssuer must be configured together" -}}
-{{- end -}}
-{{- if and (not $hasOidcIssuer) (or (ne .Values.identity.oidcScopes "") (ne .Values.secret.keys.oidcClientSecret "")) -}}
-{{- fail "identity.oidcScopes and secret.keys.oidcClientSecret require identity.oidcClientId and identity.oidcIssuer" -}}
-{{- end -}}
-{{- if and $hasOidcIssuer $hasWorkosIssuer -}}
-{{- fail "one installation has one browser-login provider: configure the identity.workos values or the identity.oidc values, not both" -}}
-{{- end -}}
 {{- $drainMilliseconds := add .Values.configuration.readinessWithdrawalMilliseconds .Values.configuration.shutdownDeadlineMilliseconds -}}
 {{- if le (mul .Values.terminationGracePeriodSeconds 1000) $drainMilliseconds -}}
 {{- fail "terminationGracePeriodSeconds must be longer than readinessWithdrawalMilliseconds plus shutdownDeadlineMilliseconds" -}}
@@ -113,7 +96,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{- define "artifact-server.configurationChecksum" -}}
-{{- dict "configuration" .Values.configuration "identity" .Values.identity "secretKeys" .Values.secret.keys | toJson | sha256sum -}}
+{{- dict "configuration" .Values.configuration "secretKeys" .Values.secret.keys | toJson | sha256sum -}}
 {{- end -}}
 
 {{- define "artifact-server.secretItems" -}}
@@ -126,14 +109,6 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   path: s3-access-key-id
 - key: {{ .Values.secret.keys.s3SecretAccessKey | quote }}
   path: s3-secret-access-key
-{{- end }}
-{{- if .Values.secret.keys.workosApiKey }}
-- key: {{ .Values.secret.keys.workosApiKey | quote }}
-  path: workos-api-key
-{{- end }}
-{{- if .Values.secret.keys.oidcClientSecret }}
-- key: {{ .Values.secret.keys.oidcClientSecret | quote }}
-  path: oidc-client-secret
 {{- end }}
 {{- end -}}
 
@@ -185,27 +160,5 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   value: /run/secrets/artifact-server/s3-access-key-id
 - name: ARTIFACT_SERVER_S3_SECRET_ACCESS_KEY_FILE
   value: /run/secrets/artifact-server/s3-secret-access-key
-{{- end }}
-{{- if .Values.identity.oidcIssuer }}
-{{- if .Values.secret.keys.oidcClientSecret }}
-- name: ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE
-  value: /run/secrets/artifact-server/oidc-client-secret
-{{- end }}
-- name: ARTIFACT_SERVER_OIDC_CLIENT_ID
-  value: {{ .Values.identity.oidcClientId | quote }}
-- name: ARTIFACT_SERVER_OIDC_ISSUER
-  value: {{ .Values.identity.oidcIssuer | quote }}
-{{- if .Values.identity.oidcScopes }}
-- name: ARTIFACT_SERVER_OIDC_SCOPES
-  value: {{ .Values.identity.oidcScopes | quote }}
-{{- end }}
-{{- end }}
-{{- if .Values.identity.workosClientId }}
-- name: ARTIFACT_SERVER_WORKOS_API_KEY_FILE
-  value: /run/secrets/artifact-server/workos-api-key
-- name: ARTIFACT_SERVER_WORKOS_CLIENT_ID
-  value: {{ .Values.identity.workosClientId | quote }}
-- name: ARTIFACT_SERVER_WORKOS_ISSUER
-  value: {{ .Values.identity.workosIssuer | quote }}
 {{- end }}
 {{- end -}}

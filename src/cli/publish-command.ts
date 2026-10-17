@@ -95,7 +95,7 @@ export function configurePublishCommand(
       ),
     )
     .action(async (inputPath: string, options: PublishOptions) => {
-      let connection = await resolveCliServerConnection(options, "publish");
+      const connection = await resolveCliServerConnection(options, "publish");
       const intent = publicationCommand(inputPath, options);
       const prepared = await preparePublication(intent);
       const operation = await resumePublicationOperation(
@@ -104,24 +104,11 @@ export function configurePublishCommand(
         prepared.operationScopeDigest,
         prepared.operationDigest,
       );
-      let outcome = await executePublication(
+      const outcome = await executePublication(
         connection,
         operation.idempotencyKey,
         prepared,
       );
-      if (
-        !outcome.success
-        && outcome.error._tag === "FilePublicationProtocolError"
-        && outcome.error.status === 401
-        && connection.profile?.authentication === "oauth"
-      ) {
-        connection = await resolveCliServerConnection(options, "publish", true);
-        outcome = await executePublication(
-          connection,
-          operation.idempotencyKey,
-          prepared,
-        );
-      }
       if (!outcome.success) throw cliPublicationError(outcome.error);
       console.log(JSON.stringify(outcome.result, null, 2));
       await operation.complete();

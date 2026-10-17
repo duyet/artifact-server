@@ -33,9 +33,6 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
-      '@workos-inc/node':
-        specifier: 10.9.0
-        version: 10.9.0
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -48,9 +45,6 @@ importers:
       isomorphic-git:
         specifier: 1.41.9
         version: 1.41.9
-      jose:
-        specifier: 6.2.9
-        version: 6.2.9
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
@@ -2067,10 +2061,6 @@ packages:
 
   '@viz-js/viz@3.29.0':
     resolution: {integrity: sha512-iq4MTqNCr8pinP4C73JRFx/h2w4QbtHvXINNiPeBv3/C5tSamXwakst6ODlR/l6uh3/SGr7IAGIfSk2qMekiNw==}
-
-  '@workos-inc/node@10.9.0':
-    resolution: {integrity: sha512-Voxhxocg7Q9lpi1gJ6qyPCjgcjh7fZmxU0gR7BQRnv+ozCJ9Xj4jZulVt38tGMukniDI1uwTiXm+G2vdogpD4Q==}
-    engines: {node: '>=22.11.0'}
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -6195,8 +6185,6 @@ snapshots:
       tinyrainbow: 3.1.1
 
   '@viz-js/viz@3.29.0': {}
-
-  '@workos-inc/node@10.9.0': {}
 
   abort-controller@3.0.0:
     dependencies:

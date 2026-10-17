@@ -168,7 +168,7 @@ Published code is untrusted.
 - Cookie-authenticated application mutations require a CSRF token and reject the content origin using `Origin` and Fetch Metadata checks.
 - The application does not grant credentialed CORS access to a content origin.
 - The content origin exposes only read-only artifact files and the private-content bootstrap exchange.
-- OAuth callbacks and MCP authorization remain on the application origin.
+- Sign-in and MCP authorization remain on the application origin.
 - Published responses set explicit media types and `X-Content-Type-Options: nosniff`.
 - Tests include a malicious artifact that attempts forms, fetches, frames, service workers, and cross-origin requests against the application.
 
@@ -332,9 +332,7 @@ The detailed MCP wire and authorization contract is in [Artifact Server MCP base
 | Condition | What the person does |
 | --- | --- |
 | Local, single user | Install Artifact Server and run `artifactserver connect`. There is no browser sign-in, visible token, copied key, Docker requirement, or startup-log step. |
-| Hosted or team server with compatible MCP OAuth | Add or select the server's `/mcp` address, sign in and approve in the browser, then return to the AI client. The client renews authorization automatically until it is revoked or disconnected. |
-| Private-network team server with compatible MCP OAuth | Connect to the required company network or VPN, then use the same server-address and browser-sign-in flow. Signing in does not change network access. |
-| Self-hosted server without compatible MCP OAuth | An administrator creates a scoped API key in the administration interface or administrator CLI. The developer enters it once through the AI client's secret input. Keys never come from startup logs. |
+| Team or self-hosted server | An administrator creates a scoped API key in the administration interface or administrator CLI. The developer enters it once through the AI client's secret input. Keys never come from startup logs. |
 | CI, scripts, or unattended agents | An administrator creates a scoped service API key and stores it in the deployment's secret manager. No browser is involved. |
 
 `artifactserver connect` registers the local `artifactserver mcp` stdio bridge
@@ -346,7 +344,8 @@ argument. `artifactserver disconnect` removes the client registration, and
 `artifactserver doctor` diagnoses the local service and connection without
 revealing credentials.
 
-Account-required artifact links use normal Artifact Server browser sign-in.
+Account-required artifact links use Artifact Server browser sign-in: API-key
+sign-in on a team server and the automatic owner session on a local server.
 Public artifact links require no sign-in. MCP credentials never become browser
 cookies.
 
@@ -357,7 +356,7 @@ the raw content URL as Review.
 
 These paths are release requirements. Each advertised client must pass clean
 connection, repeat connection, disconnect, stale-state recovery, and hostile
-credential tests. Remote OAuth paths must also pass renewal and revoke tests. A
+credential tests. API-key paths must also pass rotation and revoke tests. A
 local release cannot ship with manual token copying. API-key issuance must use
 an administration surface, never startup output.
 
@@ -395,12 +394,11 @@ size thresholds. Any temporary upload address is short-lived, bound to the
 declared upload and file, redacted, and handled inside the CLI. An exact retry
 after a lost response is safe.
 
-The CLI keeps named profiles for exact server origins. On a remote server with
-browser authorization, `artifactserver auth login <server>` opens sign-in and
-stores the renewable credential in the operating-system credential store.
-Local mode uses private user-only state without browser login or a visible
-secret. A self-hosted server without browser authorization uses an
-administrator-issued scoped key stored in the same secure profile boundary. CI
+The CLI keeps named profiles for exact server origins. On a remote server,
+`artifactserver auth login <server> --api-key-stdin` reads an
+administrator-issued scoped key from standard input and stores it in the
+operating-system credential store. Local mode uses private user-only state
+without browser login or a visible secret. CI
 uses a scoped service credential from its secret manager. `artifactserver
 connect` remains the command for registering an MCP connection; it is not CLI
 login.
@@ -490,9 +488,8 @@ A requirement is complete only when both tests pass on every applicable deployme
 - One digest-pinned Docker image for compact and external-storage profiles.
 - Compact Compose for a one-server install plus External-storage Compose that
   connects to existing Postgres and object storage.
-- Browser login through WorkOS AuthKit or any OpenID Connect provider the
-  installation already runs, scoped API keys, Postgres and native blob drivers.
-  One installation configures one browser-login provider.
+- Browser sign-in and MCP access with managed, scoped API keys, Postgres and
+  native blob drivers. There is no external identity provider.
 - Helm chart for Kubernetes. The chart deploys Artifact Server and connects to
   existing Postgres and object storage; it does not hide durable providers
   inside the application release.
@@ -503,7 +500,7 @@ The optional Plannotator connection builds on this release. Public or already re
 
 ### Optional Cloudflare deployment
 
-- Workers, D1, R2, WorkOS-hosted MCP authorization, public CDN delivery, and an off-by-default Cloudflare Artifacts integration.
+- Workers, D1, R2, public CDN delivery, and an off-by-default Cloudflare Artifacts integration.
 - A trusted installation directory maps each request to its installation and storage assignment. The request cannot supply an unverified installation ID.
 - Core technical safety: tenant isolation, authorization, audit records, recovery, and bounded uploads.
 
@@ -540,7 +537,7 @@ Every applicable release must prove:
 - backup and restore preserve IDs before a deployment is called team-ready;
 - local/team target resolution never guesses between configured servers.
 - local MCP setup requires no browser, visible token, copied key, Docker requirement, or startup-log inspection;
-- remote MCP with OAuth connects from only the `/mcp` address and completes browser approval, renewal, revoke, and reconnect;
+- remote MCP connects with a scoped API key and refuses an expired, rotated, or revoked key;
 - self-hosted and automation API keys are issued through an administration surface and never exposed in startup or diagnostic logs;
 - every advertised Codex, Claude Code, Cursor, and VS Code connection path passes from clean and stale client state.
 
@@ -552,12 +549,10 @@ These items can change implementation cost or hosting viability and must be reso
 2. **Wildcard content hosts:** local `*.localhost` behavior and a real Cloudflare wildcard TLS probe have evidence. Equivalent DNS, certificate, proxy, and hostile-host proof remains open for each deployment before support is advertised.
 3. **Hosted database growth:** load-test D1 and choose the control-plane and second-shard design before hosted scale requires it.
 4. **Cloudflare Artifacts:** complete the live binding, REST, smart-HTTP, token, backfill, disable, deletion, recovery, limits, and cost probes before advertising the off-by-default provider. The core product remains supported without access.
-5. **WorkOS MCP authorization:** live browser approval, resource-bound tokens, refresh, revocation, reconnect, CIMD, and DCR pass for Codex and Claude Code. Visual Studio Code and claude.ai are deferred client qualifications, not first-release gates.
-6. **Embedded self-hosted OAuth:** ship Better Auth only after its beta MCP path passes the security, compatibility, migration, and recovery matrix.
-7. **Direct-cloud installers:** selected live AWS and GCP lifecycle probes have evidence, but the complete signed `GATE-007` and full product-conformance runs do not. Private AWS remains a separate unqualified variant. Azure has no direct target; the Azure Blob adapter remains preview until it passes a real provider test.
-8. **Optional hosted-service policy:** if artifactserver.com later offers public hosting, its operator must separately own quotas, abuse response, malware and copyright procedures, reputation, suspension, deletion, and appeals. This policy does not gate the core OSS release.
-9. **Capacity claims:** the OSS release need not advertise universal capacity or cost envelopes. Any target-specific claim must be backed by measured evidence; enforced input bounds remain part of core safety.
-10. **Recovery promises:** choose support tiers, availability target, backup frequency, restore-time target, and acceptable data-loss window for hosted and self-hosted team deployments.
+5. **Direct-cloud installers:** selected live AWS and GCP lifecycle probes have evidence, but the complete signed `GATE-007` and full product-conformance runs do not. Private AWS remains a separate unqualified variant. Azure has no direct target; the Azure Blob adapter remains preview until it passes a real provider test.
+6. **Optional hosted-service policy:** if artifactserver.com later offers public hosting, its operator must separately own quotas, abuse response, malware and copyright procedures, reputation, suspension, deletion, and appeals. This policy does not gate the core OSS release.
+7. **Capacity claims:** the OSS release need not advertise universal capacity or cost envelopes. Any target-specific claim must be backed by measured evidence; enforced input bounds remain part of core safety.
+8. **Recovery promises:** choose support tiers, availability target, backup frequency, restore-time target, and acceptable data-loss window for hosted and self-hosted team deployments.
 11. **Optional enterprise policy:** encryption-key ownership, regional placement, audit export, legal hold, and contractual deletion are outside the simple first release and should be specified only if an enterprise offering is proposed.
 12. **Custom domains:** decide whether customer-owned content domains are supported and how certificates, cookies, abuse handling, and version origins work.
 13. **Plannotator review bridge:** test the isolated review response against hostile artifact JavaScript, strict content policies, multi-page sites, single-page routes, service workers, anchor stability, session expiry, and browsers without third-party cookies. Use a browser extension if the injected bridge cannot pass without exposing a reusable credential.

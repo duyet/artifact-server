@@ -1,20 +1,12 @@
 import {Effect, Layer, ManagedRuntime, type Redacted} from "effect";
 
 import type {ApplicationRuntime} from "../application/application-runtime.js";
-import type {
-  BearerCredentialVerifier,
-  ExternalMcpBearerVerifier,
-} from "../application/authentication.js";
-import type {InteractiveIdentityProvider} from "../application/interactive-login.js";
+import type {BearerCredentialVerifier} from "../application/authentication.js";
 import type {Clock} from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
 import {SystemClock, SystemIdGenerator} from "../core/system.js";
 import {createHttpApp} from "../http/create-http-app.js";
-import type {
-  ApiOAuthResourceConfiguration,
-  HttpAppDependencies,
-  McpOAuthResourceConfiguration,
-} from "../http/create-http-app.js";
+import type {HttpAppDependencies} from "../http/create-http-app.js";
 import {
   defaultCompletedRequestLogSampleRate,
   otlpLayer,
@@ -77,7 +69,6 @@ import {
 /** Configuration for one stateless Artifact Server process. */
 export interface ExternalStorageRuntimeConfig {
   readonly apiToken: Redacted.Redacted;
-  readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationOrigin?: string;
   /** Drain cadence for entry-document view counts; tests use a fast value. */
   readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
@@ -89,16 +80,13 @@ export interface ExternalStorageRuntimeConfig {
   readonly databaseUrl: Redacted.Redacted;
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
-  readonly externalMcpOAuthVerifier?: ExternalMcpBearerVerifier;
   readonly gitHistory?: NodeGitHistoryConfiguration;
   /** Optional provider seam for real-boundary tests; production composes REST. */
   readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
   /** Complete provider seam for conformance tests; production composes REST and Git. */
   readonly gitHistoryProvider?: GitHistoryProvider;
   readonly installationId: string;
-  readonly interactiveIdentityProvider?: InteractiveIdentityProvider;
   readonly localBootstrapCredential?: Redacted.Redacted;
-  readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
   readonly objectStorage: ObjectStorageProviderFactory;
   readonly postgresMaxConnections?: number;
   readonly runtimeLifecycle?: RuntimeLifecycle;
@@ -180,12 +168,10 @@ export async function createExternalStorageRuntime(
       dispatches: repository,
       externalApiBearerVerifier: config.externalApiBearerVerifier ?? null,
       externalMcpBearerVerifier: config.externalMcpBearerVerifier ?? null,
-      externalMcpOAuthVerifier: config.externalMcpOAuthVerifier ?? null,
       ids: new SystemIdGenerator(),
       identityRepository,
       installationId: config.installationId,
       gitHistory: {read: () => applicationGitHistory.read()},
-      interactiveIdentityProvider: config.interactiveIdentityProvider ?? null,
       localBootstrapCredential: config.localBootstrapCredential ?? null,
       protectBootstrapAdministrator: false,
       repository,
@@ -242,7 +228,7 @@ export async function createExternalStorageRuntime(
       clock: runtimeClock,
       repository,
     });
-    const appDependenciesWithoutOAuth = {
+    const appDependencies: HttpAppDependencies = {
       applicationRuntime: readyRuntime,
       artifactViews: artifactViewRecorder,
       blobs,
@@ -258,19 +244,6 @@ export async function createExternalStorageRuntime(
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(),
     };
-    let appDependencies: HttpAppDependencies = appDependenciesWithoutOAuth;
-    if (config.apiOAuthResource !== undefined) {
-      appDependencies = {
-        ...appDependencies,
-        apiOAuthResource: config.apiOAuthResource,
-      };
-    }
-    if (config.mcpOAuthResource !== undefined) {
-      appDependencies = {
-        ...appDependencies,
-        mcpOAuthResource: config.mcpOAuthResource,
-      };
-    }
     const closeCleanupSchedule = stagingCleanupPolicy.schedule === "background"
       ? startStagingCleanupSchedule(readyRuntime, stagingCleanupPolicy)
       : null;

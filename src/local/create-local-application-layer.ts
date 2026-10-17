@@ -5,16 +5,11 @@ import { DateTime, Effect, Layer, Redacted } from "effect";
 import {
   AuthenticationService,
   type BearerCredentialVerifier,
-  type ExternalMcpBearerVerifier,
 } from "../application/authentication.js";
 import {
   digestIdentitySecret,
   InstallationAccessService,
 } from "../application/installation-access.js";
-import {
-  type InteractiveIdentityProvider,
-  InteractiveLoginService,
-} from "../application/interactive-login.js";
 import {
   type AgentDispatchDependencies,
   type AgentDispatchRepositoryFailure,
@@ -158,7 +153,6 @@ export interface ApplicationAdapters {
   readonly clock: Clock;
   readonly externalApiBearerVerifier: BearerCredentialVerifier | null;
   readonly externalMcpBearerVerifier: BearerCredentialVerifier | null;
-  readonly externalMcpOAuthVerifier: ExternalMcpBearerVerifier | null;
   /**
    * Agent-dispatch persistence. Every backend implements the dispatch tables,
    * so omitting the slot is a compile error rather than a runtime failure.
@@ -167,7 +161,6 @@ export interface ApplicationAdapters {
   readonly ids: IdGenerator;
   readonly identityRepository: IdentityRepository;
   readonly installationId: string;
-  readonly interactiveIdentityProvider: InteractiveIdentityProvider | null;
   /** Live optional-provider state used to guard project enablement. */
   readonly gitHistory?: GitHistoryCapabilityReader;
   /** Optional managed provider used only after application authorization. */
@@ -225,7 +218,6 @@ export function createApplicationLayer(
   | ExpiredStagingCleanupService
   | GitHistoryAccessService
   | InstallationAccessService
-  | InteractiveLoginService
   | LinkedArtifactService
   | PublishArtifactService
   | ProjectAnalyticsService
@@ -814,10 +806,6 @@ export function createApplicationLayer(
         "admitMember",
         () => identityRepository.admitMember(command),
       ),
-      bindExternalIdentity: (command) => identityEffectWithConflict(
-        "bindExternalIdentity",
-        () => identityRepository.bindExternalIdentity(command),
-      ),
       createApiKey: (key) => identityEffect(
         "createApiKey",
         () => identityRepository.createApiKey(key),
@@ -851,18 +839,6 @@ export function createApplicationLayer(
       findActiveMemberByEmail: (installationId, email) => identityEffect(
         "findActiveMemberByEmail",
         () => identityRepository.findActiveMemberByEmail(installationId, email),
-      ),
-      findActiveMemberByExternalIdentity: (
-        installationId,
-        provider,
-        subject,
-      ) => identityEffect(
-        "findActiveMemberByExternalIdentity",
-        () => identityRepository.findActiveMemberByExternalIdentity(
-          installationId,
-          provider,
-          subject,
-        ),
       ),
       findMember: (installationId, memberId) => identityEffect(
         "findMember",
@@ -975,29 +951,9 @@ export function createApplicationLayer(
             scopes: ["mcp"],
           };
         }
-        const verifier = adapters.externalMcpOAuthVerifier;
-        if (verifier === null) {
-          return yield* Effect.fail(new AuthenticationRequired({
-            message: "A valid Artifact Server MCP credential is required.",
-          }));
-        }
-        const verified = yield* verifier.verify(credential);
-        let principal = yield* installationAccess.authenticateExternalSubject(
-          verified.provider,
-          verified.subject,
-        );
-        if (principal === null) {
-          const identity = yield* verifier.resolveIdentity(verified, credential);
-          principal = yield* installationAccess.authenticateExternalIdentity(identity);
-        }
-        return {
-          clientId: verified.clientId ?? verified.subject,
-          expiresAt: verified.expiresAt,
-          principal,
-          // The exact resource-bound audience grants access to this MCP
-          // endpoint. WorkOS does not issue a separate product scope.
-          scopes: ["mcp"],
-        };
+        return yield* Effect.fail(new AuthenticationRequired({
+          message: "A valid Artifact Server MCP credential is required.",
+        }));
       });
       return Effect.succeed(AuthenticationService.of({
         authenticateApiBearer: authenticateBearerWith(
@@ -1008,26 +964,6 @@ export function createApplicationLayer(
       }));
     }),
   ).pipe(Layer.provideMerge(identityLayer));
-  const interactiveLoginLayer = InteractiveLoginService.layer({
-    attemptLifetimeMilliseconds: 10 * 60 * 1_000,
-    clock: adapters.clock,
-    provider: adapters.interactiveIdentityProvider,
-    repository: {
-      consume: (stateDigest, provider, consumedAt) =>
-        loginAttemptEffect(
-          "consumeLoginAttempt",
-          () => identityRepository.consumeLoginAttempt(
-            stateDigest,
-            provider,
-            consumedAt,
-          ),
-        ),
-      create: (attempt) => identityEffect(
-        "createLoginAttempt",
-        () => identityRepository.createLoginAttempt(attempt),
-      ),
-    },
-  }).pipe(Layer.provideMerge(identityLayer));
   const authorizationLayer = AuthorizationService.layer({
     installationId: adapters.installationId,
   });
@@ -1190,7 +1126,6 @@ export function createApplicationLayer(
     commentLayer,
     dispatchLayer,
     identityLayer,
-    interactiveLoginLayer,
     stagedLayer,
     contentLayer,
     cleanupLayer,

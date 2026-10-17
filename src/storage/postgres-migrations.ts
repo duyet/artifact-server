@@ -760,6 +760,13 @@ const addRenameAndEditActions = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+// Browser login through an external identity provider was removed, so no
+// member binds an external identity any more.
+const dropExternalIdentities = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  yield* sql.unsafe("DROP TABLE IF EXISTS external_identities");
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -777,10 +784,11 @@ const migrationLoader = Migrator.fromRecord({
   "0014_api_key_sessions": addApiKeySessions,
   "0015_artifact_owner": addArtifactOwner,
   "0016_rename_and_edit_actions": addRenameAndEditActions,
+  "0017_drop_external_identities": dropExternalIdentities,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 16;
+export const requiredPostgresSchemaVersion = 17;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -883,6 +891,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 16,
     name: "rename_and_edit_actions",
+  }, {
+    migration_id: 17,
+    name: "drop_external_identities",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

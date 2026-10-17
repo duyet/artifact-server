@@ -10,7 +10,6 @@ import {
 } from "./create-external-storage-runtime.js";
 import {createGracefulHttpShutdown} from
   "../lifecycle/graceful-http-shutdown.js";
-import {assertTeamLoginMatchesProvider} from "../core/browser-access.js";
 import {createRuntimeLifecycle} from "../lifecycle/runtime-readiness.js";
 import {withNodeResponseCompression} from
   "../http/node-response-compression.js";
@@ -43,10 +42,6 @@ export interface RunningExternalStorageServer {
 export async function startExternalStorageServer(
   config: ExternalStorageServerConfig,
 ): Promise<RunningExternalStorageServer> {
-  assertTeamLoginMatchesProvider(
-    config.browserAccess,
-    config.interactiveIdentityProvider !== undefined,
-  );
   const lifecycle = config.runtimeLifecycle ?? createRuntimeLifecycle();
   const runtime = await createExternalStorageRuntime({
     ...config,

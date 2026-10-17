@@ -732,15 +732,15 @@ requirements:
 
   - id: CLI-001
     kind: security
-    behavior: The Artifact Server CLI keeps profiles by exact server origin and account; remote interactive login uses browser authorization and operating-system credential storage, local mode uses private user-only state without visible secrets, and CI uses scoped service credentials from its secret manager.
+    behavior: The Artifact Server CLI keeps profiles by exact server origin and account; remote login stores an administrator-issued API key read from standard input in operating-system credential storage, local mode uses private user-only state without visible secrets, and CI uses scoped service credentials from its secret manager.
     owner: cli
     source: {file: artifact-server-product-spec.html, anchor: mcp}
     acceptance:
-      behavior: {id: CLI-001-B, description: "Log in, inspect status, renew, log out, and switch exact-origin profiles on a browser-authorized server; use local automatic authentication and a CI service credential through their documented paths."}
+      behavior: {id: CLI-001-B, description: "Log in with an API key, inspect status, log out, and switch exact-origin profiles; use local automatic authentication and a CI service credential through their documented paths."}
       failure: {id: CLI-001-F, description: "Credentials never appear in startup output, command output, project files, shell arguments, logs, traces, support bundles, or another origin's profile, and revoked or mismatched credentials fail closed."}
     deployments: *all
     status: implementing
-    proof_gap: The OAuth acceptance-ID test proves browser PKCE, refresh, status, and revocation, but not the local automatic-authentication and CI paths or every credential-leak surface named by CLI-001-F.
+    proof_gap: The API-key profile test proves login, status, logout, and remote publishing, but not the local automatic-authentication path or every credential-leak surface named by CLI-001-F.
     depends_on: [AUTH-009, AUTH-017]
     evidence: []
 
@@ -1429,12 +1429,12 @@ requirements:
 
   - id: AUTH-013
     kind: security
-    behavior: OAuth callbacks, browser login, MCP authorization, artifact metadata, and mutations remain on the application origin; version origins are read-only.
+    behavior: Browser sign-in, MCP authorization, artifact metadata, and mutations remain on the application origin; version origins are read-only.
     owner: authorization
     source: {file: artifact-server-product-spec.html, anchor: safety}
     acceptance:
       behavior: {id: AUTH-013-B, description: "Enumerate application and content routes and confirm the required separation."}
-      failure: {id: AUTH-013-F, description: "No content host exposes login callback, OAuth, metadata mutation, administration, or MCP endpoints."}
+      failure: {id: AUTH-013-F, description: "No content host exposes sign-in, metadata mutation, administration, or MCP endpoints."}
     deployments: *all
     status: specified
     depends_on: [CNT-003, CNT-004]
@@ -1520,60 +1520,6 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:20:00Z"
 
-  - id: AUTH-019
-    kind: behavior
-    behavior: A deployment configured with a generic OIDC issuer completes browser login through discovery, authorization code with PKCE and nonce, id_token verification, and normal admission, on every deployment kind.
-    owner: authorization
-    source: {file: oidc-interactive-login-spec.md, anchor: conformance}
-    acceptance:
-      behavior: {id: AUTH-019-B, description: "Sign in against a real stub OIDC provider; an admitted member gets a session, the bootstrap administrator is admitted on first contact, display name and issuer-qualified binding are recorded, and a second login reuses the binding."}
-      failure: {id: AUTH-019-F, description: "An unadmitted verified identity, an unverified email, and a missing email are refused without creating members or sessions."}
-    deployments: *all
-    status: behavior_verified
-    depends_on: [AUTH-001, AUTH-010]
-    evidence:
-      - deployment: local
-        tests: [AUTH-019-B, AUTH-019-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-18T15:31:35.706Z"
-
-  - id: AUTH-020
-    kind: security
-    behavior: The OIDC callback fails closed on every token-validation defect.
-    owner: authorization
-    source: {file: oidc-interactive-login-spec.md, anchor: conformance}
-    acceptance:
-      behavior: {id: AUTH-020-B, description: "Valid logins succeed under a thirty-second clock skew, and a returnTo that only becomes scheme-relative after path normalization still lands on an application path."}
-      failure: {id: AUTH-020-F, description: "Wrong signature, wrong issuer, wrong audience, expired token, replayed or unknown state, expired attempt, wrong nonce, and a callback presented without the handshake cookie minted at /auth/login are each refused; no session or member is created; codes and tokens never appear in logs."}
-    deployments: *all
-    status: behavior_verified
-    depends_on: [AUTH-019]
-    evidence:
-      - deployment: local
-        tests: [AUTH-020-B, AUTH-020-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-18T15:31:35.706Z"
-
-  - id: AUTH-021
-    kind: constraint
-    behavior: OIDC configuration is all-or-nothing, mutually exclusive with WorkOS, and issuer and endpoint URLs obey the HTTPS rules.
-    owner: authorization
-    source: {file: oidc-interactive-login-spec.md, anchor: conformance}
-    acceptance:
-      behavior: {id: AUTH-021-B, description: "A complete OIDC configuration boots and reports the oidc interactive identity provider; an application layer constructed without either provider keeps interactive login unavailable, while private-team process startup separately obeys AUTH-025."}
-      failure: {id: AUTH-021-F, description: "Partial OIDC configuration, any WorkOS variable configured beside any OIDC variable, a non-HTTPS non-local issuer, and discovery documents with a mismatched issuer or a credentialed or fragmented endpoint URL each fail startup or login without weakening the running server."}
-    deployments: *all
-    status: behavior_verified
-    depends_on: [AUTH-019]
-    evidence:
-      - deployment: local
-        tests: [AUTH-021-B, AUTH-021-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-18T15:31:35.706Z"
-
   - id: AUTH-022
     kind: constraint
     behavior: In-process authentication caching is a bounded-staleness optimization only; successful session and managed-key checks may be cached for at most 30 seconds in a bounded store, entries never outlive the credential's own expiry, failures are never cached, and same-process logout, key revocation, key rotation, and member deactivation evict immediately, so a credential revoked on another replica authenticates for at most 30 more seconds.
@@ -1622,43 +1568,43 @@ requirements:
 
   - id: AUTH-025
     kind: constraint
-    behavior: Private-team entry points require exactly one configured browser identity provider and accept neither a local browser-bootstrap credential nor the legacy installation bearer as HTTP API or MCP request authority.
+    behavior: Private-team entry points sign browsers in with managed API keys and accept neither a local browser-bootstrap credential nor the legacy installation bearer as HTTP API or MCP request authority.
     owner: authorization
     source: {file: local-owner-and-private-team-access-spec.md, anchor: conformance-requirements}
     acceptance:
-      behavior: {id: AUTH-025-B, description: "Start compact and external-storage team runtimes with one complete OIDC or WorkOS configuration, bootstrap the configured administrator through that provider, and authenticate non-browser clients only with managed keys or a compatible external OAuth verifier."}
-      failure: {id: AUTH-025-F, description: "Missing or multiple identity providers, a configured local bootstrap credential, the local-owner session route, the generated compact bootstrap credential, and the legacy installation bearer each fail startup or authentication without granting request authority."}
+      behavior: {id: AUTH-025-B, description: "Start compact and external-storage team runtimes, read login kind none from the access-mode contract, and authenticate non-browser clients only with managed keys."}
+      failure: {id: AUTH-025-F, description: "A configured local bootstrap credential, the local-owner session route, the generated compact bootstrap credential, and the legacy installation bearer each fail startup or authentication without granting request authority."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The Node runtime test proves provider discovery, missing-provider startup refusal, local-owner route absence, managed-key authority, and legacy-bearer refusal in private-team mode, and the real Keycloak suite proves the OIDC round trip. Compact Compose, external-storage Compose, and Kubernetes startup plus the compatible external OAuth verifier matrix remain unproved.
-    depends_on: [AUTH-009, AUTH-019, AUTH-021]
+    proof_gap: The Node runtime test proves the advertised login kind, local-owner route absence, managed-key authority, and legacy-bearer refusal in private-team mode. Compact, external-storage, and Kubernetes startup runs remain unproved.
+    depends_on: [AUTH-009]
     evidence: []
 
   - id: AUTH-026
     kind: behavior
-    behavior: The management application discovers a non-secret access-mode contract and follows one bounded local-owner session flow or the configured private-team sign-in flow, with mode-correct expiry, logout, denial, and recovery behavior.
+    behavior: The management application discovers a non-secret access-mode contract and follows one bounded local-owner session flow or the private-team API-key sign-in flow, with mode-correct expiry, logout, denial, and recovery behavior.
     owner: web-application
     source: {file: local-owner-and-private-team-access-spec.md, anchor: conformance-requirements}
     acceptance:
-      behavior: {id: AUTH-026-B, description: "Load authenticated, unauthenticated, expired, and deep-linked browser states in each mode; local owner recovers once without sign-in, while private team offers the configured provider, returns safely after login, and logs out to the signed-out state."}
-      failure: {id: AUTH-026-F, description: "The public context reveals no issuer, client, bootstrap email, member state, or credential; local failures do not loop or offer provider login; team denial, deactivation, and provider failure create no session and never offer local login."}
+      behavior: {id: AUTH-026-B, description: "Load authenticated, unauthenticated, expired, and deep-linked browser states in each mode; local owner recovers once without sign-in, while private team offers API-key sign-in, returns safely after sign-in, and logs out to the signed-out state."}
+      failure: {id: AUTH-026-F, description: "The public context reveals no bootstrap email, member state, or credential; local failures do not loop or offer API-key sign-in; team denial and deactivation create no session and never offer local login."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: The browser suite proves local-owner bootstrap, deep-link loading, cookie-clearing recovery, and no logout affordance, while the HTTP suite proves the non-secret private-team context and refusal of local bootstrap. Complete private-team browser expiry, logout, denial, deactivation, provider-failure recovery, and replicated-deployment runs remain unproved.
+    proof_gap: The browser suite proves local-owner bootstrap, deep-link loading, cookie-clearing recovery, and no logout affordance, while the HTTP suite proves the non-secret private-team context and refusal of local bootstrap. Complete private-team browser expiry, logout, denial, deactivation, and replicated-deployment runs remain unproved.
     depends_on: [AUTH-023, AUTH-024, AUTH-025]
     evidence: []
 
   - id: AUTH-027
     kind: security
-    behavior: Deactivating a member stops that member's provider login, application sessions, and member-owned API keys immediately in the handling process and within the documented authentication-cache bound on every other replica, while preserving durable attributed records.
+    behavior: Deactivating a member stops that member's application sessions and member-owned API keys immediately in the handling process and within the documented authentication-cache bound on every other replica, while preserving durable attributed records.
     owner: authorization
     source: {file: local-owner-and-private-team-access-spec.md, anchor: conformance-requirements}
     acceptance:
-      behavior: {id: AUTH-027-B, description: "Authenticate one member through the identity provider, an existing application session, and a member-owned managed key; deactivate the member; observe immediate same-process refusal and cross-replica refusal within the cache bound while the member's artifacts, actions, comments, and attribution remain."}
-      failure: {id: AUTH-027-F, description: "A deactivated member cannot create a new provider binding or session, renew an existing session, use a member-owned key, or regain access through stale cached authority after the bound; unrelated service principals and durable attributed records are not removed."}
+      behavior: {id: AUTH-027-B, description: "Authenticate one member through an existing application session and a member-owned managed key; deactivate the member; observe immediate same-process refusal and cross-replica refusal within the cache bound while the member's artifacts, actions, comments, and attribution remain."}
+      failure: {id: AUTH-027-F, description: "A deactivated member cannot create a new session, renew an existing session, use a member-owned key, or regain access through stale cached authority after the bound; unrelated service principals and durable attributed records are not removed."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The local acceptance tests prove immediate refusal of a deactivated member's session and member-owned key, preserve the installation service principal, and bound a warmed cross-process session decision through the authentication cache. Provider relogin, cross-replica managed-key expiry, and explicit preservation checks for every attributed record remain unproved.
+    proof_gap: The local acceptance tests prove immediate refusal of a deactivated member's session and member-owned key, preserve the installation service principal, and bound a warmed cross-process session decision through the authentication cache. Cross-replica managed-key expiry, and explicit preservation checks for every attributed record remain unproved.
     depends_on: [AUTH-008, AUTH-009, AUTH-022, AUTH-025]
     evidence: []
 
@@ -1683,7 +1629,7 @@ requirements:
     source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
     acceptance:
       behavior: {id: AUTH-029-B, description: "Sign in with a valid key, read a session principal equal to the bearer principal of the same key, then sign out and observe the old cookie refused."}
-      failure: {id: AUTH-029-F, description: "A wrong or malformed key is 401, a cross-origin or opaque-origin request is 403, a key outside the body is refused, and a server with OIDC or local-owner login answers 404, all without Set-Cookie."}
+      failure: {id: AUTH-029-F, description: "A wrong or malformed key is 401, a cross-origin or opaque-origin request is 403, a key outside the body is refused, and a local-owner server answers 404, all without Set-Cookie."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite only. The Postgres repository compiles but its tests need Docker, and no deployed run exists.
@@ -1942,33 +1888,6 @@ requirements:
     depends_on: [AUTH-008]
     evidence: []
 
-  - id: MCP-013
-    kind: behavior
-    behavior: Local mode connects through artifactserver connect and a stdio bridge without browser OAuth or a human-visible secret; self-hosted mode uses browser OAuth when compatible authorization is configured and otherwise uses administration-issued scoped API keys. A generic OIDC issuer is compatible authorization when it signs verifiable access-token JWTs, binds the exact <origin>/mcp audience, and offers a client registration path its clients can use; the installation registers that client and never runs an authorization server of its own.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-013-B, description: "Connect locally through the stdio bridge with no visible credential, connect to a private OAuth server through browser approval including a generic OIDC issuer whose access token names the exact /mcp resource, and connect to a no-OAuth server using an administration-issued revocable API key."}
-      failure: {id: MCP-013-F, description: "Startup logs, diagnostics, project files, generic OIDC ID tokens, browser login cookies, and wrong-resource tokens cannot expose or substitute for a valid MCP credential."}
-    deployments: [local, single_server, kubernetes]
-    status: implementing
-    proof_gap: Local stdio, API-key, and generic OIDC access-token paths are implemented and covered by the local conformance suite and the real Keycloak harness, but the combined private OAuth, no-OAuth, local, wrong-credential, and credential-leak matrix has no deployment-specific MCP-013 evidence. The Keycloak harness obtains its MCP access tokens through the password grant; no MCP client has yet completed browser approval (authorization code with S256 PKCE, client registration, and the RFC 8707 resource parameter) against a generic OIDC issuer, so the browser-approval half of MCP-013-B is unproved for OIDC.
-    depends_on: [AUTH-009]
-    evidence: []
-
-  - id: MCP-014
-    kind: release_gate
-    behavior: Embedded Better Auth MCP OAuth is optional and unsupported until its beta path passes security, client compatibility, migration, durable-state, revocation, and recovery tests.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: MCP-014-B, description: "Pass the full hosted hostile and client matrix using the embedded provider before advertising it."}
-      failure: {id: MCP-014-F, description: "Self-hosted deployments remain usable through API keys and compatible external issuers when embedded OAuth is absent."}
-    deployments: [single_server, kubernetes]
-    status: specified
-    depends_on: [MCP-013]
-    evidence: []
-
   - id: MCP-015
     kind: behavior
     behavior: artifact_get returns the current exact full-screen Review address, and artifact_open returns the selected exact full-screen Review address beside the raw immutable content address; agents prefer Review for human handoff and never label raw content as Review. Only a local helper opens an address on the local computer, while remote servers return addresses.
@@ -1998,7 +1917,7 @@ requirements:
     deployments: [local]
     status: implementing
     proof_gap: Adapter and packaged-bridge tests exist, but clean real-host connect, representative use, restart, reconnect, disconnect, doctor, stale-state, and credential-leak proof is not complete for all four named clients.
-    depends_on: [MCP-002, MCP-009, MCP-013, OPS-008]
+    depends_on: [MCP-002, MCP-009, OPS-008]
     evidence: []
 
   - id: MCP-018
@@ -3558,7 +3477,7 @@ requirements:
       failure: {id: DEP-004-F, description: "Local operation does not require Docker, another container runtime, browser OAuth, a cloud account, a hosted database, or internet access."}
     deployments: [local]
     status: specified
-    depends_on: [MCP-013, CNT-004]
+    depends_on: [CNT-004]
     evidence: []
 
   - id: DEP-005
@@ -4146,19 +4065,6 @@ requirements:
     depends_on: [GIT-007, GIT-012, GIT-013, GIT-014]
     evidence: []
 
-  - id: GATE-006
-    kind: release_gate
-    behavior: Embedded Better Auth MCP OAuth is not supported until its beta path passes interoperability, security, migration, durable-state, refresh, revoke, recovery, CIMD, and DCR tests.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-006-B, description: "Run the complete hosted OAuth matrix against the embedded provider and document operational responsibility and upgrade behavior."}
-      failure: {id: GATE-006-F, description: "Beta incompatibility, lost client or consent state, weak audience binding, refresh replay, failed migration, or missing revocation keeps the option disabled."}
-    deployments: *external_storage
-    status: specified
-    depends_on: [MCP-014]
-    evidence: []
-
   - id: GATE-009
     kind: release_gate
     behavior: Default and maximum file count, file size, artifact size, version count, text-diff size, rate, retention, and egress limits come from measured tests and published cost envelopes.
@@ -4676,7 +4582,7 @@ requirements:
     source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
     acceptance:
       behavior: {id: FRK-004-B, description: "Start with no provider, read login kind none from /auth/context, publish with the API key, and follow a Review link to the artifact folder."}
-      failure: {id: FRK-004-F, description: "Browser login returns InteractiveLoginUnavailable, and a partial OIDC or WorkOS configuration still fails startup."}
+      failure: {id: FRK-004-F, description: "Browser login routes answer 404 without a redirect or cookie, and a Review link cannot choose another route."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Tests are not written yet; no deployed run exists.

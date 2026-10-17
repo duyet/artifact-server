@@ -12,14 +12,8 @@ import {
   CliAuthenticationError,
   decodeStoredCliCredential,
   encodeStoredCliCredential,
-  oauthAccessTokenIsFresh,
   verifyCliCredential,
 } from "./cli-profile-credential.js";
-import {
-  loginWithBrowserOAuth,
-  refreshCliOAuthCredential,
-  revokeCliOAuthCredential,
-} from "./cli-oauth-client.js";
 import {
   markCliProfileVerified,
   parseArtifactServerOrigin,
@@ -39,7 +33,6 @@ import {runCliEffect} from "./run-cli-effect.js";
 const maximumStdinCredentialBytes = 4_096;
 
 interface LoginOptions {
-  readonly apiKeyStdin: boolean;
   readonly name?: string;
   readonly profileData: string;
 }
@@ -70,7 +63,7 @@ export function configureCliAuthCommands(
       new Option(
         "--api-key-stdin",
         "read an administrator-issued API key from standard input",
-      ).default(false),
+      ).makeOptionMandatory(),
     )
     .addOption(profileDataOption(options.defaultProfileDirectory))
     .action(async (server: string, commandOptions: LoginOptions) => {
@@ -135,57 +128,18 @@ export function configureCliAuthCommands(
     });
 }
 
-/** Load, renew when needed, and verify one saved profile credential. */
+/** Load and verify one saved profile credential. */
 export const resolveVerifiedProfileCredential = Effect.fn(
   "CliAuth.resolveVerifiedProfileCredential",
 )(function*(
   dataDirectory: string,
   profile: CliProfile,
   store: CliCredentialStoreOperations,
-  forceRefresh = false,
 ) {
   const encoded = yield* store.read(profile.credentialId);
-  let credential = yield* decodeStoredCliCredential(encoded);
-  if (
-    credential.kind === "oauth"
-    && (forceRefresh || !oauthAccessTokenIsFresh(credential))
-  ) {
-    credential = yield* refreshCliOAuthCredential(
-      profile.origin,
-      credential,
-      process.env,
-      forceRefresh,
-    );
-    yield* store.write(
-      profile.credentialId,
-      encodeStoredCliCredential(credential),
-    );
-  }
-  let bearer = bearerFromStoredCredential(credential);
-  const account = yield* verifyCliCredential(profile.origin, bearer).pipe(
-    Effect.catchTag("CliAuthenticationError", (error) => {
-      if (
-        error.reason !== "credential_revoked"
-        || credential.kind !== "oauth"
-        || forceRefresh
-      ) return Effect.fail(error);
-      const currentOAuthCredential = credential;
-      return Effect.gen(function*() {
-        credential = yield* refreshCliOAuthCredential(
-          profile.origin,
-          currentOAuthCredential,
-          process.env,
-          true,
-        );
-        yield* store.write(
-          profile.credentialId,
-          encodeStoredCliCredential(credential),
-        );
-        bearer = bearerFromStoredCredential(credential);
-        return yield* verifyCliCredential(profile.origin, bearer);
-      });
-    }),
-  );
+  const credential = yield* decodeStoredCliCredential(encoded);
+  const bearer = bearerFromStoredCredential(credential);
+  const account = yield* verifyCliCredential(profile.origin, bearer);
   if (
     account.principal.id !== profile.accountId
     || account.principal.installationId !== profile.installationId
@@ -208,9 +162,7 @@ const loginProfile = Effect.fn("CliAuth.login")(
     store: CliCredentialStoreOperations,
   ) {
     const origin = yield* parseArtifactServerOrigin(server);
-    const credential = options.apiKeyStdin
-      ? apiKeyCredential(yield* readApiKeyFromStandardInput())
-      : (yield* loginWithBrowserOAuth(origin)).credential;
+    const credential = apiKeyCredential(yield* readApiKeyFromStandardInput());
     const account = yield* verifyCliCredential(
       origin,
       bearerFromStoredCredential(credential),
@@ -260,31 +212,9 @@ const logoutProfile = Effect.fn("CliAuth.logout")(
     profile: CliProfile,
     store: CliCredentialStoreOperations,
   ) {
-    const stored = yield* store.read(profile.credentialId).pipe(
-      Effect.flatMap(decodeStoredCliCredential),
-      Effect.catchTag("CliCredentialStoreError", (error) =>
-        error.reason === "credential_missing"
-          ? Effect.succeed(null)
-          : Effect.fail(error)),
-    );
-    let remoteRevocation:
-      | "confirmed"
-      | "not_applicable"
-      | "not_confirmed" = "not_applicable";
-    if (stored?.kind === "oauth") {
-      remoteRevocation = (yield* revokeCliOAuthCredential(
-        profile.origin,
-        stored,
-      ))
-        ? "confirmed"
-        : "not_confirmed";
-    }
     yield* store.delete(profile.credentialId);
     yield* removeCliProfile(dataDirectory, profile.id);
-    return {
-      ...profileOutput(profile, "logged_out"),
-      remoteRevocation,
-    };
+    return profileOutput(profile, "logged_out");
   },
 );
 

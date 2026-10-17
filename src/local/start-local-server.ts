@@ -12,10 +12,7 @@ import {withNodeResponseCompression} from
 import {createRuntimeLifecycle} from "../lifecycle/runtime-readiness.js";
 import type {ArtifactViewDrainReport} from
   "../application/artifact-view-recorder.js";
-import {
-  assertTeamLoginMatchesProvider,
-  browserAccessModes,
-} from "../core/browser-access.js";
+import {browserAccessModes} from "../core/browser-access.js";
 
 const loopbackHostname = "127.0.0.1";
 const serverAddressSchema = z.object({
@@ -42,18 +39,6 @@ export interface RunningLocalServer {
 export async function startLocalServer(
   config: LocalServerConfig,
 ): Promise<RunningLocalServer> {
-  assertTeamLoginMatchesProvider(
-    config.browserAccess,
-    config.interactiveIdentityProvider !== undefined,
-  );
-  if (
-    config.browserAccess.mode === browserAccessModes.localOwner
-    && config.interactiveIdentityProvider !== undefined
-  ) {
-    throw new Error(
-      "A local-owner server cannot configure an external browser-login provider.",
-    );
-  }
   const lifecycle = config.runtimeLifecycle ?? createRuntimeLifecycle();
   const hostname = config.hostname ?? loopbackHostname;
   if (

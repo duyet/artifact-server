@@ -1,6 +1,6 @@
 # Local owner and private team access
 
-- **Status:** Accepted; implementation underway — generic OIDC (`AUTH-019` through `AUTH-021`) and bounded authentication caching (`AUTH-022`) are behavior-verified; local-owner and private-team access (`AUTH-023` through `AUTH-028`) work in the current Node and browser suites but remain `implementing` for the deployment and hostile-matrix gaps recorded in the ledger
+- **Status:** Accepted; implementation underway — bounded authentication caching (`AUTH-022`) is behavior-verified; local-owner and private-team access (`AUTH-023` through `AUTH-028`) work in the current Node and browser suites but remain `implementing` for the deployment and hostile-matrix gaps recorded in the ledger
 - **Date:** 2026-08-23
 - **Decision:** [ADR 0025](./decisions/0025-local-owner-and-private-team-access.md)
 - **Owners:** authorization, web application, CLI, deployment
@@ -12,9 +12,9 @@ Artifact Server has two supported first-release access modes.
 1. A developer opens a direct local installation in any browser profile and
    receives a normal owner session without running a login command or handling
    a credential.
-2. A team deploys Artifact Server behind HTTPS, signs in through its identity
-   provider, admits teammates individually, and uses scoped credentials for
-   agents and automation.
+2. A team deploys Artifact Server behind HTTPS, signs in with managed API keys
+   that an administrator issues, and uses scoped credentials for agents and
+   automation.
 
 Both modes use the existing principal, session, CSRF, authorization,
 attribution, audit, and content-session services. The implementation changes
@@ -28,9 +28,9 @@ The repository already has most of the private-team identity model:
 - server-side application sessions with digested credentials;
 - host-only application and CSRF cookies;
 - exact-origin and Fetch Metadata checks for browser mutations;
-- generic OIDC and WorkOS interactive identity providers;
-- first-administrator bootstrap by verified email;
-- explicit member admission, administrator and member roles, and deactivation;
+- browser sign-in with a managed API key;
+- first-administrator bootstrap by the configured email;
+- members with administrator and member roles, and deactivation;
 - administrator-issued, scoped user and service API keys;
 - compact Compose, external-storage Compose, and Helm deployment shapes;
 - separate management and wildcard content origins.
@@ -42,8 +42,7 @@ has no session and sees a sign-in screen. The Vite development origin has the
 same problem in a fresh profile.
 
 The private-team pieces also lack one complete release contract. A compact
-server can currently start without OIDC or WorkOS and can retain a local
-browser-bootstrap credential. The deployment documentation leaves the proxy,
+server can currently retain a local browser-bootstrap credential. The deployment documentation leaves the proxy,
 DNS, and certificates to the operator, and the conformance ledger does not yet
 prove an install-to-use team workflow behind real TLS and wildcard routing.
 
@@ -58,8 +57,8 @@ prove an install-to-use team workflow behind real TLS and wildcard routing.
 | Browser application | Discover the access mode, establish a local session automatically, and show team sign-in only in private-team mode. |
 | Local CLI | Make `artifactserver open` open the application URL without minting or placing a credential in the URL. |
 | Development server | Make both `127.0.0.1:5173` and the compiled local application work in a fresh browser profile. |
-| Team startup | Require exactly one browser identity provider and disable local-owner and legacy installation credentials. |
-| Team onboarding | Prove first-admin login, explicit teammate admission, individual sessions, roles, logout, deactivation, and scoped non-browser credentials. |
+| Team startup | Report login kind `none` and disable local-owner and legacy installation credentials. |
+| Team onboarding | Prove first-administrator API-key sign-in, individual member sessions, roles, logout, deactivation, and scoped non-browser credentials. |
 | Team ingress | Specify and test the management hostname, wildcard content hostname, TLS, proxy, and hostile-host boundary. |
 | Packaging | Apply the team contract to compact Compose, external-storage Compose, and Helm. |
 | Release proof | Add conformance requirements and one complete local and team evidence matrix. |
@@ -70,7 +69,8 @@ prove an install-to-use team workflow behind real TLS and wildcard routing.
 - an embedded identity provider, passwords, passkeys, or email magic links;
 - SCIM, directory sync, group-to-role mapping, and automatic member creation;
 - self-service personal API-key issuance by non-administrator members;
-- MCP OAuth for a generic browser-only OIDC provider;
+- an external identity provider (OIDC or WorkOS) and MCP OAuth, which the
+  product does not include;
 - public sign-up, invitations sent by Artifact Server, and an organization
   switcher;
 - automatic DNS changes or general certificate issuance for every DNS
@@ -78,7 +78,7 @@ prove an install-to-use team workflow behind real TLS and wildcard routing.
 - a public Funnel deployment or a claim that VPN reachability is identity.
 
 Teams may use Tailscale or another private network for reachability in the
-first release. They still configure OIDC or WorkOS for browser identity and
+first release. They still sign browsers in with API keys and
 still provide two valid HTTPS origins. A private-network-specific identity
 adapter requires a separate specification and conformance tests.
 
@@ -91,7 +91,7 @@ type AccessMode = "local_owner" | "private_team";
 ```
 
 The value is selected by the entry point, not inferred from `Host`, forwarded
-headers, the configured identity provider, or storage type.
+headers, or storage type.
 
 | Entry point | Access mode | Storage |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ setting an environment variable.
 
 `artifactserver config check` and the non-secret support manifest report the
 selected access mode. They never report a session token, local API credential,
-identity-provider secret, or development-proxy secret.
+or development-proxy secret.
 
 ## Local-owner mode
 
@@ -119,7 +119,6 @@ The direct local process starts only when all of these conditions are true:
 - the listener is `127.0.0.1` or `::1`;
 - the management origin is direct loopback HTTP;
 - the content domain is `localhost`;
-- no OIDC or WorkOS browser-login variables are configured;
 - no remote trusted application origin is configured;
 - the entry point selected `local_owner`.
 
@@ -150,14 +149,14 @@ Private-team response:
 ```json
 {
   "accessMode": "private_team",
-  "login": {"kind": "oidc"}
+  "login": {"kind": "none"}
 }
 ```
 
 Both responses use `200 OK`. Requests from a content host receive `404`.
-The only private-team `login.kind` values are `oidc` and `workos`. The endpoint
-does not return an issuer URL, client ID, bootstrap email, admitted-member
-state, installation credential, or deployment secret. Content hosts do not
+The only private-team `login.kind` value is `none`, which means browsers sign in
+with an API key. The endpoint does not return a bootstrap email,
+admitted-member state, installation credential, or deployment secret. Content hosts do not
 serve this endpoint.
 
 ### Local session exchange
@@ -242,7 +241,7 @@ returns `401` and the context is `local_owner`, the application calls
 loads projects. It does not render a sign-in prompt during this exchange.
 
 If the exchange fails, the application shows the returned request ID and a
-local recovery message. It does not suggest OIDC login or tell the user to copy
+local recovery message. It does not suggest API-key sign-in or tell the user to copy
 a token.
 
 The application repeats the same bounded recovery after a local session
@@ -291,17 +290,13 @@ credential.
 A private-team process reports ready only when all of these are configured and
 valid:
 
-- exactly one browser identity provider, generic OIDC or WorkOS;
 - `ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL`;
 - an HTTPS `ARTIFACT_SERVER_ORIGIN`;
 - a separate registrable `ARTIFACT_SERVER_CONTENT_DOMAIN`;
-- the provider's complete required variable family;
 - the storage and operational configuration required by the selected runtime.
 
 Private-team mode rejects:
 
-- absent browser identity configuration;
-- both OIDC and WorkOS configuration;
 - `ARTIFACT_SERVER_LOCAL_BOOTSTRAP_TOKEN`;
 - the generated compact browser-bootstrap credential as login authority;
 - the legacy local installation bearer as HTTP API or MCP authority;
@@ -311,14 +306,8 @@ Private-team mode rejects:
 - a listener or proxy configuration that cannot enforce the trusted host
   boundary.
 
-This requirement supersedes the no-provider startup behavior recorded in ADR
-0020 for private-team entry points. An absent provider can still produce an
-unavailable interactive-login service in application-layer tests, but a
-private-team process cannot report ready in that state.
-
 The storage runtime can continue to use internal deployment credentials that
-are not request authority. Managed `as_key_` credentials and a compatible
-external OAuth verifier are the only non-browser request authorities in
+are not request authority. Managed `as_key_` credentials are the only request authority in
 private-team mode.
 
 `artifactserver init` for a new compact team installation records the
@@ -326,39 +315,38 @@ bootstrap administrator email and installation ID. It does not print a browser
 login credential. Existing compact bootstrap files may remain on disk during a
 migration, but private-team authentication ignores them.
 
-### Browser identity and admission
+### Browser sign-in and admission
 
-The existing OIDC and WorkOS flows remain authoritative:
+Private-team browsers sign in with a managed API key:
 
-1. The provider verifies the external identity.
-2. Artifact Server requires a usable email under the provider-specific rules.
-3. With no members, only the verified bootstrap-administrator email can create
-   the first member. That member receives the administrator role.
-4. After the first member exists, an administrator must admit each teammate by
-   normalized email and choose `administrator` or `member`.
-5. A teammate's first successful provider callback binds the provider and
-   subject to the admitted member and creates an Artifact Server session.
-6. Later logins reuse that binding.
+1. The deployment supplies a bootstrap managed API key through its secret
+   manager. It belongs to the bootstrap administrator named by
+   `ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL`.
+2. A person posts a managed API key in a same-origin `POST /auth/api-key` body.
+   The server checks it exactly as it checks a bearer key. The session acts as
+   that key's principal and ends at the earlier of the normal session lifetime
+   and the key's expiry.
+3. An administrator creates each teammate as a member, chooses `administrator`
+   or `member`, and issues that member's keys.
+4. Revoking, rotating, or expiring a key ends the sessions it created.
 
-There is no just-in-time member creation after the first administrator. An
-identity known to the provider but not admitted to Artifact Server receives no
-session and creates no member record.
+No session is created for a key the server does not accept, and no member is
+created by a sign-in attempt. The browser never keeps the key.
 
 The private-team browser experience has these states:
 
 | State | Browser result |
 | --- | --- |
-| No application session | Show one provider-neutral **Sign in** action. |
-| Successful provider callback | Return to the validated application path and load the session. |
-| Verified but unadmitted identity | Show that the account is not admitted and instruct the person to contact an installation administrator. |
+| No application session | Show one **Sign in** form that takes an API key. |
+| Successful sign-in | Return to the validated application path and load the session. |
+| Wrong, malformed, or revoked key | Show that the key was not accepted and create no session. |
+| Too many failed attempts | Show the retry delay and create no session. |
 | Deactivated member | Show that access has been removed. Do not offer local login. |
-| Provider unavailable | Keep the installation signed out, show a retry action and request ID, and create no partial session. |
 | Expired application session | Return to the team sign-in state. |
 | Logout | Revoke the Artifact Server session, clear application cookies, and return to the team sign-in state. |
 
 Authentication errors are rendered on the management origin. They do not put
-authorization codes, tokens, provider responses, or raw exceptions in the URL,
-page, logs, or telemetry.
+API keys, tokens, or raw exceptions in the URL, page, logs, or telemetry.
 
 ### Members, roles, and deactivation
 
@@ -370,7 +358,7 @@ The existing permission model remains:
   keys;
 - service principals act only through explicit capabilities.
 
-Deactivating a member blocks new provider logins, application sessions, and
+Deactivating a member blocks new sign-ins, application sessions, and
 member-owned API keys. Same-process caches evict immediately. Other replicas
 must refuse the member within the existing maximum authentication-cache
 staleness window. The member's artifacts, actions, comments, and attribution
@@ -389,14 +377,13 @@ URL through the team's normal channel.
 
 ### CLI, MCP, and automation
 
-Browser OIDC does not make a generic identity provider an MCP authorization
-server.
+MCP and the HTTP API authenticate with managed API keys only. There is no MCP
+OAuth and no browser OAuth flow for the CLI.
 
 | Client | First-release authority |
 | --- | --- |
-| Browser | OIDC or WorkOS followed by an Artifact Server session |
-| MCP or CLI against a compatible configured OAuth server | The existing browser OAuth flow and audience-bound access token |
-| MCP or CLI against a generic OIDC-only team server | An administrator-issued, scoped user API key |
+| Browser | API-key sign-in followed by an Artifact Server session |
+| MCP or CLI | An administrator-issued, scoped user API key |
 | CI and unattended agents | An administrator-issued, scoped service API key in the deployment's secret manager |
 
 API-key secrets are returned once, never printed at startup, and never stored
@@ -414,7 +401,7 @@ https://<version-token>.artifacts-content.example.net
 ```
 
 The example names use different registrable domains. The first host serves the
-management application, login, callback, API, and MCP. The wildcard host serves
+management application, sign-in, API, and MCP. The wildcard host serves
 only the content bootstrap exchange and read-only artifact files.
 
 The ingress must:
@@ -433,11 +420,11 @@ Compose continues to support an operator-owned gateway. The release package
 must include at least one tested copyable reference configuration using
 pre-provisioned certificates. The Helm chart continues to reference existing
 Ingress and TLS secrets. It does not install a DNS server, certificate
-authority, identity provider, Postgres, or object store.
+authority, Postgres, or object store.
 
 A tailnet-only deployment can route these names through private DNS and a
-tailnet-reachable gateway. It still needs both names and certificates and uses
-OIDC or WorkOS for Artifact Server identity. Tailscale Funnel and Tailscale
+tailnet-reachable gateway. It still needs both names and certificates and signs
+browsers in with API keys. Tailscale Funnel and Tailscale
 identity headers are outside this release scope.
 
 ## Shared security requirements
@@ -449,8 +436,8 @@ Both access modes preserve these rules:
   to content hosts;
 - browser mutations require the existing CSRF, Origin, and Fetch Metadata
   checks;
-- a local-owner session and a provider-created team session produce the same
-  provider-neutral principal shape;
+- a local-owner session and a team API-key session produce the same
+  session and principal shapes;
 - every mutation records the effective principal and applicable authorizing
   human;
 - content hosts expose no management, authentication, API, or MCP routes;
@@ -463,17 +450,17 @@ Both access modes preserve these rules:
 
 | Surface | Change |
 | --- | --- |
-| Direct `start` | Hard-code local-owner mode and keep an exact-loopback listener. Refuse interactive-provider configuration. |
+| Direct `start` | Hard-code local-owner mode and keep an exact-loopback listener. |
 | `open` | Open the plain local origin. Stop minting a browser URL token. |
-| `start-compact` | Select private-team mode and require one browser identity provider. |
-| `start-external-storage` | Select private-team mode and require one browser identity provider. |
+| `start-compact` | Select private-team mode and report login kind `none`. |
+| `start-external-storage` | Select private-team mode and report login kind `none`. |
 | Compact initialization | Stop returning a browser bootstrap credential for new team installations. |
 | Runtime configuration summary | Add non-secret `accessMode`. |
 | HTTP app dependencies | Add explicit access mode, login kind, and optional trusted development-proxy verifier. |
 | Local runtime | Provide the trusted local-owner session operation and retain the hidden local API credential only for local CLI and MCP. |
 | External-storage runtime | Disable local bootstrap and legacy local bearer authority. |
-| Compose environment and documentation | Make provider, HTTPS origin, and wildcard content domain required. Add the tested ingress recipe. |
-| Helm values and schema | Require one identity provider, remove local bootstrap as a supported secret, and validate both TLS hosts. |
+| Compose environment and documentation | Make HTTPS origin and wildcard content domain required. Add the tested ingress recipe. |
+| Helm values and schema | Remove local bootstrap as a supported secret and validate both TLS hosts. |
 | Browser API client | Add the authentication-context schema and local-session exchange. |
 | Browser shell | Implement the bounded local-owner session exchange and mode-specific login and logout states. |
 | Development runner and Vite proxy | Add the ephemeral server-side proxy credential without exposing it to browser code. |
@@ -496,22 +483,19 @@ does not rewrite member state.
 
 Before upgrading to the new team contract, an operator must:
 
-1. configure OIDC or WorkOS;
-2. verify that the configured bootstrap email matches the intended active
+1. verify that the configured bootstrap email matches the intended active
    administrator;
-3. sign in and create any API keys needed to replace the legacy installation
-   bearer;
-4. run `artifactserver config check`;
-5. test both management and wildcard content hosts.
+2. sign in with the bootstrap API key and create any API keys needed to replace
+   the legacy installation bearer;
+3. run `artifactserver config check`;
+4. test both management and wildcard content hosts.
 
-An existing local-bootstrap-created administrator can bind to OIDC or WorkOS
-through the existing verified-email match. Existing application sessions may
+Existing application sessions may
 remain valid until their normal expiry. The bootstrap credential and legacy
 installation bearer stop creating new authority in private-team mode.
 
-Startup fails with a migration message when the team identity provider is
-missing or a prohibited local credential is still configured as request
-authority. It does not start in a partially compatible mode.
+Startup fails with a migration message when a prohibited local credential is
+still configured as request authority. It does not start in a partially compatible mode.
 
 ## Implementation order
 
@@ -525,8 +509,8 @@ on the behavior above them.
 | 3 | HTTP authentication context and local exchange | The two endpoints match this specification and pass direct, hostile-header, host, mode, and cookie tests. |
 | 4 | Browser bootstrap and local UI | Fresh, expired, and cleared-cookie profiles recover once without a sign-in screen; local logout is not presented. |
 | 5 | CLI and development proxy | `artifactserver open`, the compiled origin, and Vite work without URL credentials; stale and forged proxy credentials fail. |
-| 6 | Private-team enforcement | Team entry points require one provider and reject every local browser and legacy installation authority. |
-| 7 | Team browser workflow | Real OIDC proves administrator bootstrap, admission, two roles, logout, denial, deactivation, and session behavior. |
+| 6 | Private-team enforcement | Team entry points report login kind `none` and reject every local browser and legacy installation authority. |
+| 7 | Team browser workflow | API-key sign-in proves administrator sign-in, member creation, two roles, logout, denial, deactivation, and session behavior. |
 | 8 | Team non-browser workflow | Managed user and service keys prove CLI, MCP, rotation, expiry, revocation, and least capability. |
 | 9 | Packaging and ingress | Compact Compose, external-storage Compose, and Helm pass behind real TLS and wildcard routing. |
 | 10 | Recovery and release evidence | Restart, backup, restore, upgrade, mobile browser, hostile ingress, and multi-replica revocation evidence is attached to the ledger. |
@@ -544,7 +528,6 @@ Before implementing Effect services or layers, the engineer must read
 | Browser bootstrap and mode-specific UI | `apps/web/src/api/client.ts`, `apps/web/src/review/review-app.tsx`, Playwright fixtures and browser tests |
 | Local open and development proxy | `src/cli/open-management-command.ts`, `scripts/run-web-development.ts`, `apps/web/vite.config.ts`, CLI and release-package tests |
 | Team packaging and startup | `packaging/compose`, `packaging/helm/artifact-server`, compact, external-storage, and Helm release tests |
-| OIDC team qualification | `tests/integration/oidc-keycloak.test.ts`, Keycloak runner, TLS and wildcard gateway fixture |
 | Release records | `project/spec/conformance.yml`, evidence JSON files, product and operator documentation |
 
 ## Verification matrix
@@ -563,47 +546,43 @@ Before implementing Effect services or layers, the engineer must read
 - Confirm URLs, browser history, Referrer headers, logs, telemetry, and support
   output contain no local session or bootstrap credential.
 - Refuse non-loopback binds, DNS aliases to loopback, forwarded headers,
-  provider configuration, remote origins, missing browser metadata, and forged
+  remote origins, missing browser metadata, and forged
   or stale development-proxy credentials.
 - Confirm the local-owner route is absent in private-team mode.
 
 ### Private-team acceptance
 
-The release test uses a real Keycloak process as generic OIDC, a real TLS
-gateway, an exact management host, and a wildcard content host on a separate
-registrable domain. It creates two human identities and one service principal.
+The release test uses a real TLS gateway, an exact management host, and a
+wildcard content host on a separate registrable domain. It creates two human
+members and one service principal.
 
 The run must prove:
 
-- first login admits only the configured bootstrap administrator;
-- an unadmitted verified identity receives no member or session;
-- the administrator admits a teammate as a member;
-- the teammate signs in and uses artifacts but cannot administer members or
-  keys;
+- the bootstrap administrator signs in with the bootstrap key and issues keys;
+- a wrong, malformed, or revoked key receives no session;
+- the administrator creates a teammate as a member and issues that member a key;
+- the teammate signs in with that key and uses artifacts but cannot administer
+  members or keys;
 - self-deactivation and deactivation of the last active administrator fail
   without changing membership or sessions;
 - the administrator issues a least-capability service key and its secret is
   returned once;
 - CLI or MCP uses the scoped key without a browser cookie or legacy bearer;
 - logout revokes the current team session;
-- member deactivation blocks provider login, sessions, and member-owned keys
+- member deactivation blocks sign-in, sessions, and member-owned keys
   within the documented replica-cache bound;
 - private multi-file content loads through the wildcard host and cannot reach
   management routes;
 - hostile Host and forwarded-header requests cannot change routing, cookie,
   principal, installation, or storage scope;
-- committed identities, sessions, keys, artifacts, versions, and bytes survive
+- committed members, sessions, keys, artifacts, versions, and bytes survive
   restart and the documented backup and restore path;
-- the supported upgrade path preserves identity bindings and refuses an old
+- the supported upgrade path preserves members and keys and refuses an old
   local credential;
 - the workflow passes on compact Compose, external-storage Compose, and a
   two-replica Helm installation;
 - the management and private-content flows work in Chromium, Firefox, WebKit,
   and a physical iPhone Safari run before phone access is advertised.
-
-The WorkOS path keeps its existing provider-specific tests. Generic OIDC
-evidence cannot stand in for WorkOS token or MCP OAuth evidence, and WorkOS
-evidence cannot stand in for the self-hosted OIDC team path.
 
 ## Conformance requirements
 
@@ -614,13 +593,13 @@ tests and evidence exist.
 | --- | --- | --- |
 | `AUTH-023` | A fresh local browser establishes a normal stable local-owner session without a visible credential or sign-in step. | local |
 | `AUTH-024` | Local-owner authority is available only through the exact loopback and trusted-development boundaries and fails closed for remote, proxied, or ambiguous requests. | local |
-| `AUTH-025` | Private-team entry points require one browser identity provider and accept neither local browser bootstrap nor the legacy installation bearer as request authority. | single server, Kubernetes |
+| `AUTH-025` | Private-team entry points sign browsers in with managed API keys and accept neither local browser bootstrap nor the legacy installation bearer as request authority. | single server, Kubernetes |
 | `AUTH-026` | The browser discovers the access mode without secrets and follows the bounded local-owner or private-team login behavior. | local, single server, Kubernetes |
-| `AUTH-027` | Deactivating a member stops that member's provider login, sessions, and member-owned keys within the cache bound while preserving attributed records. | single server, Kubernetes |
+| `AUTH-027` | Deactivating a member stops that member's sign-in, sessions, and member-owned keys within the cache bound while preserving attributed records. | single server, Kubernetes |
 | `AUTH-028` | Membership administration cannot deactivate the current member or leave an installation without an active administrator. | local, single server, Kubernetes |
 | `REL-007` | The first release is not declared until both the local-owner and private-team release gates pass. | local, single server, Kubernetes |
 
-Existing `AUTH-001`, `AUTH-008` through `AUTH-022`, `DEP-005`, `DEP-006`,
-`DEP-014` through `DEP-017`, `MCP-013`, `MCP-018`, `GATE-001`, `GATE-002`,
+Existing `AUTH-001`, `AUTH-008` through `AUTH-018`, `AUTH-022`, `DEP-005`, `DEP-006`,
+`DEP-014` through `DEP-017`, `MCP-018`, `GATE-001`, `GATE-002`,
 `REL-001`, `REL-002`, and `REL-006` remain part of the proof. This specification
 does not mark any of them verified.

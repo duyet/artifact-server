@@ -2,6 +2,8 @@
 
 Status: accepted
 
+> Superseded in part (2026-10-18): WorkOS and OIDC configuration were removed from the product.
+
 ## Decision
 
 Compact Compose runs one Artifact Server container and one named or bind-mounted

@@ -607,13 +607,6 @@ async function writeValues(
       repository: imageRepository,
       tag: imageTag,
     },
-    identity: {
-      oidcClientId: "helm-integration",
-      oidcIssuer: "https://identity.example.test",
-      oidcScopes: "openid email profile",
-      workosClientId: "",
-      workosIssuer: "",
-    },
     migration: {
       activeDeadlineSeconds: options.migrationDeadlineSeconds ?? 60,
       backoffLimit: 0,
@@ -628,10 +621,8 @@ async function writeValues(
       keys: {
         apiToken: "api-token",
         databaseUrl: "database-url",
-        oidcClientSecret: "",
         s3AccessKeyId: "s3-access-key-id",
         s3SecretAccessKey: "s3-secret-access-key",
-        workosApiKey: "",
       },
       name: options.namespaceSecret ?? secretName,
       rolloutChecksum: rolloutRevision,

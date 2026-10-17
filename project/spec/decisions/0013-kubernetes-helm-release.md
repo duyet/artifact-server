@@ -2,6 +2,8 @@
 
 Status: accepted
 
+> Superseded in part (2026-10-18): the chart has no WorkOS or OIDC secret keys or `identity` values. Browsers sign in with API keys.
+
 ## Decision
 
 Artifact Server ships one application-only Helm chart for Kubernetes. The chart

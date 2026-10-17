@@ -22,16 +22,10 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
       return {code: errorCodes.artifactPathTaken, message: failure.message, status: 409};
     case "AuthenticationRequired":
       return {code: errorCodes.authenticationRequired, message: failure.message, status: 401};
-    case "IdentityAdmissionDenied":
-      return {code: errorCodes.identityAdmissionDenied, message: failure.message, status: 403};
     case "IdentityConflict":
       return {code: errorCodes.identityConflict, message: failure.message, status: 409};
     case "IdentityNotFound":
       return {code: errorCodes.identityNotFound, message: failure.message, status: 404};
-    case "IdentityProviderFailure":
-      return {code: errorCodes.identityProviderFailure, message: failure.message, status: 502};
-    case "InteractiveLoginUnavailable":
-      return {code: errorCodes.interactiveLoginUnavailable, message: failure.message, status: 404};
     case "LoginAttemptRejected":
       return {code: errorCodes.authenticationRequired, message: failure.message, status: 401};
     case "AuthorizationDenied":

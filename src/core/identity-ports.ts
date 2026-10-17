@@ -16,15 +16,6 @@ export interface AdmitMemberRecord {
   readonly role: InstallationMember["role"];
 }
 
-/** Values persisted when binding one external identity to a member. */
-export interface BindExternalIdentityRecord {
-  readonly boundAt: string;
-  readonly email: string;
-  readonly memberId: string;
-  readonly provider: string;
-  readonly subject: string;
-}
-
 /** Values persisted when creating one browser application session. */
 export interface CreateApplicationSessionRecord {
   readonly createdAt: string;
@@ -41,7 +32,6 @@ export interface CreateApplicationSessionRecord {
 /** Persistent identity operations required by the Node application composition. */
 export interface IdentityRepository {
   admitMember(command: AdmitMemberRecord): Promise<InstallationMember>;
-  bindExternalIdentity(command: BindExternalIdentityRecord): Promise<void>;
   consumeLoginAttempt(
     stateDigest: string,
     provider: string,
@@ -60,11 +50,6 @@ export interface IdentityRepository {
   findActiveMemberByEmail(
     installationId: string,
     email: string,
-  ): Promise<InstallationMember | null>;
-  findActiveMemberByExternalIdentity(
-    installationId: string,
-    provider: string,
-    subject: string,
   ): Promise<InstallationMember | null>;
   findApiKey(
     installationId: string,

@@ -30,15 +30,6 @@ export interface InstallationMember {
   readonly updatedAt: string;
 }
 
-/** Identity information returned by a configured interactive-login provider. */
-export interface ExternalIdentity {
-  readonly displayName: string;
-  readonly email: string;
-  readonly emailVerified: boolean;
-  readonly provider: string;
-  readonly subject: string;
-}
-
 /** The one identity a browser session acts as. */
 export type ApplicationSessionSubject =
   | {readonly kind: "member"; readonly member: InstallationMember}

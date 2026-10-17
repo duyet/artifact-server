@@ -47,13 +47,6 @@ import {
   browserLoginKinds,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
-import {createOidcIdentityProvider} from
-  "../../src/identity/oidc-identity-provider.js";
-import {
-  startStubOidcLogin,
-  startStubOidcProvider,
-  type RunningStubOidcProvider,
-} from "../support/stub-oidc-provider.js";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const externalStorageCli = path.join(repositoryRoot, "dist/cli/main.js");
@@ -61,8 +54,7 @@ const region = "us-east-1";
 const bucket = "artifact-server-external-storage-integration";
 const installationId = "external-storage-integration-installation";
 const apiToken = managedTestKey("external-storage-integration");
-const oidcAdministratorEmail = "administrator@example.test";
-let oidcProvider: RunningStubOidcProvider;
+const administratorEmail = "administrator@example.test";
 const runningProcesses = new Set<ChildProcessWithoutNullStreams>();
 const runningInProcessServers = new Set<InProcessExternalStorageServer>();
 const availableGitHistoryProbe: GitHistoryProviderHealthProbe = {
@@ -272,9 +264,6 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
 
   beforeAll(async () => {
     environment = readIntegrationEnvironment();
-    oidcProvider = await startStubOidcProvider({
-      clientId: "external-storage-integration",
-    });
     s3Client = new S3Client({
       credentials: {
         accessKeyId: environment.accessKey,
@@ -760,7 +749,6 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
 
   afterAll(async () => {
     s3Client.destroy();
-    await oidcProvider.stop();
   });
 
   test("PUB-011-B PUB-011-F: independent external-storage processes accept uploaded bytes, reject remote sources, serialize writes, restart, and isolate installations", async () => {
@@ -1059,12 +1047,12 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     }
   });
 
-  test("external-storage foundation: a login attempt keeps its nonce through Postgres", async () => {
+  test("external-storage foundation: a local browser login attempt is consumed once through Postgres", async () => {
     const database = await PostgresDatabase.open({
       maxConnections: 2,
       url: Redacted.make(environment.databaseUrl),
     }, "validate");
-    const scopedInstallation = `login-attempt-nonce-${randomUUID()}`;
+    const scopedInstallation = `login-attempt-${randomUUID()}`;
     try {
       await PostgresArtifactRepository.open(database, scopedInstallation);
       const repository = new PostgresIdentityRepository(
@@ -1072,42 +1060,26 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         scopedInstallation,
       );
       await repository.createLoginAttempt({
-        codeVerifier: "postgres-login-attempt-code-verifier",
-        createdAt: "2026-08-18T12:00:00.000Z",
-        expiresAt: "2126-08-18T12:00:00.000Z",
-        nonce: "postgres-login-attempt-nonce",
-        provider: "oidc",
-        returnTo: "/",
-        stateDigest: "postgres-login-attempt-oidc-state",
-      });
-      await repository.createLoginAttempt({
-        codeVerifier: "postgres-login-attempt-code-verifier-two",
+        codeVerifier: "not-applicable",
         createdAt: "2026-08-18T12:00:00.000Z",
         expiresAt: "2126-08-18T12:00:00.000Z",
         nonce: null,
-        provider: "workos",
+        provider: "artifact-server-local",
         returnTo: "/",
-        stateDigest: "postgres-login-attempt-workos-state",
+        stateDigest: "postgres-login-attempt-local-state",
       });
-      const oidcAttempt = await repository.consumeLoginAttempt(
-        "postgres-login-attempt-oidc-state",
-        "oidc",
+      const consumed = await repository.consumeLoginAttempt(
+        "postgres-login-attempt-local-state",
+        "artifact-server-local",
         "2026-08-18T12:00:05.000Z",
       );
-      expect(oidcAttempt).toMatchObject({
-        codeVerifier: "postgres-login-attempt-code-verifier",
-        nonce: "postgres-login-attempt-nonce",
-        provider: "oidc",
+      expect(consumed).toMatchObject({
+        provider: "artifact-server-local",
+        returnTo: "/",
       });
-      const workOsAttempt = await repository.consumeLoginAttempt(
-        "postgres-login-attempt-workos-state",
-        "workos",
-        "2026-08-18T12:00:05.000Z",
-      );
-      expect(workOsAttempt.nonce).toBeNull();
       await expect(repository.consumeLoginAttempt(
-        "postgres-login-attempt-oidc-state",
-        "oidc",
+        "postgres-login-attempt-local-state",
+        "artifact-server-local",
         "2026-08-18T12:00:06.000Z",
       )).rejects.toMatchObject({_tag: "LoginAttemptRejected"});
     } finally {
@@ -1189,9 +1161,10 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       startInProcessExternalStorageServer(environment, externalStorageIdentity),
     ]);
 
-    const login = await oidcBrowserLogin(first.baseUrl);
-    expect(login.status).toBe(303);
-    const cookies = applicationCookies(login.headers.getSetCookie());
+    const cookies = await seedAdministratorSession(
+      environment,
+      externalStorageIdentity.installationId,
+    );
 
     const session = await fetch(`${second.baseUrl}/api/v1/session`, {
       headers: {Cookie: cookies.header},
@@ -1694,9 +1667,10 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       projectId: backupProject.id,
     });
     expect(published.response.status).toBe(201);
-    const login = await oidcBrowserLogin(source.baseUrl);
-    expect(login.status).toBe(303);
-    const cookies = applicationCookies(login.headers.getSetCookie());
+    const cookies = await seedAdministratorSession(
+      environment,
+      backupIdentity.installationId,
+    );
     const issueResponse = await fetch(`${source.baseUrl}/api/v1/api-keys`, {
       body: JSON.stringify({
         capabilities: ["artifact:read"],
@@ -2849,16 +2823,12 @@ function startExternalStorageProcess(
       env: {
         ...process.env,
         ARTIFACT_SERVER_API_TOKEN: identity.apiToken,
-        ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL: oidcAdministratorEmail,
+        ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL: administratorEmail,
         ARTIFACT_SERVER_CONTENT_DOMAIN: sameHost
           ? undefined
           : "content.example.net",
         ARTIFACT_SERVER_DATABASE_URL: environment.databaseUrl,
         ARTIFACT_SERVER_INSTALLATION_ID: identity.installationId,
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: sameHost
-          ? undefined
-          : "external-storage-integration",
-        ARTIFACT_SERVER_OIDC_ISSUER: sameHost ? undefined : oidcProvider.issuer,
         ARTIFACT_SERVER_ORIGIN: "https://artifacts.example.com",
         ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "0",
         ARTIFACT_SERVER_S3_ACCESS_KEY_ID: environment.accessKey,
@@ -2908,19 +2878,12 @@ async function startInProcessExternalStorageServer(
   const server = await startExternalStorageServer({
     apiToken: Redacted.make(identity.apiToken),
     applicationOrigin: "https://artifacts.example.com",
-    bootstrapAdministratorEmail: oidcAdministratorEmail,
-    browserAccess: privateTeamBrowserAccess(browserLoginKinds.oidc),
+    bootstrapAdministratorEmail: administratorEmail,
+    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
     contentDomain: "content.example.net",
     databaseUrl: Redacted.make(environment.databaseUrl),
     hostname: "127.0.0.1",
     installationId: identity.installationId,
-    interactiveIdentityProvider: createOidcIdentityProvider({
-      applicationOrigin: "https://artifacts.example.com",
-      clientId: "external-storage-integration",
-      clientSecret: null,
-      issuer: oidcProvider.issuer,
-      scopes: "openid email profile",
-    }),
     objectStorage: createS3ObjectStorageProviderFactory({
       accessKeyId: environment.accessKey,
       bucket,
@@ -3340,40 +3303,54 @@ interface ApplicationCookies {
   readonly header: string;
 }
 
-async function oidcBrowserLogin(baseUrl: string): Promise<Response> {
-  const authorization = await startStubOidcLogin(baseUrl);
-  const callback = new URL(baseUrl);
-  callback.pathname = authorization.callbackUrl.pathname;
-  callback.search = authorization.callbackUrl.search;
-  return fetch(callback, {
-    headers: {Cookie: authorization.handshakeCookie},
-    redirect: "manual",
-  });
-}
-
-function applicationCookies(
-  setCookieHeaders: readonly string[],
-): ApplicationCookies {
-  const session = setCookieHeaders.find((value) =>
-    value.startsWith("artifact_session=") ||
-    value.startsWith("__Host-artifact_session=")
-  );
-  const csrf = setCookieHeaders.find((value) =>
-    value.startsWith("artifact_csrf=") ||
-    value.startsWith("__Host-artifact_csrf=")
-  );
-  if (session === undefined || csrf === undefined) {
-    throw new Error("The login response did not issue both application cookies.");
-  }
-  const sessionPair = session.split(";", 1)[0];
-  const csrfPair = csrf.split(";", 1)[0];
-  if (sessionPair === undefined || csrfPair === undefined) {
-    throw new Error("The login response issued a malformed application cookie.");
+/**
+ * Seed a human administrator session, since a no-login team server has no
+ * administrator sign-in of its own.
+ */
+async function seedAdministratorSession(
+  environment: IntegrationEnvironment,
+  scopedInstallationId: string,
+): Promise<ApplicationCookies> {
+  const database = await PostgresDatabase.open({
+    maxConnections: 1,
+    url: Redacted.make(environment.databaseUrl),
+  }, "validate");
+  const token = `session_${randomUUID()}`;
+  const csrf = `csrf_${randomUUID()}`;
+  try {
+    const repository = new PostgresIdentityRepository(
+      database,
+      scopedInstallationId,
+    );
+    const now = new Date();
+    const member = await repository.admitMember({
+      createdAt: now.toISOString(),
+      displayName: "Team administrator",
+      email: administratorEmail,
+      id: `member_${randomUUID()}`,
+      installationId: scopedInstallationId,
+      role: "administrator",
+    });
+    await repository.createApplicationSession({
+      createdAt: now.toISOString(),
+      csrfDigest: sha256Hex(csrf),
+      expiresAt: new Date(now.getTime() + 3_600_000).toISOString(),
+      id: `session_${randomUUID()}`,
+      installationId: scopedInstallationId,
+      subject: {kind: "member", memberId: member.id},
+      tokenDigest: sha256Hex(token),
+    });
+  } finally {
+    await database.close();
   }
   return {
-    csrf: csrfPair.slice(csrfPair.indexOf("=") + 1),
-    header: `${sessionPair}; ${csrfPair}`,
+    csrf,
+    header: `__Host-artifact_session=${token}; __Host-artifact_csrf=${csrf}`,
   };
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function browserMutationHeaders(

@@ -9,7 +9,7 @@ const profileNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 const profileNameSchema = z.string().min(1).max(64).regex(profileNamePattern);
 const profileSchema = z.object({
   accountId: z.string().min(1).max(200),
-  authentication: z.enum(["api_key", "oauth"]),
+  authentication: z.literal("api_key"),
   createdAt: z.iso.datetime(),
   credentialId: z.string().uuid(),
   id: z.string().uuid(),

@@ -1589,7 +1589,7 @@
           </article>
           <article class="answer">
             <span class="answer-label">Agents</span>
-            <p class="answer-value">MCP, the command-line program, and normal web requests use the same artifact operations and permissions. The command-line program handles files on the user's computer. MCP or the command-line program handles work that only needs server data. Local MCP setup uses <code>artifactserver connect</code> without a visible key. Remote command-line setup uses <code>artifactserver auth login</code> and browser sign-in when the server supports it.</p>
+            <p class="answer-value">MCP, the command-line program, and normal web requests use the same artifact operations and permissions. The command-line program handles files on the user's computer. MCP or the command-line program handles work that only needs server data. Local MCP setup uses <code>artifactserver connect</code> without a visible key. Remote command-line setup uses <code>artifactserver auth login &lt;server&gt; --api-key-stdin</code> with an administrator-issued key.</p>
           </article>
           <article class="answer">
             <span class="answer-label">Sending annotations to an agent</span>
@@ -1977,9 +1977,8 @@
               One Artifact Server installation contains one closed group of people. This is a
               single-organization model without an organization list or organization switcher: the
               installation itself is the group. On a laptop, that can be one implicit local user.
-              On a team server, an administrator controls who can sign in through invitations or
-              the configured company login, which can be WorkOS AuthKit or any OpenID Connect
-              provider the team already runs. The product has no public self-sign-up and does not host
+              On a team server, an administrator controls who can sign in by creating members
+              and issuing their API keys. The product has no public self-sign-up and does not host
               several organizations inside one installation.
             </p>
           </div>
@@ -2727,11 +2726,10 @@ v12-7f3a.content.example.net</code></pre>
         <section class="section" id="mcp" aria-labelledby="mcp-title">
           <div class="section-heading">
             <span class="section-label">AI agent access</span>
-            <h2 id="mcp-title">MCP connection, sign-in, and publishing</h2>
+            <h2 id="mcp-title">MCP connection, API keys, and publishing</h2>
             <p>
-              A remote AI client connects to one address: <code>/mcp</code>. On an external-storage server, its
-              first request opens browser sign-in and approval. After approval, the client receives
-              a short-lived credential that works only with this Artifact Server. On a laptop, the
+              A remote AI client connects to one address: <code>/mcp</code>. On a team server, the client sends
+              an administrator-issued, scoped API key that works only with this Artifact Server. On a laptop, the
               user runs <code>artifactserver connect</code>. The registered stdio bridge retrieves a
               private local credential automatically and forwards to the same loopback
               <code>/mcp</code> endpoint. The credential is never printed or put in client
@@ -2747,9 +2745,7 @@ v12-7f3a.content.example.net</code></pre>
               </thead>
               <tbody>
                 <tr><td>Local laptop</td><td>Install Artifact Server and run <code>artifactserver connect</code>. No browser, Docker, visible token, copied key, or startup-log step.</td></tr>
-                <tr><td>Hosted or team server with compatible MCP OAuth</td><td>Add the server's <code>/mcp</code> address, approve sign-in in the browser, then return to the AI client.</td></tr>
-                <tr><td>Private-network server with compatible MCP OAuth</td><td>Connect to the company network or VPN first, then use the same address and browser approval. Sign-in does not change network access.</td></tr>
-                <tr><td>Self-hosted server without compatible MCP OAuth</td><td>An administrator creates a scoped API key in an administration interface or CLI. Keys never come from startup logs.</td></tr>
+                <tr><td>Team or self-hosted server</td><td>An administrator creates a scoped API key in an administration interface or CLI. The developer enters it once through the AI client's secret input. For a private network, connect to the company network or VPN first; the key does not change network access. Keys never come from startup logs.</td></tr>
                 <tr><td>CI or unattended agents</td><td>An administrator creates a scoped service key and puts it in the deployment's secret manager. No browser is involved.</td></tr>
               </tbody>
             </table>
@@ -2768,21 +2764,21 @@ v12-7f3a.content.example.net</code></pre>
 
           <figure class="architecture" aria-labelledby="mcp-auth-diagram-title">
             <div class="architecture-top">
-              <strong class="architecture-title" id="mcp-auth-diagram-title">Remote connection and browser sign-in</strong>
+              <strong class="architecture-title" id="mcp-auth-diagram-title">Remote connection with an API key</strong>
               <p class="architecture-caption">
-                Artifact Server tells the client where to sign in. WorkOS is the proposed hosted
-                service. A private installation can use another compatible authorization service.
+                An administrator issues a scoped key. The client sends it with every request.
+                Artifact Server checks it before any product code runs.
               </p>
             </div>
             <div class="diagram-shell">
               <div class="diagram-heading">
                 <strong>Connection flow</strong>
-                <span>The access credential is valid only for the exact Artifact Server address.</span>
+                <span>A key belongs to one member or service principal of one installation.</span>
               </div>
               <div class="diagram-scroll">
                 <svg class="architecture-diagram" viewBox="0 0 1040 550" role="img" aria-labelledby="mcp-flow-title mcp-flow-desc">
-                  <title id="mcp-flow-title">MCP connection and authorization flow</title>
-                  <desc id="mcp-flow-desc">An AI client contacts Artifact Server, reads its sign-in instructions, opens a browser at the configured sign-in service, receives a credential for this Artifact Server, and then calls publishing tools. Large file bytes upload separately to file storage.</desc>
+                  <title id="mcp-flow-title">MCP connection and authentication flow</title>
+                  <desc id="mcp-flow-desc">An administrator issues a scoped API key. An AI client sends it as a bearer credential to Artifact Server, which checks the key and then calls publishing tools. Large file bytes upload separately to file storage.</desc>
                   <defs>
                     <marker id="mcp-auth-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
                       <path d="M0,0 L8,4 L0,8 Z" style="fill: var(--code-ink)"></path>
@@ -2798,21 +2794,21 @@ v12-7f3a.content.example.net</code></pre>
                   <text class="svg-title" x="72" y="114">Codex or Claude</text>
                   <text class="svg-copy" x="72" y="138">Stores the server address</text>
                   <rect class="svg-node" x="52" y="190" width="170" height="118" rx="8"></rect>
-                  <text class="svg-title" x="72" y="220">OAuth client</text>
-                  <text class="svg-copy" x="72" y="244">Opens the browser</text>
-                  <text class="svg-copy" x="72" y="264">proves it started sign-in</text>
-                  <text class="svg-small" x="72" y="287">PKCE · refresh · revoke</text>
+                  <text class="svg-title" x="72" y="220">Secret input</text>
+                  <text class="svg-copy" x="72" y="244">Holds the API key</text>
+                  <text class="svg-copy" x="72" y="264">entered once</text>
+                  <text class="svg-small" x="72" y="287">NOT IN PROJECT FILES</text>
 
                   <text class="svg-label" x="292" y="34">ARTIFACT SERVER</text>
                   <rect class="svg-boundary" x="292" y="54" width="420" height="432" rx="12"></rect>
                   <rect class="svg-node-primary" x="318" y="84" width="176" height="92" rx="8"></rect>
                   <text class="svg-title" x="338" y="116">POST /mcp</text>
-                  <text class="svg-copy" x="338" y="140">Returns sign-in instructions</text>
-                  <text class="svg-small" x="338" y="159">when no credential is present</text>
+                  <text class="svg-copy" x="338" y="140">Reads the bearer key</text>
+                  <text class="svg-small" x="338" y="159">no key: 401 Bearer</text>
                   <rect class="svg-node-auth" x="510" y="84" width="176" height="92" rx="8"></rect>
-                  <text class="svg-title" x="530" y="116">Credential check</text>
-                  <text class="svg-copy" x="530" y="140">Issuer · server address</text>
-                  <text class="svg-small" x="530" y="159">expiry · signature · user</text>
+                  <text class="svg-title" x="530" y="116">Key check</text>
+                  <text class="svg-copy" x="530" y="140">Digest · expiry · revoked</text>
+                  <text class="svg-small" x="530" y="159">installation · capabilities</text>
                   <rect class="svg-node-primary" x="318" y="236" width="368" height="92" rx="8"></rect>
                   <text class="svg-title" x="338" y="268">Artifact product rules</text>
                   <text class="svg-copy" x="338" y="292">Permissions, publish, versions, access settings and comparisons</text>
@@ -2821,61 +2817,50 @@ v12-7f3a.content.example.net</code></pre>
                   <text class="svg-title" x="338" y="418">Direct upload storage</text>
                   <text class="svg-copy" x="338" y="440">Website and file bytes do not pass through MCP messages</text>
 
-                  <text class="svg-label" x="758" y="34">SIGN-IN SERVICE</text>
+                  <text class="svg-label" x="758" y="34">ADMINISTRATOR</text>
                   <rect class="svg-boundary-optional" x="758" y="54" width="254" height="304" rx="12"></rect>
                   <rect class="svg-node-auth" x="782" y="84" width="206" height="92" rx="8"></rect>
-                  <text class="svg-title" x="802" y="116">Browser sign-in</text>
-                  <text class="svg-copy" x="802" y="140">WorkOS for hosted service</text>
-                  <text class="svg-small" x="802" y="159">or a compatible private service</text>
+                  <text class="svg-title" x="802" y="116">Issue key</text>
+                  <text class="svg-copy" x="802" y="140">Scoped user or service key</text>
+                  <text class="svg-small" x="802" y="159">shown once · revocable</text>
                   <rect class="svg-node-auth" x="782" y="216" width="206" height="92" rx="8"></rect>
-                  <text class="svg-title" x="802" y="248">Issue credential</text>
-                  <text class="svg-copy" x="802" y="272">Only for this /mcp address</text>
-                  <text class="svg-small" x="802" y="291">short life · renewable · revocable</text>
+                  <text class="svg-title" x="802" y="248">Rotate or revoke</text>
+                  <text class="svg-copy" x="802" y="272">Ends the key at once</text>
+                  <text class="svg-small" x="802" y="291">and its browser sessions</text>
 
                   <path class="svg-line" d="M222 122 H318" marker-end="url(#mcp-auth-arrow)"></path>
                   <circle class="svg-step" cx="266" cy="122" r="13"></circle>
                   <text class="svg-step-number" x="266" y="126">1</text>
-                  <text class="svg-small" x="236" y="103">first request</text>
+                  <text class="svg-small" x="236" y="103">request + key</text>
 
-                  <path class="svg-line" d="M318 154 H246 V206 H222" marker-end="url(#mcp-auth-arrow)"></path>
-                  <circle class="svg-step" cx="246" cy="180" r="13"></circle>
-                  <text class="svg-step-number" x="246" y="184">2</text>
-                  <text class="svg-small" x="262" y="184">sign-in location</text>
+                  <path class="svg-line" d="M494 130 H510" marker-end="url(#mcp-auth-arrow)"></path>
+                  <circle class="svg-step" cx="502" cy="178" r="13"></circle>
+                  <text class="svg-step-number" x="502" y="182">2</text>
 
-                  <path class="svg-line-optional" d="M222 244 H744 V130 H782" marker-end="url(#mcp-auth-arrow-optional)"></path>
-                  <circle class="svg-step" cx="734" cy="244" r="13"></circle>
-                  <text class="svg-step-number" x="734" y="248">3</text>
-                  <text class="svg-small" x="602" y="229">browser opens; user signs in and approves</text>
-
-                  <path class="svg-line-optional" d="M782 272 H744 V326 H222 V282" marker-end="url(#mcp-auth-arrow-optional)"></path>
-                  <circle class="svg-step" cx="734" cy="326" r="13"></circle>
-                  <text class="svg-step-number" x="734" y="330">4</text>
-                  <text class="svg-small" x="556" y="346">client receives and stores the credential</text>
-
-                  <path class="svg-line" d="M222 300 H276 V130 H510" marker-end="url(#mcp-auth-arrow)"></path>
-                  <circle class="svg-step" cx="276" cy="300" r="13"></circle>
-                  <text class="svg-step-number" x="276" y="304">5</text>
-                  <text class="svg-small" x="52" y="340">Later MCP calls include the credential</text>
+                  <path class="svg-line-optional" d="M782 130 H686" marker-end="url(#mcp-auth-arrow-optional)"></path>
+                  <circle class="svg-step" cx="734" cy="130" r="13"></circle>
+                  <text class="svg-step-number" x="734" y="134">3</text>
+                  <text class="svg-small" x="700" y="111">key digest</text>
 
                   <path class="svg-line" d="M598 176 V210 H502 V236" marker-end="url(#mcp-auth-arrow)"></path>
                   <circle class="svg-step" cx="550" cy="210" r="13"></circle>
-                  <text class="svg-step-number" x="550" y="214">6</text>
-                  <text class="svg-small" x="568" y="214">verified user and permissions</text>
+                  <text class="svg-step-number" x="550" y="214">4</text>
+                  <text class="svg-small" x="568" y="214">verified principal and permissions</text>
 
                   <path class="svg-line" d="M502 328 V388" marker-end="url(#mcp-auth-arrow)"></path>
                   <circle class="svg-step" cx="502" cy="358" r="13"></circle>
-                  <text class="svg-step-number" x="502" y="362">7</text>
+                  <text class="svg-step-number" x="502" y="362">5</text>
                   <text class="svg-small" x="520" y="363">direct upload plan</text>
 
                   <rect class="svg-boundary" x="28" y="394" width="218" height="92" rx="12"></rect>
                   <text class="svg-label" x="52" y="423">LAPTOP MODE</text>
                   <text class="svg-title" x="52" y="450">Local helper + local token</text>
-                  <text class="svg-copy" x="52" y="470">No browser OAuth is required.</text>
+                  <text class="svg-copy" x="52" y="470">No API key is required.</text>
                 </svg>
               </div>
               <div class="diagram-legend" aria-label="MCP connection diagram legend">
                 <span><i class="diagram-key" aria-hidden="true"></i>Required Artifact Server path</span>
-                <span><i class="diagram-key optional" aria-hidden="true"></i>Replaceable sign-in provider</span>
+                <span><i class="diagram-key optional" aria-hidden="true"></i>Administrator action</span>
               </div>
             </div>
           </figure>
@@ -3054,8 +3039,8 @@ v12-7f3a.content.example.net</code></pre>
                 <p>
                   The two credential stores are intentionally separate. <code>artifactserver
                   connect</code> registers MCP in an AI client. <code>artifactserver auth login
-                  &lt;server&gt;</code> signs the command-line program into an exact server origin,
-                  opens browser approval when supported, and stores the renewable credential in
+                  &lt;server&gt;</code> signs the command-line program into an exact server origin
+                  with an API key read from standard input and stores it in
                   the operating-system credential store. Local mode uses private user-only state
                   without browser login or a visible key. CI uses a scoped service credential from
                   its secret manager.
@@ -3127,7 +3112,7 @@ v12-7f3a.content.example.net</code></pre>
               </div>
             </details>
             <details open>
-              <summary>Deployment choices for MCP sign-in</summary>
+              <summary>Deployment choices for MCP authentication</summary>
               <div class="detail-body">
                 <div class="table-wrap" role="region" aria-label="MCP authorization choices" tabindex="0">
                   <table>
@@ -3140,14 +3125,9 @@ v12-7f3a.content.example.net</code></pre>
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Hosted Artifact Server</td>
-                        <td>WorkOS AuthKit</td>
-                        <td>Add the server address, sign in and approve in the browser, then return to the AI client.</td>
-                      </tr>
-                      <tr>
                         <td>Private or self-hosted server</td>
                         <td>Server API key</td>
-                        <td>Configure a revocable key. A compatible company authorization service may replace it. Better Auth is a candidate for optional built-in browser authorization after its current beta MCP path passes testing.</td>
+                        <td>An administrator issues a revocable, scoped key. The user enters it once in the AI client's secret input.</td>
                       </tr>
                       <tr>
                         <td>One laptop</td>
@@ -3158,9 +3138,9 @@ v12-7f3a.content.example.net</code></pre>
                   </table>
                 </div>
                 <p>
-                  Ordinary OpenID Connect sign-in proves who a person is in a browser. It is not, by
-                  itself, enough for an MCP client. Remote MCP also needs discovery, approval,
-                  a credential issued for the exact <code>/mcp</code> address, renewal, and revocation.
+                  MCP has no OAuth flow. There is no sign-in metadata, no client registration, and no
+                  access token from an external identity provider. A key is valid only for the
+                  installation that issued it.
                 </p>
               </div>
             </details>
@@ -3186,30 +3166,21 @@ v12-7f3a.content.example.net</code></pre>
               </div>
             </details>
             <details>
-              <summary>Hosted OAuth and Artifact Server's responsibility</summary>
+              <summary>API keys and Artifact Server's responsibility</summary>
               <div class="detail-body">
                 <p>
-                  In the hosted service, WorkOS owns the authorization page, approval screen,
-                  authorization codes, client registration, access credentials, renewal, and revoke
-                  behavior. Artifact Server remains the protected service. It publishes the standard
-                  metadata that tells clients where to sign in and verifies every credential before an MCP request reaches product code.
+                  Artifact Server verifies every API key before an MCP request reaches product code.
+                  It checks the key's stored digest, expiry, revoke state, installation, and
+                  capabilities. A request without a valid key gets a <code>401</code> with a plain
+                  <code>Bearer</code> challenge and no sign-in metadata.
                 </p>
                 <p>
-                  The credential must name the exact Artifact Server MCP address as its audience.
-                  WorkOS identity scopes do not grant artifact permissions. Artifact Server also verifies the issuer,
-                  signature, expiry, and user, then maps that user to an account admitted to this
-                  installation. Artifact Server does not copy WorkOS organizations into a second
-                  organization system. The same membership and service-capability checks used by the
-                  browser still apply.
+                  A key belongs to one member or service principal of this installation. The same
+                  membership and service-capability checks used by the browser still apply. Keys
+                  never pass to file storage, background workers, or published websites.
                 </p>
                 <p>
-                  The hosted authorization service enables Client ID Metadata Documents first and
-                  keeps Dynamic Client Registration temporarily for clients that still require it.
-                  Authorization uses the browser authorization-code flow with S256 PKCE. WorkOS
-                  credentials never pass to file storage, background workers, or published websites.
-                </p>
-                <p>
-                  The exact wire behavior, metadata, token checks, self-hosted modes, and release
+                  The exact wire behavior, key checks, self-hosted modes, and release
                   test matrix are recorded in the <a href="artifact-server-mcp-baseline.md">Artifact Server MCP engineering baseline</a>.
                 </p>
               </div>
@@ -3300,7 +3271,7 @@ artifact_delete</code></pre>
             </article>
             <article class="deployment-item">
               <h3>First release: private team</h3>
-              <p>Compact Compose runs one container with SQLite and attached disk. External-storage Compose uses the same image with existing Postgres and object storage, and it can run multiple application processes. Each teammate signs in through the installation's configured OpenID Connect or WorkOS provider.</p>
+              <p>Compact Compose runs one container with SQLite and attached disk. External-storage Compose uses the same image with existing Postgres and object storage, and it can run multiple application processes. Each teammate signs in to the browser with an API key that an administrator issues.</p>
             </article>
             <article class="deployment-item">
               <h3>Cloudflare</h3>
@@ -3510,13 +3481,9 @@ artifact_delete</code></pre>
                   default uses ECS Fargate; it does not create or replace an existing EKS cluster.
                 </p>
                 <p>
-                  Browser login and MCP authorization are separate protocols even when they use the
-                  same identity provider. Team browser login uses WorkOS AuthKit or any OpenID Connect
-                  provider, configured directly on the installation; one installation configures one
-                  browser-login provider. Hosted MCP
-                  connections use WorkOS AuthKit. Private installations can use server API keys or a
-                  compatible authorization service. A single-user installation may rely on the
-                  operating-system account or a local token.
+                  Team browser sign-in and MCP both use managed API keys. There is no external
+                  identity provider. A single-user installation may rely on the operating-system
+                  account or a local token.
                 </p>
               </div>
             </details>
@@ -3563,7 +3530,7 @@ artifact_delete</code></pre>
                   application image, application domain, separate content domain, initial
                   administrator email, public or private ingress choice, replica limits, CPU,
                   memory, database size, backup retention, deletion protection, network choice,
-                  and optional WorkOS and telemetry references. Secret inputs are references to
+                  and optional telemetry references. Secret inputs are references to
                   the provider secret manager, not secret values in ordinary configuration.
                 </p>
                 <p>
@@ -3874,7 +3841,7 @@ artifact_delete</code></pre>
                   Keep SQLite for a single-server installation. Add Postgres and cloud file storage
                   for Kubernetes or any deployment with multiple application replicas. Support S3,
                   Google Cloud Storage, R2, compatible object stores, and a preview Azure Blob adapter through one
-                  narrow interface. Add browser login, API-key and external-issuer modes for private
+                  narrow interface. Add browser API-key sign-in and API-key MCP access for private
                   deployments, staged direct uploads, expired-staging cleanup, a Docker image, a
                   Compose file, a Helm chart, backup and restore, and optional private Git handoff.
                   Add structured request logs, standard OTLP export for logs, metrics, and traces,
@@ -3935,7 +3902,7 @@ artifact_delete</code></pre>
                 <ul>
                   <li><strong>Local:</strong> <code>artifactserver connect</code> works in every advertised local client without browser sign-in, Docker, a visible key, copied secret, or log inspection; one service then publishes one file and a complete static site, opens the unique version host, compares versions without Git, retries safely, and survives a restart.</li>
                   <li><strong>Private team:</strong> account-required subresources load, forbidden mutations fail, backup and restore preserve IDs, and cross-tenant and hostile-path tests pass on one server and Kubernetes.</li>
-                  <li><strong>Optional Cloudflare package:</strong> WorkOS MCP sign-in, R2 staged uploads, D1 transactions, public cache purge, private no-cache delivery, tenant isolation, and a restore drill pass. Service-operator policy is separate from core OSS conformance.</li>
+                  <li><strong>Optional Cloudflare package:</strong> R2 staged uploads, D1 transactions, public cache purge, private no-cache delivery, tenant isolation, and a restore drill pass. Service-operator policy is separate from core OSS conformance.</li>
                   <li><strong>Plannotator connection:</strong> one-click approval, cross-organization rejection, signed-request scope, one-use browser links, disconnect, key rotation, exact-version comments, hostile review-page tests, and private-route failure and recovery all pass.</li>
                   <li><strong>Major clouds:</strong> every provider package passes install, upgrade, rollback, backup, restore, private-network, and removal tests before support is advertised.</li>
                   <li><strong>All releases:</strong> browsers open native file types without a conversion service; arbitrary URL fetch is absent; optional Git failure never blocks or loses the primary saved version.</li>
@@ -3973,7 +3940,7 @@ artifact_delete</code></pre>
             <article class="decision-item"><p>Changing public content back to account required stops future public access and purges supported caches, but cannot recall downloaded or externally cached copies.</p></article>
             <article class="decision-item"><p>Manifest paths follow one portable safety contract. Publishing clients upload bytes. A local client may read a user-selected path with its operating-system permissions, but HTTP and MCP never receive that path. The server does not fetch arbitrary source URLs.</p></article>
             <article class="decision-item"><p>Uploads stage, verify, then write content-addressed blobs without overwrite before the database commit. The first release deletes expired staging only and does not garbage-collect committed blobs.</p></article>
-            <article class="decision-item"><p>Browser, normal software requests, the command-line program, and MCP share the same product and authorization rules. Local MCP uses <code>artifactserver connect</code> without a human-visible secret. Hosted MCP uses browser approval through WorkOS AuthKit. Self-hosted MCP uses compatible browser authorization when configured and administration-issued scoped API keys otherwise. Startup logs never distribute keys.</p></article>
+            <article class="decision-item"><p>Browser, normal software requests, the command-line program, and MCP share the same product and authorization rules. Local MCP uses <code>artifactserver connect</code> without a human-visible secret. Remote MCP uses administration-issued scoped API keys. Startup logs never distribute keys.</p></article>
             <article class="decision-item"><p>MCP and the command-line program intentionally overlap. Files on the user's computer use the command-line program. Work that only needs information already on Artifact Server may use either. <code>artifactserver auth login</code> gives the command-line program its own secure server profile. A remote MCP server never reads a user's local path.</p></article>
             <article class="decision-item"><p>Artifact Server ships one router skill with separate artifact and server-operation references. The artifact route uses the command-line program for local files and MCP or the command-line program for information already on the server. The server-operation route loads only for explicit administrator work. Stored references include the server and artifact, so agents open local or team artifacts at the correct address.</p></article>
             <article class="decision-item"><p>The product core uses narrow database, file-storage, login, background-work, and optional Git interfaces. Operators use Compose for one server, Helm for Kubernetes, Alchemy directly for Cloudflare, and Pulumi directly for AWS and GCP. Artifact Server does not add an infrastructure wrapper.</p></article>
@@ -3988,8 +3955,6 @@ artifact_delete</code></pre>
               <li><strong>Private site delivery:</strong> current tests exercise the bootstrap token and version-scoped content cookie, but the complete supported-browser and per-deployment matrix remains open.</li>
               <li><strong>Version origins:</strong> local <code>*.localhost</code> behavior and a real Cloudflare wildcard TLS probe have evidence. Equivalent DNS, certificate, proxy, and hostile-host proof remains open for each deployment before support is advertised.</li>
               <li><strong>Cloudflare Artifacts:</strong> complete bounded live binding, REST, smart-HTTP, token, project-switch, estimate, budget, namespace-isolation, run-manifest cleanup, backfill, disable, deletion, recovery, limits, jurisdiction, and cost probes before advertising the off-by-default provider. The product must remain complete without access, and tests must not touch another namespace.</li>
-              <li><strong>WorkOS MCP:</strong> browser approval, resource-bound tokens, refresh, revocation, reconnect, DCR, and CIMD pass for Codex and Claude Code. Visual Studio Code and claude.ai are deferred client qualifications, not first-release gates.</li>
-              <li><strong>Embedded self-hosted OAuth:</strong> decide whether Better Auth's beta MCP path is mature enough; API keys and compatible external issuers remain the default until it passes the same hostile tests.</li>
               <li><strong>Cross-cloud packages:</strong> selected live AWS, GCP, and Cloudflare lifecycle probes have evidence, but no direct-cloud package has complete signed conformance proof. The AWS private-ingress variant remains unqualified.</li>
               <li><strong>Optional hosted-service policy:</strong> quotas, egress limits, abuse response, phishing and malware handling, reporting, suspension, and domain reputation belong to a future artifactserver.com operator, not the core OSS first release.</li>
               <li><strong>Capacity claims:</strong> the OSS release need not advertise universal capacity or cost envelopes. Any target-specific claim must be backed by measured evidence.</li>

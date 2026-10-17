@@ -472,8 +472,6 @@ function startExternalStorageProcess(
         ARTIFACT_SERVER_CONTENT_DOMAIN: "content.example.net",
         ARTIFACT_SERVER_DATABASE_URL: environment.databaseUrl,
         ARTIFACT_SERVER_INSTALLATION_ID: identity.installationId,
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "external-storage-performance",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://oidc.performance.example",
         ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "0",
         ARTIFACT_SERVER_S3_ACCESS_KEY_ID: environment.accessKey,
         ARTIFACT_SERVER_S3_BUCKET: identity.bucket,

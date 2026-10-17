@@ -2839,7 +2839,6 @@ function errorProjection(cause: unknown) {
     switch (cause._tag) {
       case "ArtifactRepositoryFailure":
       case "BlobStorageFailure":
-      case "IdentityProviderFailure":
       case "IdentityRepositoryFailure":
       case "StagingStorageFailure":
         return {

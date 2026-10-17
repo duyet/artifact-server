@@ -2,6 +2,8 @@
 
 Status: partially implemented; client distribution, optional Git, server-operation skill routing, and full cloud release gates remain open
 
+> Superseded in part (2026-10-18): OIDC and WorkOS browser login and MCP OAuth were removed. Private-team servers use API-key sign-in.
+
 This phase turns the working Artifact Server backend into a product that agents
 can use and teams can install in their chosen environment. It covers four
 tracks:

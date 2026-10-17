@@ -284,9 +284,6 @@ jobs:
       # full-gate-command: pnpm verify:helm
       - name: Verify Helm release
         run: pnpm verify:helm
-      # full-gate-command: pnpm test:oidc
-      - name: Test generic OIDC
-        run: pnpm test:oidc
 
       - name: Upload full-gate evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

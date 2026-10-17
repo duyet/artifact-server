@@ -19,7 +19,7 @@ Use the target's native tool. Artifact Server does not provide one generic
 ## Plan before changing infrastructure
 
 1. Inspect the current release, deployment configuration, storage drivers,
-   identity mode, and health without printing credentials.
+   access mode, and health without printing credentials.
 2. State the proposed change, affected installation, expected interruption,
    rollback path, and any backup or restore consequence.
 3. Confirm that the request authorizes that exact material change. Ask before a
@@ -31,7 +31,7 @@ Use the target's native tool. Artifact Server does not provide one generic
 
 ## Protect data and credentials
 
-- Never paste infrastructure, database, object-storage, OIDC, or Artifact
+- Never paste infrastructure, database, object-storage, or Artifact
   Server credentials into chat or command output.
 - Resolve exact backup objects and destinations before a restore. A server
   backup restore is destructive and is different from making an immutable

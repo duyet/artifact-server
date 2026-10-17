@@ -2,6 +2,8 @@
 
 Status: implementation present locally; complete combined CLI proof and hosted activation remain gated
 
+> Superseded in part (2026-10-18): the CLI browser OAuth flow was removed. `artifactserver auth login <server> --api-key-stdin` is the only CLI login.
+
 ## Outcome
 
 One installed `artifactserver` program can publish a local file or finished

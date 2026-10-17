@@ -3,6 +3,8 @@
 Status: shared behavior implemented with selected local and live-cloud probes;
 complete acceptance and package-path proof remains open
 
+> Superseded in part (2026-10-18): WorkOS and hosted browser OAuth were removed from the product. Private-team servers use API-key sign-in.
+
 ## Outcome
 
 This phase closes the remaining gaps in the core Artifact Server product before

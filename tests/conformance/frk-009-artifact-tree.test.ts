@@ -39,7 +39,7 @@ const publicTreeSchema = z.object({
     views: viewCountsSchema,
   })),
   generatedAt: z.iso.datetime(),
-  loginKind: z.enum(["local_owner", "none", "oidc", "workos"]),
+  loginKind: z.enum(["local_owner", "none"]),
   truncated: z.boolean(),
   windowDays: z.literal(30),
 });

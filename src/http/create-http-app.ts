@@ -1,9 +1,3 @@
-import {
-  buildOAuthProtectedResourceMetadata,
-  getOAuthProtectedResourceMetadataUrl,
-  oauthMetadataResponse,
-  type OAuthMetadata,
-} from "@modelcontextprotocol/server";
 import {Clock, Effect, Exit, Redacted, type Tracer} from "effect";
 import { type Context, Hono } from "hono";
 import {getConnInfo} from "@hono/node-server/conninfo";
@@ -24,7 +18,6 @@ import {
   identitySecretsEqual,
   InstallationAccessService,
 } from "../application/installation-access.js";
-import { InteractiveLoginService } from "../application/interactive-login.js";
 import { ProjectManagementService } from "../application/project-management.js";
 import {ProjectGitHistoryService} from
   "../application/project-git-history.js";
@@ -483,23 +476,13 @@ const apiKeySignInSchema = z.object({
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
-const interactiveLoginQuerySchema = z.object({
-  returnTo: z.string().max(1_024).default("/api/v1/session"),
-});
-const interactiveCallbackSchema = z.object({
-  code: z.string().min(1).max(4_096),
-  state: z.string().min(16).max(4_096),
-});
 const sessionTokenSchema = z.string().min(32).max(200)
   .regex(/^[A-Za-z0-9_-]+$/u);
 const csrfTokenSchema = sessionTokenSchema;
 const applicationSessionCookie = "artifact_session";
 const applicationCsrfCookie = "artifact_csrf";
-const loginHandshakeCookie = "artifact_login";
 const secureApplicationSessionCookie = "__Host-artifact_session";
 const secureApplicationCsrfCookie = "__Host-artifact_csrf";
-const secureLoginHandshakeCookie = "__Host-artifact_login";
-const loginHandshakeMaxAgeSeconds = 10 * 60;
 /** Upper bound on one held claim poll, per the dispatch transport contract. */
 const maximumClaimWaitSeconds = 25;
 /** Spacing of the bounded re-checks inside one held claim poll. */
@@ -517,7 +500,6 @@ interface HttpEnvironment {
 }
 
 export interface HttpAppDependencies {
-  readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationRuntime: ApplicationRuntime;
   /**
    * Buffered entry-document counter. Absent, no view is ever recorded, which
@@ -540,23 +522,10 @@ export interface HttpAppDependencies {
    * the enforcing guard; this flag only shapes discovery and fast gating.
    */
   readonly linkedArtifacts?: boolean;
-  readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
   readonly readiness?: ReadinessProbe;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly trustedApplicationOrigin: string | null;
   readonly webAssets?: WebAssetStore;
-}
-
-/** RFC 9728 metadata for the separately audience-bound HTTP API resource. */
-export interface ApiOAuthResourceConfiguration {
-  readonly authorizationServers: readonly [string, ...string[]];
-  readonly resource: string;
-}
-
-/** WorkOS metadata and exact audience for the hosted MCP protected resource. */
-export interface McpOAuthResourceConfiguration {
-  readonly authorizationServerMetadata: OAuthMetadata;
-  readonly resource: string;
 }
 
 /** Machine-readable result of one declared runtime dependency probe. */
@@ -611,7 +580,6 @@ export function createHttpApp(
     gitHistory,
     linkedArtifacts: dependencies.linkedArtifacts === true,
     mode: dependencies.trustedApplicationOrigin === null ? "local" : "remote",
-    oauthResource: dependencies.mcpOAuthResource?.resource ?? null,
   });
   const boundedJsonBody = bodyLimit({
     maxSize: maximumJsonRequestBytes,
@@ -667,48 +635,6 @@ export function createHttpApp(
         },
         413,
       ),
-  });
-
-  if (dependencies.mcpOAuthResource !== undefined) {
-    const resourceServerUrl = new URL(
-      dependencies.mcpOAuthResource.resource,
-    );
-    const metadataOptions = {
-      oauthMetadata:
-        dependencies.mcpOAuthResource.authorizationServerMetadata,
-      resourceName: "Artifact Server MCP",
-      resourceServerUrl,
-    };
-    const protectedMetadata = {
-      ...buildOAuthProtectedResourceMetadata(metadataOptions),
-      bearer_methods_supported: ["header"],
-    };
-    const protectedMetadataPath = new URL(
-      getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
-    ).pathname;
-    app.get(
-      protectedMetadataPath,
-      (context) => context.json(protectedMetadata),
-    );
-  }
-
-  app.use("*", async (context, next) => {
-    if (dependencies.mcpOAuthResource !== undefined) {
-      const response = oauthMetadataResponse(
-        context.req.raw,
-        {
-          oauthMetadata:
-            dependencies.mcpOAuthResource.authorizationServerMetadata,
-          resourceName: "Artifact Server MCP",
-          resourceServerUrl: new URL(dependencies.mcpOAuthResource.resource),
-        },
-      );
-      if (response !== undefined) {
-        context.res = response;
-        return;
-      }
-    }
-    await next();
   });
 
   app.use("*", async (context, next) => {
@@ -989,16 +915,6 @@ export function createHttpApp(
     context.json({status: "ok" as const}),
   );
 
-  app.get("/.well-known/oauth-protected-resource/api", (context) => {
-    if (dependencies.apiOAuthResource === undefined) return context.notFound();
-    return context.json({
-      authorization_servers: dependencies.apiOAuthResource.authorizationServers,
-      bearer_methods_supported: ["header"],
-      resource: dependencies.apiOAuthResource.resource,
-      scopes_supported: ["artifactserver"],
-    });
-  });
-
   app.get("/ready", async (context) => {
     const lifecycle = dependencies.runtimeLifecycle?.current() ?? "ready";
     if (lifecycle !== "ready") {
@@ -1181,38 +1097,6 @@ export function createHttpApp(
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
     return context.redirect("/", 303);
-  });
-
-  app.get("/auth/login", async (context) => {
-    const query = interactiveLoginQuerySchema.parse(context.req.query());
-    const started = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      InteractiveLoginService.use((login) => login.start(query.returnTo)),
-    );
-    setLoginHandshakeCookie(context, dependencies, started.handshake);
-    context.header("Cache-Control", "private, no-store");
-    return context.redirect(started.authorizationUrl, 302);
-  });
-
-  app.get("/auth/callback", async (context) => {
-    const query = interactiveCallbackSchema.parse(context.req.query());
-    const handshake = getCookie(
-      context,
-      applicationCookieNames(dependencies).handshake,
-    ) ?? null;
-    const completed = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      InteractiveLoginService.use((login) =>
-        login.complete({...query, handshake})
-      ),
-    );
-    clearLoginHandshakeCookie(context, dependencies);
-    setApplicationSessionCookies(context, dependencies, completed.issued);
-    context.header("Cache-Control", "private, no-store");
-    context.header("Referrer-Policy", "no-referrer");
-    return context.redirect(completed.returnTo, 303);
   });
 
   app.get("/api/v1/session", (context) =>
@@ -2757,10 +2641,7 @@ export function createHttpApp(
         headers.set("Cache-Control", "private, no-store");
       }
       if (error._tag === "AuthenticationRequired") {
-        headers.set(
-          "WWW-Authenticate",
-          apiBearerChallenge(context, dependencies),
-        );
+        headers.set("WWW-Authenticate", "Bearer");
       }
       return Response.json(
         {error: {code: response.code, message: response.message}},
@@ -2807,21 +2688,6 @@ export function createHttpApp(
   return app;
 }
 
-function apiBearerChallenge(
-  context: {readonly req: {readonly path: string}},
-  dependencies: HttpAppDependencies,
-): string {
-  if (
-    dependencies.apiOAuthResource === undefined
-    || !context.req.path.startsWith("/api/")
-  ) return "Bearer";
-  const metadata = new URL(
-    "/.well-known/oauth-protected-resource/api",
-    dependencies.apiOAuthResource.resource,
-  );
-  return `Bearer resource_metadata="${metadata.toString()}" scope="artifactserver"`;
-}
-
 function setApplicationSessionCookies(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
@@ -2846,30 +2712,6 @@ function setApplicationSessionCookies(
   });
 }
 
-function setLoginHandshakeCookie(
-  context: Context<HttpEnvironment>,
-  dependencies: HttpAppDependencies,
-  handshake: string,
-): void {
-  setCookie(context, applicationCookieNames(dependencies).handshake, handshake, {
-    httpOnly: true,
-    maxAge: loginHandshakeMaxAgeSeconds,
-    path: "/",
-    sameSite: "Lax",
-    secure: usesSecureApplicationCookies(dependencies),
-  });
-}
-
-function clearLoginHandshakeCookie(
-  context: Context<HttpEnvironment>,
-  dependencies: HttpAppDependencies,
-): void {
-  deleteCookie(context, applicationCookieNames(dependencies).handshake, {
-    path: "/",
-    secure: usesSecureApplicationCookies(dependencies),
-  });
-}
-
 function clearApplicationSessionCookies(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
@@ -2884,18 +2726,15 @@ function applicationCookieNames(
   dependencies: HttpAppDependencies,
 ): {
   readonly csrf: string;
-  readonly handshake: string;
   readonly session: string;
 } {
   return usesSecureApplicationCookies(dependencies)
     ? {
       csrf: secureApplicationCsrfCookie,
-      handshake: secureLoginHandshakeCookie,
       session: secureApplicationSessionCookie,
     }
     : {
       csrf: applicationCsrfCookie,
-      handshake: loginHandshakeCookie,
       session: applicationSessionCookie,
     };
 }

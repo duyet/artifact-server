@@ -66,10 +66,7 @@ describe("Artifact Server lifecycle CLI", () => {
       expect((await stat(path.join(dataDirectory, "secrets/api-token"))).mode & 0o777)
         .toBe(0o600);
 
-      const environment = compactEnvironment({
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-configuration-client",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
-      });
+      const environment = compactEnvironment();
       const checked = await runCli([
         "config",
         "check",
@@ -85,7 +82,6 @@ describe("Artifact Server lifecycle CLI", () => {
             apiToken: "generated_file",
           },
           deploymentMode: "compact",
-          interactiveIdentityProvider: "oidc",
           installationId: initialization.installationId,
           stagingCleanup: {
             batchSize: 100,
@@ -99,34 +95,6 @@ describe("Artifact Server lifecycle CLI", () => {
         providers: {status: "ready"},
       });
       expect(checked.output).not.toContain(apiToken);
-      const noIdentityProvider = await runCli([
-        "config",
-        "check",
-        "--mode",
-        "compact",
-        "--data",
-        dataDirectory,
-      ], compactEnvironment());
-      expect(noIdentityProvider.exitCode).toBe(0);
-      expect(JSON.parse(noIdentityProvider.output)).toMatchObject({
-        configuration: {interactiveIdentityProvider: "none", status: "valid"},
-      });
-      const incompleteWorkOs = await runCli([
-        "config",
-        "check",
-        "--mode",
-        "compact",
-        "--data",
-        dataDirectory,
-      ], {
-        ...compactEnvironment(),
-        ARTIFACT_SERVER_WORKOS_API_KEY: "workos-secret-value",
-      });
-      expect(incompleteWorkOs.exitCode).not.toBe(0);
-      expect(incompleteWorkOs.output).toContain(
-        "Hosted WorkOS authentication requires",
-      );
-      expect(incompleteWorkOs.output).not.toContain("workos-secret-value");
       await chmod(path.join(dataDirectory, "secrets/api-token"), 0o644);
       const permissiveSecret = await runCli([
         "config",
@@ -443,8 +411,6 @@ describe("Artifact Server lifecycle CLI", () => {
       expect(initialized.exitCode).toBe(0);
       const environment = compactEnvironment({
         ARTIFACT_SERVER_CONTENT_DOMAIN: undefined,
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-configuration-client",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
       });
       const checked = await runCli([
         "config",
@@ -538,8 +504,6 @@ describe("Artifact Server lifecycle CLI", () => {
       expect(initialized.exitCode).toBe(0);
       const port = await availablePort();
       const environment = compactEnvironment({
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-test-client",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
         ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "300",
         ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: "3000",
       });

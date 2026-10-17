@@ -164,7 +164,7 @@ Field decisions:
 - **`series` is sparse and ascending.** Days with no views are absent, so the payload stays small on a quiet server. The client densifies against `windowDays`. A dense 30-element array per artifact would be 30 times the bytes for the same information.
 - **`url` is absolute** and comes from `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`), the same builder `links.artifact` uses, so the home page can never advertise a URL the server would not serve. In path mode it is `/<path>/`, otherwise `/<folder>/`.
 - **`access` is always `public_link`.** The field exists so the client does not have to assume, and so issue 4 can widen the endpoint to authenticated callers without changing the item shape.
-- **`loginKind` is `none`, `oidc`, or `workos`** from `dependencies.browserAccess` (`src/core/browser-access.ts`). The home page reads it to decide whether to offer a sign-in link. Issue 4 owns the link itself.
+- **`loginKind` is `local_owner` or `none`** from `dependencies.browserAccess` (`src/core/browser-access.ts`). The home page reads it to decide whether to offer a sign-in link. Issue 4 owns the link itself.
 - **`windowDays` is 30** and is echoed so the client never hard-codes it.
 - **`truncated` is a boolean, never absent.** A client must not have to tell "not truncated" from "the server did not say".
 

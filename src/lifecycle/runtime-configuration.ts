@@ -142,7 +142,6 @@ export interface RuntimeConfigurationSummary {
     readonly providerState: GitHistoryProviderState;
   };
   readonly installationId: string;
-  readonly interactiveIdentityProvider: "local" | "none" | "oidc" | "workos";
   readonly objectStorageProvider: "filesystem" | ObjectStorageProviderKind;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
@@ -423,7 +422,6 @@ const parseS3ObjectStorage = Effect.fn("parseS3ObjectStorage")(
 /** Render the safe, stable subset of one parsed runtime configuration. */
 export function summarizeRuntimeConfiguration(
   configuration: CompactRuntimeConfiguration | ExternalStorageRuntimeConfiguration,
-  interactiveIdentityProvider: "local" | "none" | "oidc" | "workos" = "local",
 ): RuntimeConfigurationSummary {
   if (configuration.deploymentMode === "compact") {
     return {
@@ -437,7 +435,6 @@ export function summarizeRuntimeConfiguration(
       gitHistory: gitHistorySummary(configuration.gitHistory),
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
-      interactiveIdentityProvider,
       objectStorageProvider: "filesystem",
       port: configuration.port,
       readinessWithdrawalMilliseconds:
@@ -458,7 +455,6 @@ export function summarizeRuntimeConfiguration(
     gitHistory: gitHistorySummary(configuration.gitHistory),
     hostname: configuration.hostname,
     installationId: configuration.installationId,
-    interactiveIdentityProvider,
     objectStorageProvider: configuration.objectStorage.kind,
     port: configuration.port,
     readinessWithdrawalMilliseconds:

@@ -118,7 +118,6 @@ function configureDirectLocalStart(programToConfigure: Command): void {
         dataDirectory,
         localCredentialFiles.browser,
       );
-      requireLocalOwnerEnvironment(process.env);
       const observability = observabilityEnvironmentSchema.parse(process.env);
       const gitHistory = await runCliEffect(
         loadNodeGitHistoryConfiguration(process.env),
@@ -183,20 +182,6 @@ function configureDirectLocalStart(programToConfigure: Command): void {
         throw error;
       }
     });
-}
-
-function requireLocalOwnerEnvironment(environment: NodeJS.ProcessEnv): void {
-  const remoteIdentityConfigured = Object.entries(environment).some(
-    ([name, value]) => (
-      name.startsWith("ARTIFACT_SERVER_OIDC_")
-      || name.startsWith("ARTIFACT_SERVER_WORKOS_")
-    ) && value !== undefined && value.trim() !== "",
-  );
-  if (remoteIdentityConfigured) {
-    throw new Error(
-      "artifactserver start is local-owner only; use a private-team deployment entrypoint for OIDC or WorkOS.",
-    );
-  }
 }
 
 function parsePort(value: string, allowAutomatic: boolean): number {

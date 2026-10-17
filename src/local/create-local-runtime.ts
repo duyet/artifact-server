@@ -3,20 +3,12 @@ import path from "node:path";
 
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import type { ApplicationRuntime } from "../application/application-runtime.js";
-import type {
-  BearerCredentialVerifier,
-  ExternalMcpBearerVerifier,
-} from "../application/authentication.js";
-import type { InteractiveIdentityProvider } from "../application/interactive-login.js";
+import type { BearerCredentialVerifier } from "../application/authentication.js";
 import type { Clock } from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
 import { SystemClock, SystemIdGenerator } from "../core/system.js";
 import { createHttpApp } from "../http/create-http-app.js";
-import type {
-  ApiOAuthResourceConfiguration,
-  HttpAppDependencies,
-  McpOAuthResourceConfiguration,
-} from "../http/create-http-app.js";
+import type { HttpAppDependencies } from "../http/create-http-app.js";
 import {
   defaultCompletedRequestLogSampleRate,
   otlpLayer,
@@ -90,7 +82,6 @@ import {
 
 export interface LocalRuntimeConfig {
   readonly apiToken: string;
-  readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationOrigin?: string;
   /** Drain cadence for entry-document view counts; tests use a fast value. */
   readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
@@ -104,19 +95,16 @@ export interface LocalRuntimeConfig {
   readonly developmentProxyCredential?: string;
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
-  readonly externalMcpOAuthVerifier?: ExternalMcpBearerVerifier;
   readonly gitHistory?: NodeGitHistoryConfiguration;
   /** Optional provider seam for real-boundary tests; production composes REST. */
   readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
   /** Complete provider seam for conformance tests; production composes REST and Git. */
   readonly gitHistoryProvider?: GitHistoryProvider;
-  readonly interactiveIdentityProvider?: InteractiveIdentityProvider;
   /** Linked-artifact capability switch; absent or "off" leaves it disabled. */
   readonly linkedFiles?: "off" | "on";
   /** Canonical roots linked source paths must resolve inside. */
   readonly linkRoots?: readonly string[];
   readonly localBootstrapToken?: string;
-  readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
   readonly observability?: boolean;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly installationId?: string;
@@ -241,12 +229,10 @@ export async function createLocalRuntime(
     dispatches: repository,
     externalApiBearerVerifier: config.externalApiBearerVerifier ?? null,
     externalMcpBearerVerifier: config.externalMcpBearerVerifier ?? null,
-    externalMcpOAuthVerifier: config.externalMcpOAuthVerifier ?? null,
     ids: new SystemIdGenerator(),
     identityRepository,
     installationId,
     gitHistory: {read: () => applicationGitHistory.read()},
-    interactiveIdentityProvider: config.interactiveIdentityProvider ?? null,
     localBootstrapCredential: config.localBootstrapToken === undefined
       ? null
       : Redacted.make(config.localBootstrapToken, {
@@ -304,7 +290,7 @@ export async function createLocalRuntime(
         store: repository,
       });
     }
-    let appDependenciesWithoutOAuth: HttpAppDependencies = {
+    let appDependencies: HttpAppDependencies = {
       applicationRuntime,
       artifactViews: artifactViewRecorder,
       blobs,
@@ -321,25 +307,12 @@ export async function createLocalRuntime(
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),
     };
     if (config.developmentProxyCredential !== undefined) {
-      appDependenciesWithoutOAuth = {
-        ...appDependenciesWithoutOAuth,
+      appDependencies = {
+        ...appDependencies,
         developmentProxyCredential: Redacted.make(
           config.developmentProxyCredential,
           {label: "development-proxy"},
         ),
-      };
-    }
-    let appDependencies: HttpAppDependencies = appDependenciesWithoutOAuth;
-    if (config.apiOAuthResource !== undefined) {
-      appDependencies = {
-        ...appDependencies,
-        apiOAuthResource: config.apiOAuthResource,
-      };
-    }
-    if (config.mcpOAuthResource !== undefined) {
-      appDependencies = {
-        ...appDependencies,
-        mcpOAuthResource: config.mcpOAuthResource,
       };
     }
     const app = createHttpApp(config.runtimeLifecycle === undefined

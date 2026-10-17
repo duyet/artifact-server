@@ -35,15 +35,6 @@ secret:
     databaseUrl: database-url
     s3AccessKeyId: ""
     s3SecretAccessKey: ""
-    workosApiKey: ""
-    oidcClientSecret: ""
-
-identity:
-  workosClientId: ""
-  workosIssuer: ""
-  oidcClientId: ""
-  oidcIssuer: ""
-  oidcScopes: ""
 
 serviceAccount:
   create: true
