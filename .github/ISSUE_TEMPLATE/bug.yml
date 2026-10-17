@@ -23,7 +23,6 @@ body:
       options:
         - Local source checkout
         - Local release package
-        - Docker Compose
         - Kubernetes with Helm
         - Other
     validations:

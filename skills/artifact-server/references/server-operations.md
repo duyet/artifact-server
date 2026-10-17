@@ -7,11 +7,10 @@ restore do not require administrator instructions.
 ## Select the installation and deployment target
 
 Identify the exact installation before changing it. Determine whether it runs
-as a local package, Docker Compose, or Kubernetes. Inspect the matching repository guide instead of translating commands
+as a local package or Kubernetes. Inspect the matching repository guide instead of translating commands
 from another target:
 
 - local package: `docs/deployment.md`
-- Docker Compose: `packaging/compose/README.md`
 - Kubernetes: `packaging/helm/artifact-server/README.md`
 
 Use the target's native tool. Artifact Server does not provide one generic

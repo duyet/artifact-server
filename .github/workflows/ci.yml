@@ -286,12 +286,6 @@ jobs:
       # full-gate-command: pnpm perf:capacity
       - name: Record server capacity baseline
         run: pnpm perf:capacity
-      # full-gate-command: pnpm test:compact-compose
-      - name: Test compact Compose
-        run: pnpm test:compact-compose
-      # full-gate-command: pnpm test:external-storage-compose
-      - name: Test external-storage Compose
-        run: pnpm test:external-storage-compose
       # full-gate-command: pnpm verify:helm
       - name: Verify Helm release
         run: pnpm verify:helm

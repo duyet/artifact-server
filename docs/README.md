@@ -16,7 +16,6 @@ Use these guides to install, connect, operate, and extend Artifact Server.
 
 ## Deployment guides
 
-- [Compose](../packaging/compose/README.md)
 - [Kubernetes](../packaging/helm/artifact-server/README.md)
 
 ## Project records

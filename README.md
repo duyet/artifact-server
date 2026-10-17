@@ -98,8 +98,6 @@ Every remote deployment uses one trusted application origin and one isolated wil
 
 | Deployment | Data layer | Guide |
 | --- | --- | --- |
-| Compact Compose | SQLite and one file volume | [Compose guide](./packaging/compose/README.md) |
-| External-storage Compose | PostgreSQL and S3-compatible storage | [Compose guide](./packaging/compose/README.md) |
 | Kubernetes | PostgreSQL and object storage | [Helm guide](./packaging/helm/artifact-server/README.md) |
 
 Azure teams deploy through the Helm chart on AKS; there is no separate Azure installer. Azure Blob Storage is available as a preview adapter and has not passed live Azure qualification.
