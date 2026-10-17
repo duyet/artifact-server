@@ -38,7 +38,7 @@ That is a security boundary, not a second application.
 | `/review` | Browse, inspect, review, and share artifacts. | Admitted humans and authorized service principals. |
 | `/review/settings/projects` | List active and archived projects; create a project. | Admitted humans and principals with `project:manage`. |
 | `/review/settings/projects/:projectId` | Rename, archive or unarchive, and manage optional Git history for one project. | Admitted humans and principals with `project:manage`. |
-| `/review/settings/mcp` | Show the exact MCP address, local connection and diagnostic commands, agent-skill setup, and the per-browser WebMCP preference. | Admitted users. |
+| `/review/settings/mcp` | Show the exact MCP address, local connection and diagnostic commands, and agent-skill setup. | Admitted users. |
 | `/review/settings/members` | List, admit, and deactivate installation members. | Installation administrators. |
 | `/review/settings/api-keys` | Issue, rotate, and revoke scoped API keys. | Installation administrators. |
 | `/review/settings/public-links` | Inventory active public links and make selected links account-required. | Installation administrators. |

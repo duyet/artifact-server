@@ -8,7 +8,6 @@ import {McpScreen} from "./settings-mcp.tsx";
 import {MembersScreen} from "./settings-members.tsx";
 import {SettingsProject, SettingsProjects} from "./settings-projects.tsx";
 import {PublicLinksScreen} from "./settings-public-links.tsx";
-import {WebmcpScreen} from "./settings-webmcp.tsx";
 
 interface ReviewSettingsProps {
   readonly onProjectsChanged: () => Promise<readonly Project[]>;
@@ -42,9 +41,6 @@ export function ReviewSettings({
         ) : null}
         <SettingsLink active={route.kind === "mcp"} href="/review/settings/mcp">
           MCP
-        </SettingsLink>
-        <SettingsLink active={route.kind === "webmcp"} href="/review/settings/webmcp">
-          WebMCP
         </SettingsLink>
         {administrator ? (
           <>
@@ -117,7 +113,6 @@ function SettingsContent({
     );
   }
   if (route.kind === "mcp") return <McpScreen administrator={administrator} />;
-  if (route.kind === "webmcp") return <WebmcpScreen />;
   if (!administrator) return <AdministratorPermissionRequired />;
   switch (route.kind) {
     case "members":

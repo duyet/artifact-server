@@ -3058,44 +3058,6 @@ requirements:
         run: project/evidence/browser.json
         recorded_at: "2026-08-26T16:24:08.705Z"
 
-  - id: WMC-001
-    kind: behavior
-    behavior: When a model context is present the review application registers seven provenance-prefixed WebMCP tools; one get_view orients, and mutations through the tools update the server and the UI with each result carrying the post-mutation thread and counts. Without a model context the application behaves identically and logs nothing.
-    owner: web-application
-    source: {file: webmcp-review-tools-spec.md, anchor: out-of-the-box-tool-set-v1-seven-tools}
-    acceptance:
-      behavior: {id: WMC-001-B, description: "The seven tools register with provenance names; get_view orients; reply then resolve through the tools update the server and the UI, each result carrying the updated thread and post-mutation counts with no read-back."}
-      failure: {id: WMC-001-F, description: "Without a model context the application behaves identically and logs nothing, and the per-user toggle unregisters and re-registers the tools live."}
-    deployments: [local]
-    status: behavior_verified
-    proof_gap: document.modelContext is faked in the browser suite to the adapter's reading of the WebMCP draft (commit bd99438, August 2026); fidelity to the real browser API is untested until a WebMCP-capable browser drives it.
-    depends_on: [CMT-012]
-    evidence:
-      - deployment: local
-        tests: [WMC-001-B, WMC-001-F]
-        result: pass
-        run: project/evidence/browser.json
-        recorded_at: "2026-08-26T16:24:08.705Z"
-
-  - id: WMC-002
-    kind: behavior
-    behavior: WebMCP tools never widen authority. Every call is refused or allowed exactly as the same session's UI operation, tools never register on content frames, and descriptions stay bounded and quote no untrusted text.
-    owner: web-application
-    source: {file: webmcp-review-tools-spec.md, anchor: stances}
-    acceptance:
-      behavior: {id: WMC-002-B, description: "A missing thread and an archived project refuse a tool call with the identical failure code the same session receives through the UI path."}
-      failure: {id: WMC-002-F, description: "No non-main frame holds a registration, and every description is at or under 300 characters, carries provenance, and never contains seeded hostile text."}
-    deployments: [local]
-    status: behavior_verified
-    proof_gap: Descriptions are static literals, so the no-untrusted-text assertion guards future changes rather than a live path; resolve and reopen read before writing, so an archived-project refusal is proven at the read.
-    depends_on: [WMC-001]
-    evidence:
-      - deployment: local
-        tests: [WMC-002-B, WMC-002-F]
-        result: pass
-        run: project/evidence/browser.json
-        recorded_at: "2026-08-26T16:24:08.705Z"
-
   - id: PLN-001
     kind: behavior
     behavior: One Artifact Server installation connects to one Plannotator organization through browser approval in the first integration release.

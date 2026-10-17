@@ -1,6 +1,5 @@
 import {
   type MouseEvent as ReactMouseEvent,
-  type RefObject,
   useCallback,
   useEffect,
   useRef,
@@ -10,7 +9,7 @@ import {IconChevronLeft, IconChevronRight, IconRefresh} from "@tabler/icons-reac
 import {motion} from "motion/react";
 
 import {writeDraft} from "@/components/comments/comment-drafts";
-import type {Artifact, Project, Session} from "@/api/client";
+import type {Artifact, Session} from "@/api/client";
 import {
   DuplicateArtifactDialog,
   EditArtifactFileDialog,
@@ -41,7 +40,6 @@ import {reviewShortcutBlocked} from "../review-shortcuts.tsx";
 import type {NavigationMode} from "../use-review-navigation.ts";
 import {useReviewPanelMotion} from "../use-review-panel-motion.ts";
 import {useReviewResizablePanel} from "../use-review-resizable-panel.ts";
-import type {WebmcpBindings} from "../webmcp.tsx";
 import {ArtifactInspector} from "./artifact-inspector.tsx";
 import {FocusComments, FocusDock} from "./focus-mode.tsx";
 import {useArtifactViewer} from "./use-artifact-viewer.ts";
@@ -69,12 +67,10 @@ export function ArtifactViewer({
   onCatalogStale,
   path,
   permissions,
-  project,
   projectId,
   session,
   theme,
   versionId,
-  webmcpRef,
 }: {
   readonly artifactId: string;
   readonly focus: boolean;
@@ -86,12 +82,10 @@ export function ArtifactViewer({
   readonly onCatalogStale: () => void;
   readonly path: string | null;
   readonly permissions: ReviewPermissions;
-  readonly project: Project | null;
   readonly projectId: string;
   readonly session: Session;
   readonly theme: "dawn" | "moon";
   readonly versionId: string | null;
-  readonly webmcpRef: RefObject<WebmcpBindings>;
 }) {
   const {setOpen: setSidebarOpen} = useSidebar();
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("details");
@@ -159,29 +153,6 @@ export function ArtifactViewer({
       void loadActions(null);
     }
   }, [actions.length, activityLoading, inspectorTab, loadActions]);
-
-  webmcpRef.current = {
-    getSnapshot: () => ({
-      artifact: details === null ? null : {
-        currentVersionId: details.artifact.currentVersionId,
-        id: details.artifact.id,
-        name: details.artifact.name,
-      },
-      loading: viewer.loading || comments.loading || selectedVersion === null,
-      projectId,
-      projectName: project?.name ?? null,
-      replies: comments.repliesByThread,
-      threads: comments.threads,
-      version: selectedVersion === null ? null : {
-        createdAt: selectedVersion.version.createdAt,
-        id: selectedVersion.version.id,
-      },
-    }),
-    openArtifact: (nextArtifactId, nextVersionId) => {
-      go({artifactId: nextArtifactId, path: null, versionId: nextVersionId}, "push");
-    },
-    reloadComments: comments.reload,
-  };
 
   const navIndex = navItems.findIndex(({artifact}) => artifact.id === artifactId);
   const openNeighbor = useCallback((direction: -1 | 1): void => {

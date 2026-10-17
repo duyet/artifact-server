@@ -1,4 +1,4 @@
-import {Fragment, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {Fragment, useCallback, useEffect, useRef, useState} from "react";
 
 import type {Project, Session} from "@/api/client";
 import {AnalyticsPage} from "@/analytics/analytics-page";
@@ -24,7 +24,6 @@ import {AppSidebar} from "./shell/app-sidebar.tsx";
 import {HomeDialog} from "./shell/home-dialog.tsx";
 import {useReviewNavigation, useSameAppLinks, type NavigationMode} from "./use-review-navigation.ts";
 import {ArtifactViewer} from "./viewer/artifact-viewer.tsx";
-import {useWebmcp, type WebmcpBindings} from "./webmcp.tsx";
 
 const settingsTitles = {
   apiKeys: "API keys",
@@ -34,7 +33,6 @@ const settingsTitles = {
   project: "Project",
   projects: "Projects",
   publicLinks: "Public links",
-  webmcp: "WebMCP",
 } as const;
 
 /** The signed-in application: sidebar, routing, and every page. */
@@ -90,23 +88,6 @@ export function ReviewShell({
     go({artifactId, path: null, versionId, view: null}, "push");
   }, [go]);
 
-  const galleryBindings = useMemo((): WebmcpBindings => ({
-    getSnapshot: () => ({
-      artifact: null,
-      loading: false,
-      projectId,
-      projectName: project?.name ?? null,
-      replies: new Map(),
-      threads: [],
-      version: null,
-    }),
-    openArtifact,
-    reloadComments: () => Promise.resolve(),
-  }), [openArtifact, project?.name, projectId]);
-  const webmcpRef = useRef<WebmcpBindings>(galleryBindings);
-  if (route.kind !== "artifacts" || location.artifactId === null) webmcpRef.current = galleryBindings;
-  useWebmcp(webmcpRef);
-
   const selectProject = (nextProjectId: string): void => {
     if (route.kind === "settings") {
       navigate(withProject("/review", nextProjectId));
@@ -152,12 +133,10 @@ export function ReviewShell({
               onCatalogStale={() => void catalog.refresh()}
               path={location.path}
               permissions={permissions}
-              project={project}
               projectId={projectId}
               session={session}
               theme={theme}
               versionId={location.versionId}
-              webmcpRef={webmcpRef}
             />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
