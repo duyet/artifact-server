@@ -39,6 +39,11 @@ export interface ExternalIdentity {
   readonly subject: string;
 }
 
+/** The one identity a browser session acts as. */
+export type ApplicationSessionSubject =
+  | {readonly kind: "member"; readonly member: InstallationMember}
+  | {readonly kind: "api_key"; readonly apiKey: ManagedApiKey};
+
 /** One server-side browser session after its opaque credential is verified. */
 export interface ApplicationSession {
   readonly createdAt: string;
@@ -46,8 +51,8 @@ export interface ApplicationSession {
   readonly expiresAt: string;
   readonly id: string;
   readonly installationId: string;
-  readonly member: InstallationMember;
   readonly revokedAt: string | null;
+  readonly subject: ApplicationSessionSubject;
   readonly tokenDigest: string;
 }
 

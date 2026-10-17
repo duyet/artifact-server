@@ -32,7 +32,9 @@ export interface CreateApplicationSessionRecord {
   readonly expiresAt: string;
   readonly id: string;
   readonly installationId: string;
-  readonly memberId: string;
+  readonly subject:
+    | {readonly kind: "member"; readonly memberId: string}
+    | {readonly kind: "api_key"; readonly apiKeyId: string};
   readonly tokenDigest: string;
 }
 

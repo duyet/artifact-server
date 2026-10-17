@@ -61,6 +61,7 @@ import {
   sourceDriftDescription,
   sourceFreshnessLabel,
 } from "@/lib/presentation";
+import {ApiKeySignIn} from "./api-key-sign-in.tsx";
 import artifactServerAnimationUrl from "./assets/artifact-server.svg";
 import {ArtifactMark} from "./artifact-mark.tsx";
 import {
@@ -462,8 +463,9 @@ export function ReviewApp() {
   if (sessionState === "unauthenticated" && loginKind === "none") {
     return (
       <ReviewGate
-        description="This server has no browser sign-in. Open artifacts from the links you were given."
-        title="Browser sign-in is off"
+        action={<ApiKeySignIn onSignedIn={() => void bootstrap()} />}
+        description="Sign in with an Artifact Server API key to review artifacts in this browser."
+        title="Sign in with an API key"
       />
     );
   }

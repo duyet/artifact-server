@@ -309,6 +309,7 @@ export async function createLocalRuntime(
       artifactViews: artifactViewRecorder,
       blobs,
       browserAccess: config.browserAccess,
+      clock: runtimeClock,
       completedRequestLogSampleRate:
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,

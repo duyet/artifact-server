@@ -77,6 +77,14 @@ const sessionRowSchema = z.object({
   revokedAt: z.string().nullable(),
   tokenDigest: z.string(),
 });
+const apiKeySessionRowSchema = z.object({
+  sessionCreatedAt: z.string(),
+  sessionCsrfDigest: z.string(),
+  sessionExpiresAt: z.string(),
+  sessionId: z.string(),
+  sessionRevokedAt: z.string().nullable(),
+  sessionTokenDigest: z.string(),
+});
 const apiKeyRowSchema = z.object({
   authorizedByPrincipalId: z.string(),
   capabilitiesJson: z.string(),
@@ -299,16 +307,31 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     command: CreateApplicationSessionRecord,
   ): Promise<ApplicationSession> {
     this.#assertInstallationScope(command.installationId);
+    const subject = command.subject;
     await this.#database.run(Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
-      yield* sql`INSERT INTO application_sessions (
-        installation_id, id, member_id, token_digest, csrf_digest,
-        created_at, expires_at, revoked_at
-      ) VALUES (
-        ${command.installationId}, ${command.id}, ${command.memberId},
-        ${command.tokenDigest}, ${command.csrfDigest}, ${command.createdAt},
-        ${command.expiresAt}, NULL
-      )`;
+      switch (subject.kind) {
+        case "member":
+          yield* sql`INSERT INTO application_sessions (
+            installation_id, id, member_id, token_digest, csrf_digest,
+            created_at, expires_at, revoked_at
+          ) VALUES (
+            ${command.installationId}, ${command.id}, ${subject.memberId},
+            ${command.tokenDigest}, ${command.csrfDigest}, ${command.createdAt},
+            ${command.expiresAt}, NULL
+          )`;
+          return;
+        case "api_key":
+          yield* sql`INSERT INTO api_key_sessions (
+            installation_id, id, api_key_id, token_digest, csrf_digest,
+            created_at, expires_at, revoked_at
+          ) VALUES (
+            ${command.installationId}, ${command.id}, ${subject.apiKeyId},
+            ${command.tokenDigest}, ${command.csrfDigest}, ${command.createdAt},
+            ${command.expiresAt}, NULL
+          )`;
+          return;
+      }
     }));
     const session = await this.findApplicationSession(
       command.installationId,
@@ -348,26 +371,32 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
         [installationId, tokenDigest, requestTime, memberStatuses.active],
       );
       const parsed = sessionRowSchema.nullable().parse(rows[0] ?? null);
-      if (parsed === null) return null;
-      return {
+      if (parsed === null) {
+        return yield* findApiKeySession(installationId, tokenDigest, requestTime);
+      }
+      const session: ApplicationSession = {
         createdAt: parsed.createdAt,
         csrfDigest: parsed.csrfDigest,
         expiresAt: parsed.expiresAt,
         id: parsed.id,
         installationId: parsed.installationId,
-        member: {
-          createdAt: parsed.memberCreatedAt,
-          displayName: parsed.memberDisplayName,
-          email: parsed.memberEmail,
-          id: parsed.memberId,
-          installationId: parsed.installationId,
-          role: parsed.memberRole,
-          status: parsed.memberStatus,
-          updatedAt: parsed.memberUpdatedAt,
-        },
         revokedAt: parsed.revokedAt,
+        subject: {
+          kind: "member",
+          member: {
+            createdAt: parsed.memberCreatedAt,
+            displayName: parsed.memberDisplayName,
+            email: parsed.memberEmail,
+            id: parsed.memberId,
+            installationId: parsed.installationId,
+            role: parsed.memberRole,
+            status: parsed.memberStatus,
+            updatedAt: parsed.memberUpdatedAt,
+          },
+        },
         tokenDigest: parsed.tokenDigest,
       };
+      return session;
     }));
   }
 
@@ -380,6 +409,10 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     await this.#database.run(Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
       yield* sql`UPDATE application_sessions
+        SET revoked_at = COALESCE(revoked_at, ${revokedAt})
+        WHERE installation_id = ${installationId}
+          AND token_digest = ${tokenDigest}`;
+      yield* sql`UPDATE api_key_sessions
         SET revoked_at = COALESCE(revoked_at, ${revokedAt})
         WHERE installation_id = ${installationId}
           AND token_digest = ${tokenDigest}`;
@@ -466,6 +499,7 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
             message: "The API key does not exist.",
           });
         }
+        yield* revokeApiKeySessions(installationId, keyId, revokedAt);
         const key = yield* this.#findApiKey(installationId, keyId, false);
         if (key === null) throw new Error("The revoked API key disappeared.");
         return withoutSecretDigest(key);
@@ -501,6 +535,7 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
         }
         yield* sql`UPDATE managed_api_keys SET revoked_at = ${revokedAt}
           WHERE installation_id = ${installationId} AND id = ${previousKeyId}`;
+        yield* revokeApiKeySessions(installationId, previousKeyId, revokedAt);
         yield* this.#insertApiKey(replacement);
         return withoutSecretDigest(replacement);
       }));
@@ -624,6 +659,67 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     });
   }
 }
+
+const findApiKeySession = Effect.fnUntraced(function*(
+  installationId: string,
+  tokenDigest: string,
+  requestTime: string,
+) {
+  const sql = yield* SqlClient;
+  const rows = yield* sql.unsafe<object>(
+    `SELECT session.id AS "sessionId",
+      session.token_digest AS "sessionTokenDigest",
+      session.csrf_digest AS "sessionCsrfDigest",
+      session.created_at AS "sessionCreatedAt",
+      session.expires_at AS "sessionExpiresAt",
+      session.revoked_at AS "sessionRevokedAt",
+      api_key.id, api_key.installation_id AS "installationId",
+      api_key.name, api_key.prefix,
+      api_key.secret_digest AS "secretDigest",
+      api_key.principal_id AS "principalId",
+      api_key.principal_kind AS "principalKind",
+      api_key.capabilities_json AS "capabilitiesJson",
+      api_key.authorized_by_principal_id AS "authorizedByPrincipalId",
+      api_key.created_at AS "createdAt", api_key.expires_at AS "expiresAt",
+      api_key.revoked_at AS "revokedAt",
+      api_key.rotated_from_id AS "rotatedFromId"
+     FROM api_key_sessions AS session
+     JOIN managed_api_keys AS api_key
+       ON api_key.installation_id = session.installation_id
+      AND api_key.id = session.api_key_id
+     WHERE session.installation_id = $1 AND session.token_digest = $2
+       AND session.revoked_at IS NULL AND session.expires_at > $3
+       AND api_key.revoked_at IS NULL AND api_key.expires_at > $3`,
+    [installationId, tokenDigest, requestTime],
+  );
+  if (rows[0] === undefined) return null;
+  const session = apiKeySessionRowSchema.parse(rows[0]);
+  const found: ApplicationSession = {
+    createdAt: session.sessionCreatedAt,
+    csrfDigest: session.sessionCsrfDigest,
+    expiresAt: session.sessionExpiresAt,
+    id: session.sessionId,
+    installationId,
+    revokedAt: session.sessionRevokedAt,
+    subject: {
+      apiKey: withoutSecretDigest(parseApiKey(apiKeyRowSchema.parse(rows[0]))),
+      kind: "api_key",
+    },
+    tokenDigest: session.sessionTokenDigest,
+  };
+  return found;
+});
+
+const revokeApiKeySessions = Effect.fnUntraced(function*(
+  installationId: string,
+  keyId: string,
+  revokedAt: string,
+) {
+  const sql = yield* SqlClient;
+  yield* sql`UPDATE api_key_sessions
+    SET revoked_at = COALESCE(revoked_at, ${revokedAt})
+    WHERE installation_id = ${installationId} AND api_key_id = ${keyId}`;
+});
 
 function memberSelect(suffix: string): string {
   return `SELECT id, installation_id AS "installationId", email,

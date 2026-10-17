@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/server";
 import {Clock, Effect, Exit, Redacted, type Tracer} from "effect";
 import { type Context, Hono } from "hono";
+import {getConnInfo} from "@hono/node-server/conninfo";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {routePath} from "hono/route";
@@ -117,7 +118,7 @@ import {
   type VersionContent,
   type VersionRecord,
 } from "../core/model.js";
-import type { BlobStore } from "../core/ports.js";
+import type { BlobStore, Clock as WallClock } from "../core/ports.js";
 import {
   disabledGitHistoryCapability,
   fixedGitHistoryCapabilityReader,
@@ -159,6 +160,7 @@ import {
   type SameHostPathRequest,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
+import {FailedSignInLimiter} from "./failed-sign-in-limiter.js";
 import {attachmentContentDisposition} from "./content-disposition.js";
 import {
   PublicArtifactCatalogService,
@@ -177,6 +179,7 @@ import type {
 } from "../lifecycle/runtime-readiness.js";
 
 const maximumJsonRequestBytes = 1_500_000;
+const maximumSignInRequestBytes = 4_096;
 const accessSettingSchema = z.enum([
   accessSettings.accountRequired,
   accessSettings.publicLink,
@@ -460,6 +463,9 @@ const issueApiKeySchema = z.object({
   memberId: z.string().trim().min(1).max(200).optional(),
   name: z.string().trim().min(1).max(200),
 });
+const apiKeySignInSchema = z.object({
+  apiKey: z.string().min(1).max(1_024),
+}).strict();
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -507,6 +513,7 @@ export interface HttpAppDependencies {
   readonly blobs: BlobStore;
   /** Browser authentication policy fixed by the deployment entrypoint. */
   readonly browserAccess: BrowserAccess;
+  readonly clock: WallClock;
   readonly completedRequestLogSampleRate: number;
   readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
@@ -605,6 +612,20 @@ export function createHttpApp(
         413,
       ),
   });
+  const boundedSignInBody = bodyLimit({
+    maxSize: maximumSignInRequestBytes,
+    onError: (context) =>
+      context.json(
+        {
+          error: {
+            code: errorCodes.invalidInput,
+            message: "The sign-in request body exceeds its limit.",
+          },
+        },
+        413,
+      ),
+  });
+  const failedSignIns = new FailedSignInLimiter(dependencies.clock);
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -1042,6 +1063,43 @@ export function createHttpApp(
       dependencies,
       InstallationAccessService.use((access) => access.loginAsLocalOwner()),
     );
+    setApplicationSessionCookies(context, dependencies, issued);
+    context.header("Cache-Control", "private, no-store");
+    context.header("Referrer-Policy", "no-referrer");
+    return context.body(null, 204);
+  });
+
+  app.post("/auth/api-key", boundedSignInBody, async (context) => {
+    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
+      return context.notFound();
+    }
+    requireApplicationOrigin(context, dependencies);
+    const clientAddress = getConnInfo(context).remote.address ?? "unknown";
+    const retryAfterSeconds = failedSignIns.retryAfterSeconds(clientAddress);
+    if (retryAfterSeconds !== null) {
+      context.header("Retry-After", String(retryAfterSeconds));
+      context.header("Cache-Control", "private, no-store");
+      return context.json({
+        error: {
+          code: errorCodes.rateLimited,
+          message: "Too many failed sign-in attempts. Try again later.",
+        },
+      }, 429);
+    }
+    const body = apiKeySignInSchema.parse(await context.req.json());
+    const issued = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) =>
+        access.loginWithApiKey(
+          Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
+        )
+      ).pipe(
+        Effect.tapErrorTag("AuthenticationRequired", () =>
+          Effect.sync(() => failedSignIns.recordFailure(clientAddress))),
+      ),
+    );
+    failedSignIns.clear(clientAddress);
     setApplicationSessionCookies(context, dependencies, issued);
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
@@ -2800,19 +2858,7 @@ function requireBrowserMutationSecurity(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
 ): void {
-  const requestUrl = new URL(context.req.url);
-  const trustedOrigin = dependencies.trustedApplicationOrigin ?? requestUrl.origin;
-  const origin = context.req.header("origin");
-  const fetchSite = context.req.header("sec-fetch-site");
-  const fetchMode = context.req.header("sec-fetch-mode");
-  if (
-    origin !== trustedOrigin || fetchSite !== "same-origin" ||
-    (fetchMode !== "cors" && fetchMode !== "same-origin" && fetchMode !== "navigate")
-  ) {
-    throw new AuthorizationDenied({
-      message: "Browser mutations must come from the Artifact Server application origin.",
-    });
-  }
+  requireApplicationOrigin(context, dependencies);
 
   const names = applicationCookieNames(dependencies);
   const headerToken = csrfTokenSchema.safeParse(context.req.header("x-csrf-token"));
@@ -2825,6 +2871,25 @@ function requireBrowserMutationSecurity(
   ) {
     throw new AuthorizationDenied({
       message: "A valid browser CSRF token is required.",
+    });
+  }
+}
+
+function requireApplicationOrigin(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+): void {
+  const requestUrl = new URL(context.req.url);
+  const trustedOrigin = dependencies.trustedApplicationOrigin ?? requestUrl.origin;
+  const origin = context.req.header("origin");
+  const fetchSite = context.req.header("sec-fetch-site");
+  const fetchMode = context.req.header("sec-fetch-mode");
+  if (
+    origin !== trustedOrigin || fetchSite !== "same-origin" ||
+    (fetchMode !== "cors" && fetchMode !== "same-origin" && fetchMode !== "navigate")
+  ) {
+    throw new AuthorizationDenied({
+      message: "Browser mutations must come from the Artifact Server application origin.",
     });
   }
 }

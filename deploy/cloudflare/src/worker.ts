@@ -219,6 +219,7 @@ async function createCloudflareRuntime(
     artifactViews: artifactViewRecorder,
     blobs,
     browserAccess,
+    clock: applicationAdapters.clock,
     completedRequestLogSampleRate: requestLogSampleRate(environment),
     contentDomain: environment.ARTIFACT_SERVER_CONTENT_DOMAIN,
     gitHistory: gitHistory.capability,

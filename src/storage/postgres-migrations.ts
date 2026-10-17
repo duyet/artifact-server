@@ -687,6 +687,29 @@ const addArtifactViews = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+const addApiKeySessions = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `CREATE TABLE api_key_sessions (
+      installation_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      api_key_id TEXT NOT NULL,
+      token_digest TEXT NOT NULL,
+      csrf_digest TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      PRIMARY KEY (installation_id, id),
+      UNIQUE (installation_id, token_digest),
+      FOREIGN KEY (installation_id, api_key_id)
+        REFERENCES managed_api_keys(installation_id, id)
+    )`,
+    `CREATE INDEX api_key_sessions_key_idx
+      ON api_key_sessions (installation_id, api_key_id)`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -701,10 +724,11 @@ const migrationLoader = Migrator.fromRecord({
   "0011_artifact_search_name": addArtifactSearchName,
   "0012_artifact_path": addArtifactPath,
   "0013_artifact_views": addArtifactViews,
+  "0014_api_key_sessions": addApiKeySessions,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 13;
+export const requiredPostgresSchemaVersion = 14;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -798,6 +822,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 13,
     name: "artifact_views",
+  }, {
+    migration_id: 14,
+    name: "api_key_sessions",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

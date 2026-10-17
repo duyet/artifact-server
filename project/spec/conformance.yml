@@ -1710,6 +1710,62 @@ requirements:
     depends_on: [AUTH-001, AUTH-023, AUTH-025]
     evidence: []
 
+  - id: AUTH-029
+    kind: security
+    behavior: When the browser login kind is none, a person signs the browser in by presenting a managed API key in a same-origin POST body; the session acts as exactly that key's principal and sign-out revokes it.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
+    acceptance:
+      behavior: {id: AUTH-029-B, description: "Sign in with a valid key, read a session principal equal to the bearer principal of the same key, then sign out and observe the old cookie refused."}
+      failure: {id: AUTH-029-F, description: "A wrong or malformed key is 401, a cross-origin or opaque-origin request is 403, a key outside the body is refused, and a server with OIDC or local-owner login answers 404, all without Set-Cookie."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite only. The Postgres repository compiles but its tests need Docker, and no deployed run exists.
+    depends_on: [AUTH-009, FRK-004]
+    evidence: []
+
+  - id: AUTH-030
+    kind: security
+    behavior: An API-key browser session never outlives its key; it ends when the key is revoked, rotated, or expires, and its lifetime is capped at the key's expiry.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
+    acceptance:
+      behavior: {id: AUTH-030-B, description: "A stored key session resolves to its key metadata until the session expires or is revoked."}
+      failure: {id: AUTH-030-F, description: "Revoking the key through the administration API refuses its live browser session on the next request in the same process."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite only. Other replicas rely on the documented authentication-cache bound, and the Postgres path is unproved without Docker.
+    depends_on: [AUTH-009, AUTH-029]
+    evidence: []
+
+  - id: AUTH-031
+    kind: security
+    behavior: Failed API-key sign-ins are limited to five per client address in a sixty-second fixed window, checked before the key, with 429 RATE_LIMITED and Retry-After; a success clears the address.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
+    acceptance:
+      behavior: {id: AUTH-031-B, description: "After the window passes a valid key signs in, and a success resets the failure count."}
+      failure: {id: AUTH-031-F, description: "The sixth failure in the window is 429 with Retry-After, and a valid key is also refused until the window ends."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: The limiter is per process, so replicas each keep their own count. Behind an ingress every client shares one address.
+    depends_on: [AUTH-029]
+    evidence: []
+
+  - id: AUTH-032
+    kind: security
+    behavior: Artifact code served on the application origin cannot use an API-key browser session to read the principal or mutate state.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
+    acceptance:
+      behavior: {id: AUTH-032-B, description: "Artifact content served while a key session exists carries a CSP sandbox without allow-same-origin."}
+      failure: {id: AUTH-032-F, description: "A mutation carrying the key-session cookie from an opaque or cross-site origin is 403 and leaves the session live; in Chromium, artifact script cannot read a principal from /api/v1/session."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: The Chromium check lives in tests/browser/frk-002-same-host-sandbox.spec.ts and runs only in CI.
+    depends_on: [AUTH-029, FRK-002]
+    evidence: []
+
   - id: SEC-001
     kind: security
     behavior: Published websites are treated as untrusted arbitrary browser JavaScript.

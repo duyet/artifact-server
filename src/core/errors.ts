@@ -35,6 +35,7 @@ export const errorCodes = {
   sourceMissing: "SOURCE_MISSING",
   sourceUnreadable: "SOURCE_UNREADABLE",
   publishConflict: "PUBLISH_CONFLICT",
+  rateLimited: "RATE_LIMITED",
   projectArchived: "PROJECT_ARCHIVED",
   projectConflict: "PROJECT_CONFLICT",
   projectNotFound: "PROJECT_NOT_FOUND",
