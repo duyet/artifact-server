@@ -14,6 +14,8 @@ import {assertTeamLoginMatchesProvider} from "../core/browser-access.js";
 import {createRuntimeLifecycle} from "../lifecycle/runtime-readiness.js";
 import {withNodeResponseCompression} from
   "../http/node-response-compression.js";
+import type {ArtifactViewDrainReport} from
+  "../application/artifact-view-recorder.js";
 
 const serverAddressSchema = z.object({
   address: z.string().min(1),
@@ -32,6 +34,8 @@ export interface ExternalStorageServerConfig extends ExternalStorageRuntimeConfi
 export interface RunningExternalStorageServer {
   readonly hostname: string;
   readonly port: number;
+  /** Write buffered entry-document view counts to storage now. */
+  flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   close(): Promise<void>;
 }
 
@@ -77,5 +81,6 @@ export async function startExternalStorageServer(
     hostname: address.address,
     port: address.port,
     close,
+    flushArtifactViews: () => runtime.flushArtifactViews(),
   };
 }

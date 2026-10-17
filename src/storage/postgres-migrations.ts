@@ -668,6 +668,25 @@ const addArtifactPath = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+// One row is one artifact on one UTC day. Nothing here names a viewer: no
+// address, no session, no referrer, no user agent. Deletion is a tombstone, so
+// no cascade is needed and a deleted artifact's counters simply go unread.
+const addArtifactViews = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `CREATE TABLE artifact_views (
+      installation_id TEXT NOT NULL,
+      artifact_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      count INTEGER NOT NULL CHECK (count >= 0),
+      PRIMARY KEY (installation_id, artifact_id, day),
+      FOREIGN KEY (installation_id, artifact_id)
+        REFERENCES artifacts(installation_id, id)
+    )`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -681,10 +700,11 @@ const migrationLoader = Migrator.fromRecord({
   "0010_agent_capabilities": widenRegisteredAgentKind,
   "0011_artifact_search_name": addArtifactSearchName,
   "0012_artifact_path": addArtifactPath,
+  "0013_artifact_views": addArtifactViews,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 12;
+export const requiredPostgresSchemaVersion = 13;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -775,6 +795,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 12,
     name: "artifact_path",
+  }, {
+    migration_id: 13,
+    name: "artifact_views",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

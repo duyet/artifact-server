@@ -8,7 +8,7 @@ import {defaultGitHistoryMaximumCopiedFiles} from
   "../../../src/git-history/git-history-capability.js";
 
 /** D1 schema revision required by the Cloudflare runtime. */
-export const requiredD1SchemaVersion = 9;
+export const requiredD1SchemaVersion = 10;
 
 /** SQL literal list of every action kind the ledger accepts. */
 const actionKindList = [
@@ -78,6 +78,14 @@ const schemaSql = `
     artifact_id TEXT NOT NULL REFERENCES artifacts(id),
     tag TEXT NOT NULL,
     PRIMARY KEY (artifact_id, tag)
+  );
+
+  -- One row is one artifact on one UTC day. Nothing here names a viewer.
+  CREATE TABLE IF NOT EXISTS artifact_views (
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    day TEXT NOT NULL,
+    count INTEGER NOT NULL CHECK (count >= 0),
+    PRIMARY KEY (artifact_id, day)
   );
 
   CREATE TABLE IF NOT EXISTS idempotency_records (

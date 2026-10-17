@@ -46,6 +46,8 @@ import {
   type ArtifactState,
   type ArtifactTombstone,
   type ArtifactVersion,
+  type ArtifactViewDay,
+  type ArtifactViewTotal,
   type CommentAuthor,
   type CommentReplyCreation,
   type CommentReplyRecord,
@@ -62,6 +64,7 @@ import {
   defaultProjectName,
   type PublishedVersion,
   type ProjectRecord,
+  type PublicArtifactSummary,
   type RegisteredAgentPresence,
   type RegisteredAgentRecord,
   type StagedUpload,
@@ -72,6 +75,7 @@ import {
 import type {
   AgentDispatchRepository,
   ArtifactRepository,
+  ArtifactViewRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
@@ -100,7 +104,9 @@ import type {
   MarkDispatchFailed,
   PublicationSource,
   ProjectRepository,
+  ReadArtifactViewDays,
   RecordAgentActivity,
+  ArtifactViewDelta,
   RegisterAgent,
   RenameProject,
   RestoreArtifactVersion,
@@ -235,6 +241,22 @@ const artifactRowSchema = z.object({
   projectId: z.string(),
 });
 const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
+const artifactViewDayRowSchema = z.object({
+  artifactId: z.string(),
+  count: nonnegativeIntegerSchema,
+  day: z.string(),
+});
+const artifactViewTotalRowSchema = z.object({
+  artifactId: z.string(),
+  count: nonnegativeIntegerSchema,
+});
+const publicArtifactSummaryRowSchema = z.object({
+  accessSetting: accessSettingSchema,
+  currentVersionCreatedAt: z.string(),
+  id: z.string(),
+  name: z.string(),
+  path: z.string().nullable(),
+});
 const artifactListRowSchema = artifactRowSchema.extend({
   commentCount: z.coerce.number().int().nonnegative(),
   versionCount: z.coerce.number().int().positive(),
@@ -282,6 +304,7 @@ const versionContentRowSchema = z.object({
   artifactId: z.string(),
   contentToken: z.string(),
   disposition: dispositionSchema,
+  entryPath: z.string(),
   isCurrent: z.boolean(),
   mediaType: z.string(),
   path: z.string(),
@@ -524,6 +547,7 @@ interface ChangedCommentThreadValues {
 export class PostgresArtifactRepository implements
   AgentDispatchRepository,
   ArtifactRepository,
+  ArtifactViewRepository,
   CommentRepository,
   ContentSessionRepository,
   GitHistoryMirrorStore,
@@ -1588,6 +1612,92 @@ export class PostgresArtifactRepository implements
     }));
   }
 
+  async listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT artifacts.id, artifacts.name, artifacts.path,
+           artifacts.access_setting AS "accessSetting",
+           versions.created_at AS "currentVersionCreatedAt"
+         FROM artifacts
+         JOIN versions
+           ON versions.installation_id = artifacts.installation_id
+          AND versions.id = artifacts.current_version_id
+         WHERE artifacts.installation_id = $1
+           AND artifacts.deleted_at IS NULL
+           AND artifacts.access_setting = 'public_link'
+         ORDER BY artifacts.created_at DESC, artifacts.id DESC
+         LIMIT $2`,
+        [installationId, limit],
+      );
+      return z.array(publicArtifactSummaryRowSchema).parse(rows);
+    }));
+  }
+
+  async readArtifactViewDays(
+    command: ReadArtifactViewDays,
+  ): Promise<readonly ArtifactViewDay[]> {
+    if (command.artifactIds.length === 0) return [];
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT artifact_id AS "artifactId", day, count
+         FROM artifact_views
+         WHERE installation_id = $1 AND artifact_id = ANY($2::text[])
+           AND day >= $3 AND day <= $4
+         ORDER BY artifact_id, day`,
+        [
+          installationId,
+          command.artifactIds,
+          command.sinceDay,
+          command.untilDay,
+        ],
+      );
+      return z.array(artifactViewDayRowSchema).parse(rows);
+    }));
+  }
+
+  async readArtifactViewTotals(
+    artifactIds: readonly string[],
+  ): Promise<readonly ArtifactViewTotal[]> {
+    if (artifactIds.length === 0) return [];
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT artifact_id AS "artifactId", SUM(count)::bigint AS count
+         FROM artifact_views
+         WHERE installation_id = $1 AND artifact_id = ANY($2::text[])
+         GROUP BY artifact_id`,
+        [installationId, artifactIds],
+      );
+      return z.array(artifactViewTotalRowSchema).parse(rows);
+    }));
+  }
+
+  async recordArtifactViews(deltas: readonly ArtifactViewDelta[]): Promise<void> {
+    if (deltas.length === 0) return;
+    const installationId = this.#installationId;
+    await this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      // Two replicas may drain at the same moment. `DO UPDATE` locks the row,
+      // so both batches add instead of the second overwriting the first.
+      yield* sql.withTransaction(Effect.gen(function*() {
+        for (const delta of deltas) {
+          yield* sql.unsafe(
+            `INSERT INTO artifact_views (installation_id, artifact_id, day, count)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (installation_id, artifact_id, day)
+             DO UPDATE SET count = artifact_views.count + excluded.count`,
+            [installationId, delta.artifactId, delta.day, delta.count],
+          );
+        }
+      }));
+    }));
+  }
+
   async findVersionRecord(
     projectId: string,
     artifactId: string,
@@ -1944,6 +2054,7 @@ export class PostgresArtifactRepository implements
         `SELECT a.access_setting AS "accessSetting", a.id AS "artifactId",
           a.project_id AS "projectId",
           v.content_token AS "contentToken", v.id AS "versionId",
+          v.entry_path AS "entryPath",
           e.path, e.size, e.media_type AS "mediaType", e.sha256,
           e.disposition, v.id = a.current_version_id AS "isCurrent"
          FROM versions v
@@ -1978,6 +2089,7 @@ export class PostgresArtifactRepository implements
           sha256: parsed.sha256,
           size: parsed.size,
         },
+        entryPath: parsed.entryPath,
         isCurrent: parsed.isCurrent,
         projectId: parsed.projectId,
         versionId: parsed.versionId,

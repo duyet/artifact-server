@@ -3,6 +3,11 @@ import {Effect, Layer, ManagedRuntime, Redacted} from "effect";
 import type {ApplicationRuntime} from "../../../src/application/application-runtime.js";
 import {ExpiredStagingCleanupService} from
   "../../../src/application/expired-staging-cleanup.js";
+import {
+  type ArtifactViewDrainReport,
+  createArtifactViewRecorder,
+  defaultArtifactViewDrainChunkSize,
+} from "../../../src/application/artifact-view-recorder.js";
 import {SystemClock, SystemIdGenerator} from "../../../src/core/system.js";
 import {
   browserLoginKinds,
@@ -77,6 +82,8 @@ interface CloudflareRuntime {
   readonly qualificationMode: boolean;
   cleanupStaging(): Promise<void>;
   drainGitHistory(): Promise<void>;
+  /** Write buffered entry-document view counts to D1. */
+  flushArtifactViews(): Promise<ArtifactViewDrainReport>;
 }
 
 interface WorkerErrorResponse {
@@ -104,7 +111,11 @@ export default {
       if (!["GET", "HEAD", "OPTIONS"].includes(prepared.method)) {
         context.waitUntil(runtime.drainGitHistory());
       }
-      return runtime.app.fetch(prepared, environment, context);
+      const response = await runtime.app.fetch(prepared, environment, context);
+      // A worker has no interval to drain on, so the buffer is written once
+      // the response is already built. `waitUntil` keeps it off the response.
+      context.waitUntil(runtime.flushArtifactViews());
+      return response;
     } catch (cause) {
       runtimePromise = null;
       console.error(JSON.stringify({
@@ -198,8 +209,14 @@ async function createCloudflareRuntime(
   );
   await applicationRuntime.context();
   const origin = new URL(environment.ARTIFACT_SERVER_ORIGIN);
+  const artifactViewRecorder = createArtifactViewRecorder({
+    chunkSize: defaultArtifactViewDrainChunkSize,
+    clock: new SystemClock(),
+    repository,
+  });
   const appDependencies = {
     applicationRuntime,
+    artifactViews: artifactViewRecorder,
     blobs,
     browserAccess,
     completedRequestLogSampleRate: requestLogSampleRate(environment),
@@ -235,6 +252,7 @@ async function createCloudflareRuntime(
       }
     },
     drainGitHistory: gitHistory.drain,
+    flushArtifactViews: () => artifactViewRecorder.flush(),
     contentDomain: environment.ARTIFACT_SERVER_CONTENT_DOMAIN,
     qualificationMode:
       environment.ARTIFACT_SERVER_QUALIFICATION_MODE === "enabled",

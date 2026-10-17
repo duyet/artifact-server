@@ -495,6 +495,10 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       await database.run(Effect.gen(function*() {
         const sql = yield* SqlClient;
         const statements = [
+          // Every table a later migration created is dropped, so the rewind
+          // really is the v1 schema and each migration finds its own work
+          // undone rather than a relation it already made.
+          "DROP TABLE artifact_views",
           `ALTER TABLE actions
             DROP CONSTRAINT actions_action_check,
             ADD CONSTRAINT actions_action_check

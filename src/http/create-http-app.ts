@@ -160,6 +160,12 @@ import {
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {attachmentContentDisposition} from "./content-disposition.js";
+import {
+  PublicArtifactCatalogService,
+  publicCatalogLimit,
+} from "../application/public-artifact-catalog.js";
+import type {ArtifactViewRecorder} from
+  "../application/artifact-view-recorder.js";
 import {observeHttpRequest} from "../observability/application-observability.js";
 import {
   createVersionArchive,
@@ -376,6 +382,12 @@ const versionFileQuerySchema = z.object({
 const deleteArtifactSchema = z.object({
   expectedCurrentVersionId: z.string().min(1).max(200),
 });
+/**
+ * The one API prefix that answers without a credential. It exists so a viewer
+ * on the VPN can read the public catalog; adding to it is a naming decision,
+ * not another edit to the authentication middleware.
+ */
+const anonymousApiPrefix = "/api/v1/public/";
 const pageQuerySchema = z.object({
   cursor: z.string().max(1_024).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -487,6 +499,11 @@ interface HttpEnvironment {
 export interface HttpAppDependencies {
   readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationRuntime: ApplicationRuntime;
+  /**
+   * Buffered entry-document counter. Absent, no view is ever recorded, which
+   * is the correct behaviour for a deployment that wired no drain.
+   */
+  readonly artifactViews?: ArtifactViewRecorder;
   readonly blobs: BlobStore;
   /** Browser authentication policy fixed by the deployment entrypoint. */
   readonly browserAccess: BrowserAccess;
@@ -836,10 +853,13 @@ export function createHttpApp(
     return context.redirect(`/review${requestUrl.search}`, 308);
   });
 
-  app.on(["GET", "HEAD"], "/", (context) => {
-    const requestUrl = new URL(context.req.url);
-    return context.redirect(`/review${requestUrl.search}`, 308);
-  });
+  app.on(["GET", "HEAD"], "/", (context) =>
+    serveWebAsset(
+      context,
+      dependencies,
+      "/index.html",
+      "application-shell",
+    ));
   app.on(["GET", "HEAD"], "/projects", (context) =>
     redirectWithRequestQuery(context, "/review/settings/projects"));
   app.on(["GET", "HEAD"], "/administration/members", (context) =>
@@ -871,6 +891,10 @@ export function createHttpApp(
   );
 
   app.use("/api/*", async (context, next) => {
+    // The public prefix carries only reads of artifacts every viewer may
+    // already open, so it asks for no credential. Everything an operator can
+    // reach stays behind the bearer or session check below.
+    if (context.req.path.startsWith(anonymousApiPrefix)) return next();
     const authorization = context.req.header("authorization");
     if (authorization !== undefined) {
       const parsed = bearerSchema.safeParse(authorization);
@@ -953,6 +977,39 @@ export function createHttpApp(
       {...report, lifecycle},
       report.status === "ready" ? 200 : 503,
     );
+  });
+
+  // Public artifacts and their view counts, for a viewer who holds no
+  // credential. The browser groups the flat list into folders; see
+  // docs/fork/HOMEPAGE.md.
+  app.get("/api/v1/public/tree", async (context) => {
+    // Counts move between reads, so the browser must revalidate rather than
+    // reuse a cached copy. The response carries no viewer-specific fact.
+    context.header("Cache-Control", "no-cache");
+    const catalog = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      PublicArtifactCatalogService.use((catalogService) =>
+        catalogService.listCatalog({limit: publicCatalogLimit})),
+    );
+    const requestUrl = new URL(context.req.url);
+    return context.json({
+      ...catalog,
+      artifacts: catalog.artifacts.map((item) => ({
+        access: item.artifact.accessSetting,
+        name: item.artifact.name,
+        path: item.artifact.path,
+        series: item.series.map((day) => ({count: day.count, day: day.day})),
+        updatedAt: item.artifact.currentVersionCreatedAt,
+        url: artifactBrowserUrl(
+          requestUrl,
+          dependencies.contentDomain,
+          item.artifact,
+        ),
+        views: item.views,
+      })),
+      loginKind: dependencies.browserAccess.loginKind,
+    });
   });
 
   app.get("/auth/context", (context) => {
@@ -3561,6 +3618,16 @@ async function serveVersionContent(
   );
   if (content === null) {
     return versionNotFoundResponse();
+  }
+  if (
+    dependencies.artifactViews !== undefined &&
+    context.req.method === "GET" &&
+    (requestedPath === "" || requestedPath === content.entryPath)
+  ) {
+    // A `Map` increment behind a buffer: the content response never waits for
+    // a counter to reach storage. An asset, a HEAD probe, and a 404 all miss
+    // this branch, because none of them carries the entry document.
+    dependencies.artifactViews.record(content.artifactId);
   }
   const publiclyCacheable = content.accessSetting === accessSettings.publicLink &&
     content.isCurrent;

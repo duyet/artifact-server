@@ -79,6 +79,7 @@ import {
 import type {
   AgentDispatchRepository,
   ArtifactRepository,
+  ArtifactViewRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
@@ -287,6 +288,22 @@ const artifactListRowSchema = artifactRowSchema.extend({
   versionCount: z.coerce.number().int().positive(),
 });
 const tagRowSchema = z.object({artifactId: z.string(), tag: z.string()});
+const artifactViewDayRowSchema = z.object({
+  artifactId: z.string(),
+  count: z.coerce.number().int().nonnegative(),
+  day: z.string(),
+});
+const artifactViewTotalRowSchema = z.object({
+  artifactId: z.string(),
+  count: z.coerce.number().int().nonnegative(),
+});
+const publicArtifactSummaryRowSchema = z.object({
+  accessSetting: accessSettingSchema,
+  currentVersionCreatedAt: z.string(),
+  id: z.string(),
+  name: z.string(),
+  path: z.null(),
+});
 const versionRowSchema = z.object({
   artifactId: z.string(),
   contentToken: z.string(),
@@ -501,6 +518,7 @@ const versionContentRowSchema = z.object({
   artifactId: z.string(),
   contentToken: z.string(),
   disposition: dispositionSchema,
+  entryPath: z.string(),
   isCurrent: z.union([z.literal(0), z.literal(1)]).transform((value) => value === 1),
   mediaType: z.string(),
   path: z.string(),
@@ -595,9 +613,9 @@ interface PageResult<Item> {
 }
 
 export type D1ArtifactRepository = AgentDispatchRepository & ArtifactRepository &
-  CommentRepository & ContentSessionRepository & ProjectRepository &
-  ProjectGitHistoryStore & GitHistoryMirrorStore & GitHistoryPurgeStore &
-  StagedUploadRepository & {
+  ArtifactViewRepository & CommentRepository & ContentSessionRepository &
+  ProjectRepository & ProjectGitHistoryStore & GitHistoryMirrorStore &
+  GitHistoryPurgeStore & StagedUploadRepository & {
     readonly listPublicLinks: (
       command: ListPublicLinks,
     ) => Promise<PublicLinkInventoryPage>;
@@ -2333,6 +2351,47 @@ export function createD1ArtifactRepository(
     findArtifactForAdministration: (projectId, artifactId) =>
       readArtifactOrNull(projectId, artifactId, true),
     findArtifactByPath: () => Promise.resolve(null),
+    listPublicArtifacts: async (limit) => {
+      const result = await database.prepare(`
+        SELECT artifacts.id, artifacts.name, artifacts.path,
+          artifacts.access_setting AS accessSetting,
+          versions.created_at AS currentVersionCreatedAt
+        FROM artifacts
+        JOIN versions ON versions.id = artifacts.current_version_id
+        WHERE artifacts.deleted_at IS NULL AND artifacts.access_setting = 'public_link'
+        ORDER BY artifacts.created_at DESC, artifacts.id DESC
+        LIMIT ?
+      `).bind(limit).all<z.input<typeof publicArtifactSummaryRowSchema>>();
+      return z.array(publicArtifactSummaryRowSchema).parse(result.results);
+    },
+    readArtifactViewDays: async ({artifactIds, sinceDay, untilDay}) => {
+      if (artifactIds.length === 0) return [];
+      const result = await database.prepare(`
+        SELECT artifact_id AS artifactId, day, count FROM artifact_views
+        WHERE artifact_id IN (SELECT value FROM json_each(?)) AND day >= ? AND day <= ?
+        ORDER BY artifact_id, day
+      `).bind(JSON.stringify(artifactIds), sinceDay, untilDay)
+        .all<z.input<typeof artifactViewDayRowSchema>>();
+      return z.array(artifactViewDayRowSchema).parse(result.results);
+    },
+    readArtifactViewTotals: async (artifactIds) => {
+      if (artifactIds.length === 0) return [];
+      const result = await database.prepare(`
+        SELECT artifact_id AS artifactId, SUM(count) AS count FROM artifact_views
+        WHERE artifact_id IN (SELECT value FROM json_each(?))
+        GROUP BY artifact_id
+      `).bind(JSON.stringify(artifactIds))
+        .all<z.input<typeof artifactViewTotalRowSchema>>();
+      return z.array(artifactViewTotalRowSchema).parse(result.results);
+    },
+    recordArtifactViews: async (deltas) => {
+      if (deltas.length === 0) return;
+      // D1 offers a batch as its only multi-statement transaction.
+      await database.batch(deltas.map((delta) => database.prepare(`
+        INSERT INTO artifact_views (artifact_id, day, count) VALUES (?, ?, ?)
+        ON CONFLICT(artifact_id, day) DO UPDATE SET count = count + excluded.count
+      `).bind(delta.artifactId, delta.day, delta.count)));
+    },
     findCurrentVersion: async (projectId, artifactId) => {
       const row = await database.prepare(`
         SELECT project_id AS projectId, current_version_id AS currentVersionId
@@ -2591,7 +2650,8 @@ export function createD1ArtifactRepository(
       const row = await database.prepare(`
         SELECT a.access_setting AS accessSetting, a.id AS artifactId,
           a.project_id AS projectId, v.content_token AS contentToken,
-          v.id AS versionId, e.path, e.size, e.media_type AS mediaType,
+          v.id AS versionId, v.entry_path AS entryPath,
+          e.path, e.size, e.media_type AS mediaType,
           e.sha256, e.disposition,
           CASE WHEN v.id = a.current_version_id THEN 1 ELSE 0 END AS isCurrent
         FROM versions v JOIN artifacts a ON a.id = v.artifact_id
@@ -2630,6 +2690,7 @@ export function createD1ArtifactRepository(
         artifactId: parsed.artifactId,
         contentToken: parsed.contentToken,
         entry,
+        entryPath: parsed.entryPath,
         isCurrent: parsed.isCurrent,
         projectId: parsed.projectId,
         versionId: parsed.versionId,

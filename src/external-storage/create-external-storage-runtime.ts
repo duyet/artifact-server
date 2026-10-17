@@ -63,12 +63,24 @@ import {
 } from "../git-history/git-history-mirror.js";
 import {CloudflareArtifactsGitHistoryProvider} from
   "../git-history/cloudflare-artifacts-git-history-provider.js";
+import {
+  type ArtifactViewDrainReport,
+  createArtifactViewRecorder,
+  defaultArtifactViewDrainChunkSize,
+} from "../application/artifact-view-recorder.js";
+import {
+  type ArtifactViewCollectionPolicy,
+  defaultArtifactViewCollectionPolicy,
+  startArtifactViewCollection,
+} from "../lifecycle/artifact-view-collection.js";
 
 /** Configuration for one stateless Artifact Server process. */
 export interface ExternalStorageRuntimeConfig {
   readonly apiToken: Redacted.Redacted;
   readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationOrigin?: string;
+  /** Drain cadence for entry-document view counts; tests use a fast value. */
+  readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
   readonly bootstrapAdministratorEmail: string;
   readonly browserAccess: Extract<BrowserAccess, {readonly mode: "private_team"}>;
   readonly clock?: Clock;
@@ -98,6 +110,8 @@ export interface ExternalStorageRuntimeConfig {
 export interface ExternalStorageRuntime {
   readonly app: ReturnType<typeof createHttpApp>;
   cleanupStaging(limit: number): Promise<ExpiredStagingCleanupReport>;
+  /** Write buffered view counts now instead of waiting for the next drain. */
+  flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   close(): Promise<void>;
 }
 
@@ -223,8 +237,14 @@ export async function createExternalStorageRuntime(
         store: repository,
       });
     }
+    const artifactViewRecorder = createArtifactViewRecorder({
+      chunkSize: defaultArtifactViewDrainChunkSize,
+      clock: runtimeClock,
+      repository,
+    });
     const appDependenciesWithoutOAuth = {
       applicationRuntime: readyRuntime,
+      artifactViews: artifactViewRecorder,
       blobs,
       browserAccess: config.browserAccess,
       completedRequestLogSampleRate:
@@ -253,13 +273,23 @@ export async function createExternalStorageRuntime(
     const closeCleanupSchedule = stagingCleanupPolicy.schedule === "background"
       ? startStagingCleanupSchedule(readyRuntime, stagingCleanupPolicy)
       : null;
+    const closeArtifactViewCollection = startArtifactViewCollection(
+      readyRuntime,
+      artifactViewRecorder,
+      config.artifactViewCollectionPolicy ??
+        defaultArtifactViewCollectionPolicy,
+    );
     return {
       app: createHttpApp(config.runtimeLifecycle === undefined
         ? appDependencies
         : {...appDependencies, runtimeLifecycle: config.runtimeLifecycle}),
       cleanupStaging: (limit) => runStagingCleanupPass(readyRuntime, limit),
+      flushArtifactViews: () => artifactViewRecorder.flush(),
       close: async () => {
         if (closeCleanupSchedule !== null) await closeCleanupSchedule();
+        // Drains what is buffered before the database closes, so a clean
+        // shutdown loses no counted view.
+        await closeArtifactViewCollection();
         if (gitHistoryWorker !== null) await gitHistoryWorker.close();
         if (gitHistoryMonitor !== null) await gitHistoryMonitor.close();
         await readyRuntime.dispose();

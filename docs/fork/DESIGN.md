@@ -497,6 +497,10 @@ From this commit on, the fork owns migration numbers. Upstream's next migrations
 3. A path sent to a host-mode server is refused, not stored.
 4. An artifact that has a path still answers at its folder URL, with no redirect.
 
+## 12. Home page tree and view analytics
+
+`docs/fork/HOMEPAGE.md` is the design for the home page at `/`: public artifacts as a folder tree built from the readable paths of section 11, plus per-artifact view counts from one three-column table. It follows issue 5 and depends on FRK-006 and FRK-007.
+
 ## Decisions
 
 All seven open decisions from revision 1 are settled:

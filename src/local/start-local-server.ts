@@ -10,6 +10,8 @@ import {createGracefulHttpShutdown} from
 import {withNodeResponseCompression} from
   "../http/node-response-compression.js";
 import {createRuntimeLifecycle} from "../lifecycle/runtime-readiness.js";
+import type {ArtifactViewDrainReport} from
+  "../application/artifact-view-recorder.js";
 import {
   assertTeamLoginMatchesProvider,
   browserAccessModes,
@@ -31,6 +33,8 @@ export interface LocalServerConfig extends LocalRuntimeConfig {
 export interface RunningLocalServer {
   readonly hostname: string;
   readonly port: number;
+  /** Write buffered entry-document view counts to storage now. */
+  flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   /** Withdraw readiness and gracefully drain accepted HTTP work. */
   close(): Promise<void>;
 }
@@ -94,5 +98,6 @@ export async function startLocalServer(
     hostname: address.address,
     port: address.port,
     close,
+    flushArtifactViews: () => runtime.flushArtifactViews(),
   };
 }

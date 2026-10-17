@@ -77,11 +77,23 @@ import {
 } from "../git-history/git-history-mirror.js";
 import {CloudflareArtifactsGitHistoryProvider} from
   "../git-history/cloudflare-artifacts-git-history-provider.js";
+import {
+  type ArtifactViewDrainReport,
+  createArtifactViewRecorder,
+  defaultArtifactViewDrainChunkSize,
+} from "../application/artifact-view-recorder.js";
+import {
+  type ArtifactViewCollectionPolicy,
+  defaultArtifactViewCollectionPolicy,
+  startArtifactViewCollection,
+} from "../lifecycle/artifact-view-collection.js";
 
 export interface LocalRuntimeConfig {
   readonly apiToken: string;
   readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationOrigin?: string;
+  /** Drain cadence for entry-document view counts; tests use a fast value. */
+  readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
   readonly bootstrapAdministratorEmail?: string;
   readonly browserAccess: BrowserAccess;
   readonly clock?: Clock;
@@ -116,6 +128,8 @@ export interface LocalRuntimeConfig {
 
 export interface LocalRuntime {
   readonly app: ReturnType<typeof createHttpApp>;
+  /** Write buffered view counts now instead of waiting for the next drain. */
+  flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   cleanupStaging(limit: number): Promise<ExpiredStagingCleanupReport>;
   close(): Promise<void>;
 }
@@ -137,6 +151,11 @@ export async function createLocalRuntime(
   );
   const repository = new SqliteArtifactRepository(databasePath, installationId);
   const identityRepository = new SqliteIdentityRepository(databasePath);
+  const artifactViewRecorder = createArtifactViewRecorder({
+    chunkSize: defaultArtifactViewDrainChunkSize,
+    clock: runtimeClock,
+    repository,
+  });
   const configuredGitHistory = configuredNodeGitHistory(gitHistory);
   const gitHistoryProvider = configuredGitHistory === null
     ? null
@@ -287,6 +306,7 @@ export async function createLocalRuntime(
     }
     let appDependenciesWithoutOAuth: HttpAppDependencies = {
       applicationRuntime,
+      artifactViews: artifactViewRecorder,
       blobs,
       browserAccess: config.browserAccess,
       completedRequestLogSampleRate:
@@ -328,11 +348,21 @@ export async function createLocalRuntime(
     const closeCleanupSchedule = stagingCleanupPolicy.schedule === "background"
       ? startStagingCleanupSchedule(applicationRuntime, stagingCleanupPolicy)
       : null;
+    const closeArtifactViewCollection = startArtifactViewCollection(
+      applicationRuntime,
+      artifactViewRecorder,
+      config.artifactViewCollectionPolicy ??
+        defaultArtifactViewCollectionPolicy,
+    );
     return {
       app,
       cleanupStaging: (limit) => runStagingCleanupPass(applicationRuntime, limit),
+      flushArtifactViews: () => artifactViewRecorder.flush(),
       close: async () => {
         if (closeCleanupSchedule !== null) await closeCleanupSchedule();
+        // Drains what is buffered before the repository closes, so a clean
+        // shutdown loses no counted view.
+        await closeArtifactViewCollection();
         if (gitHistoryWorker !== null) await gitHistoryWorker.close();
         if (gitHistoryMonitor !== null) await gitHistoryMonitor.close();
         await applicationRuntime.dispose();

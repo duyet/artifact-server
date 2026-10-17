@@ -11,6 +11,8 @@ import type {
   ArtifactState,
   ArtifactVersion,
   ArtifactRecord,
+  ArtifactViewDay,
+  ArtifactViewTotal,
   CanonicalManifest,
   CommentAuthor,
   DispatchedThreadFilter,
@@ -30,6 +32,7 @@ import type {
   PageCursor,
   PublishedVersion,
   ProjectRecord,
+  PublicArtifactSummary,
   RegisteredAgentKind,
   RegisteredAgentPresence,
   RegisteredAgentRecord,
@@ -670,7 +673,53 @@ export interface ArtifactRepository {
     projectId: string,
     artifactId: string,
   ): Promise<readonly VersionRecord[]>;
+  /**
+   * Read the newest live public artifacts across every project, with the facts
+   * a public catalog shows. Callers shape the links, so this never returns a
+   * URL that a credential could change.
+   */
+  listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]>;
   restoreVersion(command: RestoreArtifactVersion): Promise<ArtifactState>;
+}
+
+/** One coalesced group of view counts for one artifact on one UTC day. */
+export interface ArtifactViewDelta {
+  readonly artifactId: string;
+  /** The UTC calendar day the views were served on, as `YYYY-MM-DD`. */
+  readonly day: string;
+  readonly count: number;
+}
+
+/** Values used to read the stored daily rows inside one day window. */
+export interface ReadArtifactViewDays {
+  readonly artifactIds: readonly string[];
+  /** Inclusive first day of the window, as `YYYY-MM-DD`. */
+  readonly sinceDay: string;
+  /** Inclusive last day of the window, as `YYYY-MM-DD`. */
+  readonly untilDay: string;
+}
+
+/**
+ * Durable per-artifact view counters. One row is one artifact on one UTC day,
+ * and the table holds no other fact about a viewer: no address, no session, no
+ * referrer, no user agent.
+ */
+export interface ArtifactViewRepository {
+  /** Read each requested artifact's all-time total. */
+  readArtifactViewTotals(
+    artifactIds: readonly string[],
+  ): Promise<readonly ArtifactViewTotal[]>;
+  /** Read the daily rows inside one inclusive day window. */
+  readArtifactViewDays(
+    command: ReadArtifactViewDays,
+  ): Promise<readonly ArtifactViewDay[]>;
+  /**
+   * Add each coalesced delta to its artifact's row for that day. Two calls with
+   * equal deltas add twice, because they are two batches of served views.
+   */
+  recordArtifactViews(
+    deltas: readonly ArtifactViewDelta[],
+  ): Promise<void>;
 }
 
 /** Persistent capabilities required by private browser content sessions. */
