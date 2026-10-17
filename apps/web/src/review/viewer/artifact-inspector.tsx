@@ -102,6 +102,7 @@ export function ArtifactInspector({
             onTagsChange={viewer.changeTags}
             onTombstone={onTombstone}
             version={selectedVersion}
+            viewerPrincipalId={session.principal.id}
           />
         ) : tab === "comments" ? (
           <ReviewCommentsInspector

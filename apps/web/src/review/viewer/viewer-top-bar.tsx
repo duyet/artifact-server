@@ -33,7 +33,8 @@ import {Separator} from "@/components/ui/separator";
 import {SidebarTrigger} from "@/components/ui/sidebar";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import type {VersionListItem} from "../inspectors/versions-inspector.tsx";
-import {OwnerAvatar, principalLabel} from "../owner-avatar.tsx";
+import {OwnerAvatar} from "../owner-avatar.tsx";
+import {principalLabel} from "../principal-name.ts";
 import {ReviewDownloadControl, type ReviewDownload} from "../review-download.tsx";
 import {IconButton} from "../review-primitives.tsx";
 

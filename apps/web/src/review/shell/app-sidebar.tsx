@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/sidebar";
 import {ArtifactMark} from "../artifact-mark.tsx";
 import type {ArtifactCatalog} from "../catalog/use-artifact-catalog.ts";
-import {principalInitials} from "../owner-avatar.tsx";
+import {principalInitials} from "../principal-name.ts";
 import {ReviewProjectPicker} from "../review-project-picker.tsx";
 import {analyticsPath, artifactsPath, settingsPath, withProject, type ReviewRoute} from "../review-routes.ts";
 import {ArtifactTree} from "./artifact-tree.tsx";

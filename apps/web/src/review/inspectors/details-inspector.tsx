@@ -17,6 +17,7 @@ import {Input} from "@/components/ui/input";
 import {Spinner} from "@/components/ui/spinner";
 import {formatTimestamp, sourceDriftDescription, sourceFreshnessLabel} from "@/lib/presentation";
 import {AccessBadge} from "../access-badge.tsx";
+import {principalLabel} from "../principal-name.ts";
 import {InspectorRow, InspectorSection, InspectorStack} from "./inspector-layout.tsx";
 import {parseTagList} from "./inspector-model.ts";
 
@@ -29,6 +30,7 @@ export function DetailsInspector({
   onTagsChange,
   onTombstone,
   version,
+  viewerPrincipalId,
 }: {
   readonly canManage: boolean;
   readonly details: ArtifactDetails;
@@ -38,6 +40,7 @@ export function DetailsInspector({
   readonly onTagsChange: (tags: readonly string[]) => Promise<void>;
   readonly onTombstone: () => Promise<boolean>;
   readonly version: ArtifactVersion;
+  readonly viewerPrincipalId: string;
 }) {
   const linkedDriftDescription = details.sourceBinding === undefined
     ? null
@@ -49,7 +52,7 @@ export function DetailsInspector({
         <InspectorRow
           label="owner"
           title={details.artifact.owner.principalId}
-          value={details.artifact.owner.displayName ?? details.artifact.owner.principalId}
+          value={principalLabel(details.artifact.owner, viewerPrincipalId)}
         />
         <InspectorRow
           label="access"
@@ -64,7 +67,10 @@ export function DetailsInspector({
         <InspectorRow
           label="publisher"
           title={version.version.publisherPrincipalId}
-          value={version.version.publisherDisplayName ?? version.version.publisherPrincipalId}
+          value={principalLabel({
+            displayName: version.version.publisherDisplayName,
+            principalId: version.version.publisherPrincipalId,
+          }, viewerPrincipalId)}
         />
         <InspectorRow label="saved" title={formatTimestamp(version.version.createdAt)} value={formatTimestamp(version.version.createdAt)} />
         <InspectorRow label="entry" mono title={version.manifest.entryPath} value={version.manifest.entryPath} />
