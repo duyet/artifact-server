@@ -1,6 +1,11 @@
 import {StrictMode, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 
+import {IconAlertCircle} from "@tabler/icons-react";
+
+import {Alert, AlertDescription, AlertTitle} from "@/components/ui/alert";
+import {Skeleton} from "@/components/ui/skeleton";
+
 import {HomePage} from "./home-app.js";
 import {readPublicCatalog, type PublicCatalog} from "./home-client.js";
 import "../index.css";
@@ -38,16 +43,31 @@ function HomeShell() {
 
   if (failure !== null) {
     return (
-      <main className="mx-auto max-w-2xl px-6 py-16">
+      <main className="mx-auto flex max-w-2xl flex-col gap-4 px-6 py-16">
         <h1 className="font-heading text-xl font-semibold">Catalog unavailable</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{failure}</p>
+        <Alert variant="destructive">
+          <IconAlertCircle />
+          <AlertTitle>The public catalog could not be loaded</AlertTitle>
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
       </main>
     );
   }
   if (catalog === null) {
     return (
-      <main className="mx-auto max-w-2xl px-6 py-16 text-sm text-muted-foreground">
-        Loading the public catalog…
+      <main
+        aria-busy="true"
+        className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10"
+      >
+        <p className="sr-only" role="status">Loading the public catalog…</p>
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-3 gap-4">
+          <Skeleton className="h-20 rounded-xl" />
+          <Skeleton className="h-20 rounded-xl" />
+          <Skeleton className="h-20 rounded-xl" />
+        </div>
+        <Skeleton className="h-48 rounded-xl" />
+        <Skeleton className="h-64 rounded-xl" />
       </main>
     );
   }
