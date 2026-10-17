@@ -1,5 +1,6 @@
 import {expect, type Browser, type BrowserContext, type Page} from "@playwright/test";
 
+import type {BrowserAccess} from "../../src/core/browser-access.js";
 import {
   createTestInstallation,
   removeTestInstallation,
@@ -19,16 +20,17 @@ export interface BrowserFixture {
 export async function startBrowserFixture(
   browser: Browser,
   options: {
+    readonly browserAccess?: BrowserAccess;
     readonly contentDomain?: string | null;
     readonly timezoneId?: string;
   } = {},
 ): Promise<BrowserFixture> {
-  const {contentDomain, ...contextOptions} = options;
+  const {browserAccess, contentDomain, ...contextOptions} = options;
   const installation = await createTestInstallation();
-  const server = await startTestServer(
-    installation,
-    contentDomain === undefined ? {} : {contentDomain},
-  );
+  let serverOptions: Parameters<typeof startTestServer>[1] = {};
+  if (browserAccess !== undefined) serverOptions = {...serverOptions, browserAccess};
+  if (contentDomain !== undefined) serverOptions = {...serverOptions, contentDomain};
+  const server = await startTestServer(installation, serverOptions);
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   return {context, installation, page, server};
