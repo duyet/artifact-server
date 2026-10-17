@@ -88,3 +88,62 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test external-storage runtime
         run: pnpm test:external-storage-runtime
+
+  oci-image:
+    name: OCI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.34.3
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Enable the containerd image store
+        run: |
+          artifactserver_daemon_config=$(mktemp)
+          if [[ -s /etc/docker/daemon.json ]]; then
+            jq \
+              '.features = ((.features // {}) + {"containerd-snapshotter": true})' \
+              /etc/docker/daemon.json > "$artifactserver_daemon_config"
+          else
+            printf '%s\n' \
+              '{"features":{"containerd-snapshotter":true}}' \
+              > "$artifactserver_daemon_config"
+          fi
+          sudo install -d -m 0755 /etc/docker
+          sudo install -m 0644 \
+            "$artifactserver_daemon_config" \
+            /etc/docker/daemon.json
+          rm -f -- "$artifactserver_daemon_config"
+          sudo systemctl restart docker
+          docker info --format '{{json .DriverStatus}}' \
+            | grep -F 'io.containerd.snapshotter.v1'
+      - name: Prepare attestation-capable BuildKit
+        run: |
+          docker buildx create \
+            --driver docker-container \
+            --driver-opt image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8 \
+            --name artifact-server-ci \
+            --use
+          docker buildx inspect --bootstrap
+      - name: Test the release image
+        run: pnpm test:oci-image
+      - name: Upload OCI image evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: project/evidence/oci-image.json
+          if-no-files-found: warn
+          retention-days: 14
