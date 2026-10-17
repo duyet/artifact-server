@@ -40,7 +40,7 @@ product-probe contracts; it does not hide infrastructure plans behind an
 `artifactserver deploy` wrapper.
 
 The exact handoff is
-[`cloud-deployment-contract.md`](./cloud-deployment-contract.md).
+`cloud-deployment-contract.md` (removed in this fork).
 
 ### Ship one default managed-container path for AWS and GCP
 
@@ -352,7 +352,7 @@ The provider package grants the application only the database, object, secret,
 and telemetry permissions it needs. The application container uses no static
 cloud access key. Exact shared inputs, provider-specific network inputs,
 runtime configuration, outputs, and secret rules are defined in
-[`cloud-deployment-contract.md`](./cloud-deployment-contract.md).
+`cloud-deployment-contract.md` (removed in this fork).
 
 ### Kubernetes option
 

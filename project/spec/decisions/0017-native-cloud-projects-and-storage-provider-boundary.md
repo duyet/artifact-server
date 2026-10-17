@@ -24,7 +24,7 @@ prerequisites or run product probes, but it does not hide, proxy, or reinterpret
 an infrastructure plan or update.
 
 All managed-cloud packages implement the shared contract in
-[`../cloud-deployment-contract.md`](../cloud-deployment-contract.md). The
+`cloud-deployment-contract.md` (removed in this fork). The
 contract fixes the product inputs, secret boundary, runtime configuration,
 outputs, and release evidence while leaving provider resources in the provider
 package.

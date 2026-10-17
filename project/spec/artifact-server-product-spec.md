@@ -434,7 +434,7 @@ Operators use the deployment tool that owns the target: Compose for one server, 
 
 The exact cross-cloud input, output, secret, runtime-configuration, and evidence
 contract is defined in
-[`cloud-deployment-contract.md`](./cloud-deployment-contract.md).
+`cloud-deployment-contract.md` (removed in this fork).
 
 Local use runs directly on the host by default and does not require Docker. The
 one-server Compose package has two explicit profiles. Compact Compose runs one
