@@ -4984,3 +4984,31 @@ requirements:
     proof_gap: Proved locally against SQLite only. The Postgres path lookup is exercised by one external-storage case in CI with Docker, and no deployed run exists.
     depends_on: [FRK-006, FRK-002]
     evidence: []
+
+  - id: FRK-008
+    kind: behavior
+    behavior: One GET of an artifact's entry document adds one view to that artifact and that UTC day, counted in one three-column table and written by a background drain that never delays the content response.
+    owner: content-delivery
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: data-shape}
+    acceptance:
+      behavior: {id: FRK-008-B, description: "Open the entry document at its path, at its folder, and at /v/<token>/, and read the totals, the last 7 and 30 day counts, and the daily rows through the public tree endpoint after a drain."}
+      failure: {id: FRK-008-F, description: "HEAD, an asset, a 404, and a Review lease add nothing, a private artifact is never counted, a burst larger than one drain chunk lands exactly once per artifact, and the stored row carries only artifact id, day, and count."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet. Proved locally against SQLite only; the Postgres migration and upsert, and the D1 table, run in CI with Docker, and no deployed run exists.
+    depends_on: [CNT-001]
+    evidence: []
+
+  - id: FRK-009
+    kind: behavior
+    behavior: The home page at / lists every public artifact as a folder tree built from its readable path, newest first, with its view counts, and it answers a viewer who holds no credential.
+    owner: content-delivery
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-tree-endpoint}
+    acceptance:
+      behavior: {id: FRK-009-B, description: "Publish artifacts under 2026/10 and 2026/11 plus one with no path, read the tree, and observe nested folders labelled by their last segment, newest-first order, the ungrouped group, sparse daily rows, and the 7-day, 30-day, and all-time totals."}
+      failure: {id: FRK-009-F, description: "A private or deleted artifact is absent, the endpoint needs no credential while /api/v1/artifacts still does, an artifact path cannot shadow the endpoint, and / carries the application policy and not the content sandbox."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet. The tree builder is proved locally with no database; the Postgres read path and the light and dark screenshots run in CI, and no deployed run exists.
+    depends_on: [FRK-008, FRK-007, FRK-002]
+    evidence: []
