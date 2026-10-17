@@ -26,6 +26,9 @@ import {
 import {startExternalStorageServer} from "../../src/external-storage/start-external-storage-server.js";
 import {checkExternalStorageIntegrity} from
   "../../src/lifecycle/integrity-check.js";
+import type {ArtifactViewDrainReport} from
+  "../../src/application/artifact-view-recorder.js";
+import type {Clock} from "../../src/core/ports.js";
 import {createS3ObjectStorageProviderFactory} from
   "../../src/storage/s3-object-storage.js";
 import {PostgresDatabase} from "../../src/storage/postgres-database.js";
@@ -216,6 +219,24 @@ const commentFailureSchema = z.object({
   error: z.object({code: z.string(), message: z.string()}).loose(),
 }).loose();
 
+const publicArtifactViewCountsSchema = z.object({
+  last7Days: z.number().int().nonnegative(),
+  last30Days: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+
+const publicArtifactTreeSchema = z.object({
+  artifacts: z.array(z.object({
+    name: z.string(),
+    series: z.array(z.object({
+      count: z.number().int().nonnegative(),
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    })),
+    views: publicArtifactViewCountsSchema,
+  })),
+  truncated: z.boolean(),
+}).loose();
+
 interface IntegrationEnvironment {
   readonly accessKey: string;
   readonly databaseUrl: string;
@@ -240,6 +261,8 @@ interface ExternalStorageProcess {
 
 interface InProcessExternalStorageServer {
   readonly baseUrl: string;
+  /** Write buffered entry-document view counts to Postgres now. */
+  flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   stop(): Promise<void>;
 }
 
@@ -2645,7 +2668,121 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       await server.stop();
     }
   });
+
+  test("Postgres counts one entry-document view per drain, and probes, misses, and the home shell add nothing", async () => {
+    // One pinned instant, so the counted view lands on a day the assertions
+    // can name without racing a midnight boundary.
+    const viewDay = "2026-10-17";
+    const identity = {
+      apiToken: managedTestKey("view-collection"),
+      installationId: `view-collection-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {clock: {now: () => new Date(`${viewDay}T09:30:00.000Z`)}},
+    );
+    const published = await publishNew(server.baseUrl, identity.apiToken, {
+      content: "<h1>counted entry document</h1>",
+      idempotencyKey: `view-collection-publish-${randomUUID()}`,
+      name: "Viewed proof",
+    });
+    expect(published.response.status).toBe(201);
+
+    const versionUrl = published.body.links.version;
+    const entryResponse = await fetchContentThroughServer(
+      server.baseUrl,
+      versionUrl,
+    );
+    expect(entryResponse.status).toBe(200);
+    expect(await entryResponse.text()).toBe("<h1>counted entry document</h1>");
+
+    const readTree = async () => {
+      const response = await fetch(`${server.baseUrl}/api/v1/public/tree`);
+      expect(response.status).toBe(200);
+      return publicArtifactTreeSchema.parse(await response.json());
+    };
+
+    // The count is buffered in-process, so a read before the drain sees zero.
+    expect(publicTreeEntry(await readTree(), "Viewed proof").views.total)
+      .toBe(0);
+
+    expect(await server.flushArtifactViews()).toEqual({
+      failedChunks: 0,
+      writtenRows: 1,
+    });
+    const counted = publicTreeEntry(await readTree(), "Viewed proof");
+    expect(counted.views).toEqual({last7Days: 1, last30Days: 1, total: 1});
+    expect(counted.series).toEqual([{count: 1, day: viewDay}]);
+
+    const database = await PostgresDatabase.inspect({
+      applicationName: "artifact-server-view-collection-test",
+      maxConnections: 1,
+      url: Redacted.make(environment.databaseUrl),
+    });
+    try {
+      const readViewRows = () => database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        return yield* sql<{
+          readonly artifact_id: string;
+          readonly count: number;
+          readonly day: string;
+        }>`
+          SELECT artifact_id, count, day
+          FROM artifact_views
+          WHERE installation_id = ${identity.installationId}
+        `.withoutTransform;
+      }));
+      // One GET of the entry document is one row with one count, on the UTC
+      // day the served request happened.
+      expect(await readViewRows()).toEqual([{
+        artifact_id: published.body.artifact.id,
+        count: 1,
+        day: viewDay,
+      }]);
+
+      // A HEAD probe answers the entry document without carrying it, a
+      // miss resolves no manifest entry, and `/` serves the application
+      // shell. None of them carries an entry document, so none may count.
+      expect((await fetchContentThroughServer(
+        server.baseUrl,
+        versionUrl,
+        undefined,
+        "HEAD",
+      )).status).toBe(200);
+      expect((await fetchContentThroughServer(
+        server.baseUrl,
+        `${versionUrl}missing.html`,
+      )).status).toBe(404);
+      expect((await fetch(`${server.baseUrl}/`)).status).toBe(200);
+
+      expect(await server.flushArtifactViews()).toEqual({
+        failedChunks: 0,
+        writtenRows: 0,
+      });
+      expect(publicTreeEntry(await readTree(), "Viewed proof").views.total)
+        .toBe(1);
+      expect(await readViewRows()).toEqual([{
+        artifact_id: published.body.artifact.id,
+        count: 1,
+        day: viewDay,
+      }]);
+    } finally {
+      await database.close();
+    }
+  });
 });
+
+type PublicArtifactTree = z.infer<typeof publicArtifactTreeSchema>;
+
+/** Resolve one public tree item by name, failing loudly rather than silently. */
+function publicTreeEntry(tree: PublicArtifactTree, name: string) {
+  const found = tree.artifacts.find((item) => item.name === name);
+  if (found === undefined) {
+    throw new Error(`The public tree holds no artifact named ${name}.`);
+  }
+  return found;
+}
 
 function readIntegrationEnvironment(): IntegrationEnvironment {
   const accessKey = process.env["ARTIFACT_SERVER_TEST_S3_ACCESS_KEY"];
@@ -2758,6 +2895,7 @@ async function startInProcessExternalStorageServer(
   environment: IntegrationEnvironment,
   identity: {readonly apiToken: string; readonly installationId: string},
   options: {
+    readonly clock?: Clock;
     readonly gitHistory?: NodeGitHistoryConfiguration;
     readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
   } = {},
@@ -2792,6 +2930,7 @@ async function startInProcessExternalStorageServer(
   let stopped = false;
   const running: InProcessExternalStorageServer = {
     baseUrl: `http://${server.hostname}:${server.port}`,
+    flushArtifactViews: () => server.flushArtifactViews(),
     stop: async () => {
       if (stopped) return;
       stopped = true;
@@ -3270,6 +3409,7 @@ function fetchContentThroughServer(
   baseUrl: string,
   contentUrl: string,
   headers?: HeadersInit,
+  method: "GET" | "HEAD" = "GET",
 ): Promise<Response> {
   const server = new URL(baseUrl);
   const target = new URL(contentUrl);
@@ -3280,6 +3420,7 @@ function fetchContentThroughServer(
       {
         headers: Object.fromEntries(requestHeaders),
         hostname: server.hostname,
+        method,
         path: `${target.pathname}${target.search}`,
         port: server.port,
       },
