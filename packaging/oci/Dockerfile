@@ -14,7 +14,6 @@ RUN corepack enable \
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/package.json
-COPY patches ./patches
 RUN --mount=type=cache,id=artifact-server-pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 

@@ -68,8 +68,6 @@ jobs:
         run: pnpm typecheck
       - name: Build application
         run: pnpm build
-      - name: Verify public site
-        run: pnpm verify:site
       - name: Validate conformance ledger
         run: pnpm conformance:validate
       - name: Validate conformance test IDs

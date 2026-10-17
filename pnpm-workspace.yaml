@@ -1,6 +1,6 @@
 packages:
   - .
-  - apps/*
+  - apps/web
   - integrations/claude-channel
   - integrations/opencode
   - integrations/pi

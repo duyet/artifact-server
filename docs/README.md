@@ -4,18 +4,17 @@ Use these guides to install, connect, operate, and extend Artifact Server.
 
 ## Start here
 
-- [Deployment](./deployment.md)
 - [MCP and AI agents](./mcp.md)
 - [Pi live feedback extension](../integrations/pi/README.md)
 - [OpenCode extension](../integrations/opencode/README.md)
 - [Claude Code channel bridge](../integrations/claude-channel/README.md)
 - [Agent bridge protocol](./agent-bridge-protocol.md)
 - [Command-line interface](./cli.md)
-- [Cloudflare Artifacts integration status](./cloudflare-artifacts.md)
 - [Security](../SECURITY.md)
 
 ## Deployment guides
 
+- [Runbook](./fork/RUNBOOK.md)
 - [Kubernetes](../packaging/helm/artifact-server/README.md)
 
 ## Project records

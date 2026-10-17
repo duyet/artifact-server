@@ -1740,7 +1740,7 @@ async function publishReviewMultifileFixture(fixture: BrowserFixture) {
     new URL("../../project/evidence/frontend-mvp/error-not-found.png", import.meta.url),
   );
   const fontBytes = await readFile(
-    new URL("../../apps/site/public/fonts/Inter-Bold.ttf", import.meta.url),
+    new URL("./fixtures/Inter-Bold.ttf", import.meta.url),
   );
   const files = [
     {

@@ -16,36 +16,23 @@
       "esbuild"
     ],
     "overrides": {
-      "@chevrotain/cst-dts-gen@10.5.0>lodash": "4.18.0",
-      "@chevrotain/gast@10.5.0>lodash": "4.18.0",
-      "@prisma/dev>@hono/node-server": "1.19.15",
-      "@prisma/dev>hono": "4.13.5",
-      "js-yaml@>=4.0.0 <4.3.2": "4.3.2",
-      "sharp@<0.35.4": "0.35.4",
-      "@prisma/dev>valibot": "1.4.2",
-      "chevrotain@10.5.0>lodash": "4.18.0",
       "fast-uri": "3.1.6",
       "qs": "6.16.0",
       "gaxios>uuid": "11.1.1"
-    },
-    "patchedDependencies": {
-      "undici@7.29.0": "patches/undici@7.29.0.patch"
     }
   },
   "scripts": {
     "artifactserver": "tsx src/cli/main.ts",
     "build": "pnpm --filter @artifact-server/web build && tsc -p tsconfig.build.json",
-    "build:site": "pnpm --filter @artifact-server/site build",
     "capture:web": "pnpm build && tsx tests/browser/capture-frontend-mvp.ts",
-    "check": "pnpm check:release-version && pnpm lint && pnpm typecheck && pnpm build && pnpm verify:site && pnpm test && pnpm conformance:validate && pnpm conformance:tests",
+    "check": "pnpm check:release-version && pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm conformance:validate && pnpm conformance:tests",
     "check:ci": "node scripts/check-ci-full-gate.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
     "conformance:tests": "ruby scripts/check-conformance-test-ids.rb",
     "conformance:validate": "ruby scripts/validate-conformance.rb project/spec/conformance.yml --report",
     "dev": "tsx scripts/run-web-development.ts",
-    "dev:site": "pnpm --filter @artifact-server/site dev",
     "dev:server": "tsx watch src/cli/main.ts start",
-    "lint": "oxlint --type-aware --type-check --deny-warnings --ignore-pattern 'apps/site/**' .",
+    "lint": "oxlint --type-aware --type-check --deny-warnings .",
     "perf:baseline": "node --expose-gc --import tsx project/performance/run-local-baseline.ts",
     "perf:capacity": "pnpm build && node --import tsx project/performance/run-server-capacity-baseline.ts",
     "perf:external-storage-baseline": "bash scripts/run-external-storage-performance-baseline.sh",
@@ -69,9 +56,7 @@
     "test:external-storage-runtime": "bash scripts/run-external-storage-runtime-integration.sh",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @artifact-server/web typecheck && pnpm --filter @plannotator/artifact-server-pi typecheck && pnpm --filter @plannotator/artifact-server-opencode typecheck && pnpm --filter @plannotator/artifact-server-claude-channel typecheck",
-    "typecheck:site": "pnpm --filter @artifact-server/site typecheck",
     "verify:iteration": "pnpm check && pnpm test:web && pnpm verify:object-storage && pnpm test:external-storage-runtime && pnpm test:coverage && pnpm perf:baseline && pnpm perf:capacity && pnpm verify:helm && pnpm test:oidc",
-    "verify:site": "pnpm --filter @artifact-server/site verify",
     "verify:external-storage-performance": "pnpm perf:external-storage-baseline",
     "verify:external-storage-runtime": "pnpm test:external-storage-runtime",
     "verify:helm-static": "pnpm test:helm-static",

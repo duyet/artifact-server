@@ -102,7 +102,7 @@ Every remote deployment uses one trusted application origin and one isolated wil
 
 Azure teams deploy through the Helm chart on AKS; there is no separate Azure installer. Azure Blob Storage is available as a preview adapter and has not passed live Azure qualification.
 
-[Read the deployment guide](./docs/deployment.md) for shared requirements, storage choices, authentication, and backups.
+[Read the runbook](./docs/fork/RUNBOOK.md) for the Helm install against PostgreSQL and S3-compatible storage.
 
 ## Run it locally
 
@@ -126,8 +126,6 @@ Most artifacts are published by an agent through the [Artifact Server Skill](./s
 Artifact Server serves untrusted artifact content from isolated version hosts, separate from the trusted application origin used for authentication, review, comments, API, and MCP. Private content uses version-scoped browser sessions, and untrusted paths cannot select storage locations.
 
 Read the [security model](./project/spec/decisions/0002-shared-identity-and-private-content.md) or [report a vulnerability](./SECURITY.md).
-
-Read about Artifact Server's [software supply-chain security](https://artifactserver.com/docs/security/).
 
 ## Development and project records
 
