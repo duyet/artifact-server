@@ -130,6 +130,7 @@ import {
   publicLinkInventoryRowSchema,
   publicLinkPageFromRows,
 } from "./public-link-inventory-row.js";
+import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
 import {
   gitHistoryCopyPolicyDigest,
   gitHistoryJobId,
@@ -1259,13 +1260,17 @@ export class PostgresArtifactRepository implements
           command.manifest.digest,
           command.createdAt,
         );
+        if (command.path !== null) {
+          yield* lockArtifactPaths(sql, installationId);
+          yield* this.#assertArtifactPathFree(command.path);
+        }
         yield* sql`INSERT INTO artifacts (
           installation_id, project_id, id, name, search_name, access_setting,
-          current_version_id, created_at, deleted_at
+          current_version_id, created_at, deleted_at, path
         ) VALUES (
           ${installationId}, ${command.projectId}, ${command.artifactId}, ${command.name},
           ${normalizeArtifactSearchText(command.name)}, ${command.accessSetting}, NULL,
-          ${command.createdAt}, NULL
+          ${command.createdAt}, NULL, ${command.path}
         )`;
         yield* this.#replaceTags(command.artifactId, command.tags);
         yield* this.#insertVersion(
@@ -3365,6 +3370,29 @@ export class PostgresArtifactRepository implements
     });
   }
 
+  #assertArtifactPathFree(path: string) {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const claim = artifactPathClaim(path);
+      const rows = yield* sql.unsafe<object>(
+        `SELECT path FROM artifacts
+         WHERE installation_id = $1
+           AND path IS NOT NULL AND deleted_at IS NULL
+           AND (path = ANY($2::text[]) OR (path >= $3 AND path < $4))
+         LIMIT 1`,
+        [
+          installationId,
+          claim.lineage,
+          claim.descendants.from,
+          claim.descendants.to,
+        ],
+      );
+      const existing = z.object({path: z.string()}).nullable().parse(rows[0] ?? null);
+      if (existing !== null) yield* artifactPathTaken(path, existing.path);
+    });
+  }
+
   #assertProjectActive(
     projectId: string,
   ) {
@@ -4835,6 +4863,17 @@ function lockAgentClaim(
 ): Effect.Effect<readonly object[], unknown> {
   return sql`SELECT pg_advisory_xact_lock(
     hashtextextended(${`agent-claim:${installationId}:${agentId}`}, 0)
+  )`;
+}
+
+// Paths are prefix-free across the installation, so every create that
+// claims one serializes on a single lock while it checks and inserts.
+function lockArtifactPaths(
+  sql: SqlClient,
+  installationId: string,
+): Effect.Effect<readonly object[], unknown> {
+  return sql`SELECT pg_advisory_xact_lock(
+    hashtextextended(${`${installationId}:artifact-paths`}, 0)
   )`;
 }
 

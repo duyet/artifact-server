@@ -104,6 +104,7 @@ describe("staged upload lifecycle", () => {
           accessSetting: "public_link",
           kind: "new_artifact",
           name: "Must not commit",
+          path: null,
         },
         uploadId: upload.id,
       })
@@ -164,6 +165,7 @@ describe("staged upload lifecycle", () => {
               accessSetting: "public_link",
               kind: "new_artifact",
               name: "Must not commit",
+              path: null,
             },
             uploadId: upload.id,
           }),
@@ -213,6 +215,7 @@ describe("staged upload lifecycle", () => {
           accessSetting: "public_link",
           kind: "new_artifact",
           name: "Expired upload",
+          path: null,
         },
         uploadId: expired.id,
       })
@@ -238,6 +241,7 @@ describe("staged upload lifecycle", () => {
       accessSetting: "public_link" as const,
       kind: "new_artifact" as const,
       name: "Committed upload",
+      path: null,
     };
     const committed = await runStaged(runtime, (service) => service.commitUpload({
       idempotencyKey: "committed-upload-stable-retry",
@@ -314,6 +318,7 @@ describe("staged upload lifecycle", () => {
         accessSetting: "account_required",
         kind: "new_artifact",
         name: "Committed cleanup control",
+        path: null,
       },
       uploadId: committedUpload.id,
     }));

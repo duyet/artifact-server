@@ -8,6 +8,7 @@ import {
   AgentDispatchNotFound,
   ArtifactMutationConflict,
   ArtifactNotFound,
+  CapabilityUnavailable,
   CommentNotFound,
   CommentResolved,
   DispatchStateConflict,
@@ -2195,6 +2196,11 @@ export function createD1ArtifactRepository(
     },
 
     commitNewArtifact: async (command: CommitNewArtifact) => {
+      if (command.path !== null) {
+        throw new CapabilityUnavailable({
+          message: "Readable artifact paths are not available on this deployment.",
+        });
+      }
       const replay = await findIdempotentPublication(
         command.projectId,
         command.idempotencyKey,

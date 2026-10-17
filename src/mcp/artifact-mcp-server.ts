@@ -1286,7 +1286,9 @@ export function createArtifactMcpServer(
             idempotencyKey,
             principal: identity.principal,
             projectId,
-            target,
+            target: target.kind === "new_artifact"
+              ? {...target, path: null}
+              : target,
             uploadId,
           })
         ),

@@ -110,6 +110,8 @@ export interface CommitNewArtifact {
   readonly inputDigest: string;
   readonly manifest: CanonicalManifest;
   readonly name: string;
+  /** A readable path already normalized at the boundary, or null. */
+  readonly path: string | null;
   readonly principalId: string;
   readonly projectId: string;
   readonly authorizedByPrincipalId: string | null;

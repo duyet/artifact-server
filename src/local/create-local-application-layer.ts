@@ -79,9 +79,11 @@ import {
   AgentNotFound,
   ArtifactNotFound,
   ArtifactMutationConflict,
+  ArtifactPathTaken,
   ArtifactRepositoryFailure,
   AuthenticationRequired,
   BlobStorageFailure,
+  CapabilityUnavailable,
   CommentNotFound,
   CommentResolved,
   DispatchStateConflict,
@@ -1280,7 +1282,10 @@ function classifySourceReadinessFailure(cause: unknown) {
 
 function classifyCommitNewFailure(cause: unknown) {
   if (
-    cause instanceof IdempotencyConflict || cause instanceof ProjectArchived
+    cause instanceof ArtifactPathTaken ||
+    cause instanceof CapabilityUnavailable ||
+    cause instanceof IdempotencyConflict ||
+    cause instanceof ProjectArchived
   ) return cause;
   if (
     cause instanceof UploadNotFound ||

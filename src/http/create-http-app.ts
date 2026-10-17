@@ -152,6 +152,7 @@ import {
   canonicalFolderLocation,
   isolateSameHostResponse,
   parseSameHostContentRequest,
+  requestedArtifactPath,
   sameHostContentSource,
   type SameHostFolderRequest,
 } from "./same-host-content.js";
@@ -204,6 +205,7 @@ const commitUploadSchema = z.object({
       accessSetting: accessSettingSchema.optional(),
       kind: z.literal("new_artifact"),
       name: z.string().min(1).max(200),
+      path: z.string().min(1).max(200).optional(),
       tags: artifactTagsSchema,
     }).strict(),
     z.object({
@@ -2289,6 +2291,10 @@ export function createHttpApp(
           ...body.target,
           accessSetting: body.target.accessSetting
             ?? defaultAccessSetting(dependencies.browserAccess),
+          path: requestedArtifactPath(
+            body.target.path,
+            dependencies.contentDomain,
+          ),
         }
         : body.target;
       const result = await runHttpApplicationEffect(

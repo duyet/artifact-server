@@ -4956,3 +4956,17 @@ requirements:
     proof_gap: Tests are not written yet; no deployed run exists.
     depends_on: [AUTH-002, FRK-004]
     evidence: []
+
+  - id: FRK-006
+    kind: behavior
+    behavior: A new artifact may claim one readable path when it is created; live paths are prefix-free within an installation, a new version keeps the path, and a deleted artifact frees it.
+    owner: publishing
+    source: {file: ../../docs/fork/DESIGN.md, anchor: readable-artifact-paths}
+    acceptance:
+      behavior: {id: FRK-006-B, description: "Create an artifact with a path, publish a new version, retry the create, and observe the stored normalized path each time."}
+      failure: {id: FRK-006-F, description: "An equal, ancestor, or descendant path is 409, a concurrent claim of one path admits one create, malformed paths and a path on a new version are 422, a host-mode server answers CapabilityUnavailable, and a deleted artifact frees its path."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite only. The Postgres race between two server processes runs in CI with Docker, and no deployed run exists.
+    depends_on: [FRK-003]
+    evidence: []

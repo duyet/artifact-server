@@ -2,7 +2,11 @@ import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
-import {parseArtifactFolder} from "../../src/http/same-host-content.js";
+import {
+  isArtifactPathSegment,
+  parseArtifactFolder,
+  reservedPathRoots,
+} from "../../src/http/same-host-content.js";
 import {createLocalRuntime} from "../../src/local/create-local-runtime.js";
 import {publishVersion} from "../support/publishing.js";
 import {
@@ -160,6 +164,10 @@ describe("artifact folders in path mode", () => {
       );
       expect(reaching).toEqual([]);
       expect(firstSegments).toContain("api");
+      const claimable = [...firstSegments].filter((segment) =>
+        isArtifactPathSegment(segment) && !reservedPathRoots.has(segment)
+      );
+      expect(claimable).toEqual([]);
     } finally {
       await runtime.close();
       await removeTestInstallation(routeInstallation);

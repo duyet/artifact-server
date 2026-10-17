@@ -129,6 +129,7 @@ import {
 } from "../core/publishing-limits.js";
 import { createManifest } from "../manifest/create-manifest.js";
 import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
+import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
 import type {
   ListPublicLinks,
   PublicLinkInventoryPage,
@@ -1317,14 +1318,15 @@ export class SqliteArtifactRepository implements
       command.manifest.digest,
       command.createdAt,
     );
+    if (command.path !== null) this.#assertArtifactPathFree(command.path);
 
     this.#database
       .prepare(
         `INSERT INTO artifacts (
           id, project_id, name, search_name, access_setting,
-          current_version_id, created_at, deleted_at,
+          current_version_id, created_at, deleted_at, path,
           source_path, source_fingerprint, source_status, source_verified_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
       )
       .run(
         command.artifactId,
@@ -1333,6 +1335,7 @@ export class SqliteArtifactRepository implements
         normalizeArtifactSearchText(command.name),
         command.accessSetting,
         command.createdAt,
+        command.path,
         binding === null ? null : binding.path,
         binding === null ? null : binding.fingerprint,
         binding === null ? null : sourceFreshnessStates.inSync,
@@ -1381,6 +1384,23 @@ export class SqliteArtifactRepository implements
     );
 
     return this.#readPublishedVersion(command.projectId, command.versionId, false);
+  }
+
+  // The caller's BEGIN IMMEDIATE transaction holds the only writer, so no
+  // other claim can land between this check and the insert.
+  #assertArtifactPathFree(path: string): void {
+    const claim = artifactPathClaim(path);
+    const placeholders = claim.lineage.map(() => "?").join(", ");
+    const row = this.#database
+      .prepare(
+        `SELECT path FROM artifacts
+         WHERE path IS NOT NULL AND deleted_at IS NULL
+           AND (path IN (${placeholders}) OR (path >= ? AND path < ?))
+         LIMIT 1`,
+      )
+      .get(...claim.lineage, claim.descendants.from, claim.descendants.to);
+    const existing = z.object({path: z.string()}).nullable().parse(row ?? null);
+    if (existing !== null) throw artifactPathTaken(path, existing.path);
   }
 
   #applyVersionCommit(
