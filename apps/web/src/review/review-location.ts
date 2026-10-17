@@ -8,8 +8,8 @@ export interface ReviewLocation {
   readonly view: "focus" | null;
 }
 
-export function readReviewLocation(): ReviewLocation {
-  const search = new URLSearchParams(window.location.search);
+export function readReviewLocation(query: string): ReviewLocation {
+  const search = new URLSearchParams(query);
   return {
     artifactId: search.get("artifact"),
     path: search.get("path"),

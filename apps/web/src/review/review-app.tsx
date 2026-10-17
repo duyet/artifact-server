@@ -3,10 +3,11 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {setDraftPrincipal} from "@/components/comments/comment-drafts";
 import {api, ApiError, type AccessContext, type Project, type Session} from "@/api/client";
 import {ApiKeySignIn} from "./api-key-sign-in.tsx";
-import {ArtifactReview, type ReviewTheme} from "./artifact-review.tsx";
+import {Button, ButtonLink} from "@/components/ui/button";
 import {ReviewGate} from "./review-primitives.tsx";
-import {isSettingsPath, parseSettingsRoute} from "./review-routes.ts";
-import {ReviewSettings} from "./review-settings.tsx";
+import {ReviewShell} from "./review-shell.tsx";
+
+type ReviewTheme = "dawn" | "moon";
 
 /** Start the artifact-first Artifact Server review application. */
 export function ReviewApp() {
@@ -126,9 +127,9 @@ export function ReviewApp() {
     return (
       <ReviewGate
         action={(
-          <a className="as-button as-button--primary" href={`/auth/login?returnTo=${encodeURIComponent(returnTo)}`}>
+          <ButtonLink className="w-full" href={`/auth/login?returnTo=${encodeURIComponent(returnTo)}`}>
             Sign in
-          </a>
+          </ButtonLink>
         )}
         description="This installation requires an authenticated browser session."
         title="Sign in required"
@@ -138,7 +139,7 @@ export function ReviewApp() {
   if (error !== null) {
     return (
       <ReviewGate
-        action={<button className="as-button" onClick={() => void bootstrap()} type="button">Try again</button>}
+        action={<Button onClick={() => void bootstrap()} variant="outline">Try again</Button>}
         description={error.message}
         title="Artifact Server unavailable"
       />
@@ -146,20 +147,10 @@ export function ReviewApp() {
   }
   if (session === null) return null;
 
-  if (isSettingsPath(window.location.pathname)) {
-    return (
-      <ReviewSettings
-        onProjectsChanged={loadProjects}
-        projects={projects}
-        route={parseSettingsRoute(window.location.pathname)}
-        session={session}
-      />
-    );
-  }
-
   return (
-    <ArtifactReview
+    <ReviewShell
       onCreateProject={createProject}
+      onProjectsChanged={loadProjects}
       onThemeChange={() => setTheme((current) => current === "moon" ? "dawn" : "moon")}
       projects={projects}
       session={session}

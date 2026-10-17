@@ -1,8 +1,9 @@
-import { IconCheck, IconChevronDown, IconFolderCog, IconPlus, IconSettings } from "@tabler/icons-react";
+import {IconCheck, IconFolderCog, IconPlus, IconSelector, IconSettings} from "@tabler/icons-react";
 import {type FormEvent, useMemo, useState} from "react";
 
 import {type Project} from "@/api/client";
 import {Alert, AlertDescription} from "@/components/ui/alert";
+import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
 import {
   Field,
@@ -18,7 +19,10 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {Separator} from "@/components/ui/separator";
+import {SidebarMenuButton} from "@/components/ui/sidebar";
 import {projectSettingsHref} from "./review-routes.ts";
+
+const projectActionClass = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent";
 
 interface ReviewProjectPickerProps {
   readonly canCreate: boolean;
@@ -91,41 +95,45 @@ export function ReviewProjectPicker({
     <Popover onOpenChange={changePickerOpen} open={pickerOpen}>
       <PopoverTrigger
         aria-label={`Current project: ${selectedProject?.name ?? "none"}`}
-        className="as-project-trigger"
+        render={<SidebarMenuButton className="data-popup-open:bg-sidebar-accent" size="lg" />}
       >
-        <span>{selectedProject?.name ?? "Select project"}</span>
-        <IconChevronDown aria-hidden="true" stroke={2} />
+        <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+          <span className="truncate font-medium">{selectedProject?.name ?? "Select project"}</span>
+          <span className="truncate text-xs text-muted-foreground">Project</span>
+        </span>
+        <IconSelector aria-hidden="true" className="ml-auto" />
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="as-project-popover"
+        className="w-64 gap-2 p-1"
         data-screen={pickerScreen}
-        sideOffset={7}
+        sideOffset={6}
       >
         {pickerScreen === "projects"
           ? (
             <>
               <PopoverTitle className="sr-only">Projects</PopoverTitle>
-              <div aria-label="Projects" className="as-project-list" role="listbox">
+              <p className="px-2 pt-1 text-xs font-medium text-muted-foreground">Projects</p>
+              <div aria-label="Projects" className="flex max-h-72 flex-col overflow-y-auto" role="listbox">
                 {orderedProjects.map((project) => {
                   const selected = project.id === selectedProjectId;
                   return (
                     <button
                       aria-selected={selected}
-                      className="as-project-option"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
                       key={project.id}
                       onClick={() => chooseProject(project.id)}
                       role="option"
                       type="button"
                     >
-                      <span className="as-project-option__identity">
-                        <span>{project.name}</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="truncate">{project.name}</span>
                         {project.archivedAt === null
                           ? null
-                          : <span className="as-project-option__status">Archived</span>}
+                          : <Badge variant="outline">Archived</Badge>}
                       </span>
                       {selected
-                        ? <IconCheck aria-hidden="true" stroke={2} />
+                        ? <IconCheck aria-hidden="true" className="size-4" />
                         : null}
                     </button>
                   );
@@ -134,31 +142,31 @@ export function ReviewProjectPicker({
               {canCreate ? (
                 <>
                   <Separator />
-                  <div className="as-project-actions">
+                  <div className="flex flex-col">
                     {selectedProject === null ? null : (
                       <a
-                        className="as-project-action"
+                        className={projectActionClass}
                         href={projectSettingsHref(selectedProject.id)}
                         onClick={() => setPickerOpen(false)}
                       >
-                        <IconSettings aria-hidden="true" stroke={2} />
+                        <IconSettings aria-hidden="true" className="size-4 text-muted-foreground" />
                         <span>Project settings</span>
                       </a>
                     )}
                     <a
-                      className="as-project-action"
+                      className={projectActionClass}
                       href="/review/settings/projects"
                       onClick={() => setPickerOpen(false)}
                     >
-                      <IconFolderCog aria-hidden="true" stroke={2} />
+                      <IconFolderCog aria-hidden="true" className="size-4 text-muted-foreground" />
                       <span>Manage projects</span>
                     </a>
                     <button
-                      className="as-project-action as-project-action--create"
+                      className={projectActionClass}
                       onClick={showCreateForm}
                       type="button"
                     >
-                      <IconPlus aria-hidden="true" stroke={2} />
+                      <IconPlus aria-hidden="true" className="size-4 text-muted-foreground" />
                       <span>New project</span>
                     </button>
                   </div>
@@ -167,8 +175,8 @@ export function ReviewProjectPicker({
             </>
           )
           : (
-            <form className="flex flex-col gap-4" onSubmit={(event) => void createProject(event)}>
-              <PopoverTitle className="as-visually-hidden">Create project</PopoverTitle>
+            <form className="flex flex-col gap-4 p-2" onSubmit={(event) => void createProject(event)}>
+              <PopoverTitle className="sr-only">Create project</PopoverTitle>
               {error === null
                 ? null
                 : (
@@ -179,7 +187,7 @@ export function ReviewProjectPicker({
               <FieldGroup>
                 <Field data-invalid={error !== null}>
                   <FieldLabel
-                    className="as-visually-hidden"
+                    className="sr-only"
                     htmlFor="review-new-project-name"
                   >
                     Project name

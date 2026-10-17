@@ -68,33 +68,3 @@ export function InspectorRow({
   );
 }
 
-export function InspectorTabButton({
-  active,
-  count,
-  label,
-  onClick,
-  tab,
-}: {
-  readonly active: boolean;
-  readonly count?: number;
-  readonly label: string;
-  readonly onClick: () => void;
-  readonly tab: InspectorTab;
-}) {
-  return (
-    <button
-      aria-controls="review-inspector-panel"
-      aria-selected={active}
-      className="as-tab"
-      data-active={active}
-      id={`review-inspector-tab-${tab}`}
-      onClick={onClick}
-      role="tab"
-      type="button"
-    >
-      {label}
-      {count === undefined ? null : <span>{count}</span>}
-    </button>
-  );
-}
-

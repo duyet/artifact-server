@@ -1,8 +1,39 @@
-import {IconCheck, IconFilter} from "@tabler/icons-react";
-import {Popover} from "@base-ui/react/popover";
+import {IconFilter} from "@tabler/icons-react";
+
+import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export type CatalogCommentFilter = "all" | "with" | "without";
 
+const commentFilters = [
+  {label: "All artifacts", value: "all"},
+  {label: "With comments", value: "with"},
+  {label: "No comments", value: "without"},
+] as const satisfies readonly {readonly label: string; readonly value: CatalogCommentFilter}[];
+
+function filterLabel(commentFilter: CatalogCommentFilter, tagFilters: readonly string[]): string {
+  const activeCount = Number(commentFilter !== "all") + tagFilters.length;
+  if (commentFilter === "all" && tagFilters.length === 1) return tagFilters[0] ?? "1 tag";
+  if (commentFilter === "all" && tagFilters.length > 1) return `${tagFilters.length} tags`;
+  if (tagFilters.length === 0) {
+    return commentFilters.find((filter) => filter.value === commentFilter)?.label ?? "All artifacts";
+  }
+  return `${activeCount} filters`;
+}
+
+/** Narrow the catalog by comment presence and by any of its known tags. */
 export function CatalogFilters({
   commentFilter,
   knownTags,
@@ -16,126 +47,80 @@ export function CatalogFilters({
   readonly onTagFiltersChange: (tags: readonly string[]) => void;
   readonly tagFilters: readonly string[];
 }) {
-  const activeFilterCount = Number(commentFilter !== "all") + tagFilters.length;
-  let triggerLabel = "All artifacts";
-  if (commentFilter === "all" && tagFilters.length === 1) {
-    triggerLabel = tagFilters[0] ?? "1 tag";
-  } else if (commentFilter === "all" && tagFilters.length > 1) {
-    triggerLabel = `${tagFilters.length} tags`;
-  } else if (commentFilter === "with" && tagFilters.length === 0) {
-    triggerLabel = "With comments";
-  } else if (commentFilter === "without" && tagFilters.length === 0) {
-    triggerLabel = "No comments";
-  } else if (activeFilterCount > 0) {
-    triggerLabel = `${activeFilterCount} filters`;
-  }
+  const activeCount = Number(commentFilter !== "all") + tagFilters.length;
   const tags = [...new Set([...knownTags, ...tagFilters])].toSorted();
-  const toggleTag = (tag: string): void => {
-    onTagFiltersChange(
-      tagFilters.includes(tag)
-        ? tagFilters.filter((selected) => selected !== tag)
-        : [...tagFilters, tag].toSorted(),
-    );
+  const toggleTag = (tag: string, checked: boolean): void => {
+    onTagFiltersChange(checked
+      ? [...tagFilters, tag].toSorted()
+      : tagFilters.filter((selected) => selected !== tag));
   };
 
   return (
-    <Popover.Root>
-      <Popover.Trigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         render={(
-          <button
-            aria-label={`Filter artifacts. ${activeFilterCount === 0 ? "No filters applied" : `${activeFilterCount} applied`}.`}
-            className="as-catalog-filter-trigger"
-            type="button"
+          <Button
+            aria-label={`Filter artifacts. ${activeCount === 0 ? "No filters applied" : `${activeCount} applied`}.`}
+            size="sm"
+            variant="outline"
           />
         )}
       >
-        <IconFilter aria-hidden="true" stroke={1.8} />
-        <span>{triggerLabel}</span>
-        {activeFilterCount === 0 ? null : (
-          <span aria-hidden="true" className="as-catalog-filter-trigger__count">
-            {activeFilterCount}
-          </span>
-        )}
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner
-          align="start"
-          className="as-catalog-filter-positioner"
-          sideOffset={6}
-        >
-          <Popover.Popup aria-label="Filter artifacts" className="as-catalog-filter-popover">
-            {activeFilterCount === 0 ? null : (
-              <div className="as-catalog-filter-popover__actions">
-                <button
-                  className="as-catalog-filter-popover__clear"
-                  onClick={() => {
-                    onCommentFilterChange("all");
-                    onTagFiltersChange([]);
-                  }}
-                  type="button"
-                >
-                  Clear filters
-                </button>
-              </div>
-            )}
-            <fieldset>
-              <legend>Comments</legend>
-              {([
-                ["all", "All artifacts"],
-                ["with", "With comments"],
-                ["without", "No comments"],
-              ] as const).map(([value, label]) => (
-                <label className="as-catalog-filter-option" data-selected={commentFilter === value} key={value}>
-                  <input
-                    checked={commentFilter === value}
-                    name="catalog-comment-filter"
-                    onChange={() => onCommentFilterChange(value)}
-                    type="radio"
-                    value={value}
-                  />
-                  <span>{label}</span>
-                  {commentFilter === value ? (
-                    <IconCheck aria-hidden="true" stroke={2} />
-                  ) : null}
-                </label>
-              ))}
-            </fieldset>
-            <fieldset>
-              <legend>Tags</legend>
-              <button
-                aria-pressed={tagFilters.length === 0}
-                className="as-catalog-filter-option"
-                data-selected={tagFilters.length === 0}
-                onClick={() => onTagFiltersChange([])}
-                type="button"
+        <IconFilter data-icon="inline-start" />
+        <span className="max-w-32 truncate">{filterLabel(commentFilter, tagFilters)}</span>
+        {activeCount === 0 ? null : <Badge variant="secondary">{activeCount}</Badge>}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Comments</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            onValueChange={(value: CatalogCommentFilter) => onCommentFilterChange(value)}
+            value={commentFilter}
+          >
+            {commentFilters.map((filter) => (
+              <DropdownMenuRadioItem key={filter.value} value={filter.value}>
+                {filter.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Tags</DropdownMenuLabel>
+          <DropdownMenuCheckboxItem
+            checked={tagFilters.length === 0}
+            onCheckedChange={() => onTagFiltersChange([])}
+          >
+            Any tag
+          </DropdownMenuCheckboxItem>
+          {tags.length === 0 ? (
+            <DropdownMenuItem disabled>No tags in the loaded catalog.</DropdownMenuItem>
+          ) : tags.map((tag) => (
+            <DropdownMenuCheckboxItem
+              checked={tagFilters.includes(tag)}
+              key={tag}
+              onCheckedChange={(checked) => toggleTag(tag, checked)}
+            >
+              {tag}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
+        {activeCount === 0 ? null : (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                onClick={() => {
+                  onCommentFilterChange("all");
+                  onTagFiltersChange([]);
+                }}
               >
-                <span>Any tag</span>
-                {tagFilters.length === 0 ? (
-                  <IconCheck aria-hidden="true" stroke={2} />
-                ) : null}
-              </button>
-              {tags.length === 0 ? (
-                <p className="as-catalog-filter-popover__empty">No tags in the loaded catalog.</p>
-              ) : tags.map((tag) => (
-                <label className="as-catalog-filter-option" data-selected={tagFilters.includes(tag)} key={tag}>
-                  <input
-                    checked={tagFilters.includes(tag)}
-                    name="catalog-tag-filter"
-                    onChange={() => toggleTag(tag)}
-                    type="checkbox"
-                    value={tag}
-                  />
-                  <span>{tag}</span>
-                  {tagFilters.includes(tag) ? (
-                    <IconCheck aria-hidden="true" stroke={2} />
-                  ) : null}
-                </label>
-              ))}
-            </fieldset>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+                Clear filters
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
-

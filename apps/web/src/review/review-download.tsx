@@ -1,12 +1,15 @@
 import {IconDownload} from "@tabler/icons-react";
 
 import {api, type ArtifactVersion} from "@/api/client";
+import {Button, buttonVariants} from "@/components/ui/button";
+import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 
 export interface ReviewDownload {
   readonly href: string;
   readonly title: string;
 }
 
+/** One file downloads as itself; several download as one ZIP. */
 export function reviewDownload(
   projectId: string,
   artifactId: string | null,
@@ -17,12 +20,7 @@ export function reviewDownload(
   const onlyEntry = entries.length === 1 ? entries[0] : undefined;
   if (onlyEntry !== undefined) {
     return {
-      href: api.versionFileUrl(
-        projectId,
-        artifactId,
-        version.version.id,
-        onlyEntry.path,
-      ),
+      href: api.versionFileUrl(projectId, artifactId, version.version.id, onlyEntry.path),
       title: `Download ${onlyEntry.path}`,
     };
   }
@@ -32,32 +30,36 @@ export function reviewDownload(
   };
 }
 
+/** Icon download control; disabled until a version is readable. */
 export function ReviewDownloadControl({
-  className,
   download,
+  variant = "ghost",
 }: {
-  readonly className: string;
   readonly download: ReviewDownload | null;
+  readonly variant?: "ghost" | "secondary";
 }) {
   if (download === null) {
     return (
-      <button aria-label="Download" className={className} disabled type="button">
-        <IconDownload aria-hidden="true" stroke={1.8} />
-        <span className="as-button__label">Download</span>
-      </button>
+      <Button aria-label="Download" disabled size="icon-sm" variant={variant}>
+        <IconDownload />
+      </Button>
     );
   }
   return (
-    <a
-      aria-label="Download"
-      className={className}
-      download
-      href={download.href}
-      title={download.title}
-    >
-      <IconDownload aria-hidden="true" stroke={1.8} />
-      <span className="as-button__label">Download</span>
-    </a>
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <a
+            aria-label="Download"
+            className={buttonVariants({size: "icon-sm", variant})}
+            download
+            href={download.href}
+          />
+        )}
+      >
+        <IconDownload />
+      </TooltipTrigger>
+      <TooltipContent>{download.title}</TooltipContent>
+    </Tooltip>
   );
 }
-

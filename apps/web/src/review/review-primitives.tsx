@@ -1,7 +1,14 @@
-import {IconLink} from "@tabler/icons-react";
+import type {ReactNode} from "react";
+import {IconFileSearch} from "@tabler/icons-react";
 
-import type {ArtifactDetails} from "@/api/client";
+import {Button} from "@/components/ui/button";
+import {Card, CardContent, CardDescription, CardHeader, CardTitle} from "@/components/ui/card";
+import {Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle} from "@/components/ui/empty";
+import {Kbd} from "@/components/ui/kbd";
+import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
+import {ArtifactMark} from "./artifact-mark.tsx";
 
+/** An icon-only button whose label shows as a tooltip, with its shortcut. */
 export function IconButton({
   active,
   children,
@@ -9,94 +16,84 @@ export function IconButton({
   keyShortcuts,
   label,
   onClick,
-  title,
+  shortcut,
 }: {
   readonly active?: boolean;
-  readonly children: React.ReactNode;
+  readonly children: ReactNode;
   readonly disabled?: boolean;
+  /** The `aria-keyshortcuts` value, such as "Meta+\\ Control+\\". */
   readonly keyShortcuts?: string;
   readonly label: string;
   readonly onClick: () => void;
-  readonly title?: string;
+  /** The key to show in the tooltip, such as "]". */
+  readonly shortcut?: string;
 }) {
   return (
-    <button
-      aria-keyshortcuts={keyShortcuts}
-      aria-label={label}
-      aria-pressed={active}
-      className="as-icon-button"
-      data-active={active}
-      disabled={disabled}
-      onClick={onClick}
-      title={title ?? label}
-      type="button"
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            aria-keyshortcuts={keyShortcuts}
+            aria-label={label}
+            aria-pressed={active}
+            data-active={active}
+            disabled={disabled}
+            onClick={onClick}
+            size="icon-sm"
+            variant={active === true ? "secondary" : "ghost"}
+          />
+        )}
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>
+        {label}
+        {shortcut === undefined ? null : <Kbd>{shortcut}</Kbd>}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
-export function AccessPill({access}: {readonly access: ArtifactDetails["artifact"]["accessSetting"]}) {
-  return (
-    <span className="as-pill" data-access={access}>
-      {access === "public_link" ? "public" : "private"}
-    </span>
-  );
-}
-
+/** The viewer's state before an artifact or version is readable. */
 export function PreviewWelcome({
-  description = "Choose an artifact from the catalog to inspect its current immutable version.",
+  description = "Choose an artifact to inspect its current immutable version.",
   title = "Select an artifact",
 }: {
   readonly description?: string;
   readonly title?: string;
 }) {
   return (
-    <div className="as-preview-welcome">
-      <span aria-hidden="true"><IconLink stroke={1.4} /></span>
-      <p>Immutable artifact workspace</p>
-      <h2>{title}</h2>
-      <small>{description}</small>
-    </div>
+    <Empty className="h-full">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><IconFileSearch /></EmptyMedia>
+        <EmptyTitle aria-level={2} role="heading">{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 
-export function InlineState({
-  description,
-  title,
-  tone = "neutral",
-}: {
-  readonly description: string;
-  readonly title: string;
-  readonly tone?: "error" | "neutral";
-}) {
-  return (
-    <div className="as-inline-state" data-tone={tone} role="status">
-      <strong>{title}</strong>
-      <p>{description}</p>
-    </div>
-  );
-}
-
+/** A full-page sign-in, loading, or failure state shown before the shell. */
 export function ReviewGate({
   action,
   description,
   title,
 }: {
-  readonly action?: React.ReactNode;
+  readonly action?: ReactNode;
   readonly description: string;
   readonly title: string;
 }) {
   return (
-    <main className="as-gate">
-      <section>
-        <span aria-hidden="true" className="as-gate__mark">A</span>
-        <p>Artifact Server</p>
-        <h1>{title}</h1>
-        <small>{description}</small>
-        {action}
-      </section>
+    <main className="flex min-h-svh items-center justify-center bg-muted/40 p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <ArtifactMark className="mb-2 size-9" />
+          <CardDescription>Artifact Server</CardDescription>
+          <CardTitle aria-level={1} role="heading">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        {action === undefined ? null : <CardContent>{action}</CardContent>}
+      </Card>
     </main>
   );
 }
-

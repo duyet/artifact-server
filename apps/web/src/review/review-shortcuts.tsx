@@ -1,6 +1,9 @@
-import {IconKeyboard} from "@tabler/icons-react";
-import {Popover} from "@base-ui/react/popover";
+import {Fragment} from "react";
 
+import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle} from "@/components/ui/dialog";
+import {Kbd, KbdGroup} from "@/components/ui/kbd";
+
+/** Whether a single-key review shortcut must yield to typing or an open layer. */
 export function reviewShortcutBlocked(event: KeyboardEvent): boolean {
   if (
     event.defaultPrevented
@@ -20,6 +23,7 @@ export function reviewShortcutBlocked(event: KeyboardEvent): boolean {
     "select",
     "[contenteditable]:not([contenteditable='false'])",
     "[role='dialog']",
+    "[role='alertdialog']",
     "[role='listbox']",
     "[role='menu']",
     "[role='radiogroup']",
@@ -30,82 +34,72 @@ export function reviewShortcutBlocked(event: KeyboardEvent): boolean {
   }
 
   return document.querySelector([
-    ".as-catalog-filter-popover[data-open]",
     "[data-slot='popover-content'][data-open]",
     "[role='dialog'][data-open]",
+    "[role='alertdialog'][data-open]",
     "[role='listbox'][data-open]",
     "[role='menu'][data-open]",
   ].join(", ")) !== null;
 }
 
-export function ReviewKeyboardShortcuts() {
+const shortcutGroups = [
+  {
+    shortcuts: [
+      {keys: [["K"], ["↑"]], label: "Previous artifact"},
+      {keys: [["J"], ["↓"]], label: "Next artifact"},
+    ],
+    title: "Navigate",
+  },
+  {
+    shortcuts: [
+      {keys: [["["]], label: "Sidebar"},
+      {keys: [["]"]], label: "Inspector or comments"},
+      {keys: [["F"]], label: "Full screen"},
+      {keys: [["Esc"]], label: "Back or close current layer"},
+      {keys: [["⌘ / Ctrl", "\\"]], label: "Reveal hidden viewer controls"},
+    ],
+    title: "Layout",
+  },
+] as const;
+
+/** Every single-key shortcut the review application answers. */
+export function KeyboardShortcutsDialog({
+  onOpenChange,
+  open,
+}: {
+  readonly onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+}) {
   return (
-    <Popover.Root>
-      <Popover.Trigger
-        render={(
-          <button
-            aria-label="Keyboard shortcuts"
-            className="as-keyboard-shortcuts__trigger"
-            title="Keyboard shortcuts"
-            type="button"
-          />
-        )}
-      >
-        <IconKeyboard aria-hidden="true" stroke={1.8} />
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner
-          align="end"
-          className="as-keyboard-shortcuts__positioner"
-          side="top"
-          sideOffset={8}
-        >
-          <Popover.Popup className="as-keyboard-shortcuts">
-            <Popover.Title className="as-keyboard-shortcuts__title">
-              Keyboard shortcuts
-            </Popover.Title>
-            <section aria-labelledby="review-shortcuts-navigation">
-              <h3 id="review-shortcuts-navigation">Navigate</h3>
-              <dl>
-                <div>
-                  <dt>Previous artifact</dt>
-                  <dd><kbd>K</kbd><span>or</span><kbd>↑</kbd></dd>
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <DialogDescription>Shortcuts pause while you type or a menu is open.</DialogDescription>
+        </DialogHeader>
+        {shortcutGroups.map((group) => (
+          <section aria-label={group.title} className="flex flex-col gap-2" key={group.title}>
+            <h3 className="text-xs font-medium text-muted-foreground">{group.title}</h3>
+            <dl className="flex flex-col gap-1.5">
+              {group.shortcuts.map((shortcut) => (
+                <div className="flex items-center justify-between gap-4 text-sm" key={shortcut.label}>
+                  <dt>{shortcut.label}</dt>
+                  <dd className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {shortcut.keys.map((combo, index) => (
+                      <Fragment key={combo.join("+")}>
+                        {index === 0 ? null : <span>or</span>}
+                        <KbdGroup>
+                          {combo.map((key) => <Kbd key={key}>{key}</Kbd>)}
+                        </KbdGroup>
+                      </Fragment>
+                    ))}
+                  </dd>
                 </div>
-                <div>
-                  <dt>Next artifact</dt>
-                  <dd><kbd>J</kbd><span>or</span><kbd>↓</kbd></dd>
-                </div>
-              </dl>
-            </section>
-            <section aria-labelledby="review-shortcuts-layout">
-              <h3 id="review-shortcuts-layout">Layout</h3>
-              <dl>
-                <div>
-                  <dt>Artifact catalog</dt>
-                  <dd><kbd>[</kbd></dd>
-                </div>
-                <div>
-                  <dt>Inspector or comments</dt>
-                  <dd><kbd>]</kbd></dd>
-                </div>
-                <div>
-                  <dt>Full screen</dt>
-                  <dd><kbd>F</kbd></dd>
-                </div>
-                <div>
-                  <dt>Back or close current layer</dt>
-                  <dd><kbd>Esc</kbd></dd>
-                </div>
-                <div>
-                  <dt>Reveal hidden viewer controls</dt>
-                  <dd><kbd>⌘ / Ctrl</kbd><span>+</span><kbd>\</kbd></dd>
-                </div>
-              </dl>
-            </section>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </DialogContent>
+    </Dialog>
   );
 }
-

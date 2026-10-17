@@ -9,7 +9,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
@@ -45,8 +44,13 @@ export function DetailsInspector({
     : sourceDriftDescription(details.sourceBinding.status, "captured");
   return (
     <InspectorStack>
-      <InspectorSection count={5} title="Artifact">
+      <InspectorSection count={6} title="Artifact">
         <InspectorRow label="name" title={details.artifact.name} value={details.artifact.name} />
+        <InspectorRow
+          label="owner"
+          title={details.artifact.owner.principalId}
+          value={details.artifact.owner.displayName ?? details.artifact.owner.principalId}
+        />
         <InspectorRow
           label="access"
           value={<AccessBadge access={details.artifact.accessSetting} />}
@@ -55,8 +59,13 @@ export function DetailsInspector({
         <InspectorRow label="artifact id" mono title={details.artifact.id} value={details.artifact.id} />
         <InspectorRow label="project id" mono title={details.artifact.projectId} value={details.artifact.projectId} />
       </InspectorSection>
-      <InspectorSection count={5} title="Version">
+      <InspectorSection count={6} title="Version">
         <InspectorRow label="number" title={String(version.version.number)} value={String(version.version.number)} />
+        <InspectorRow
+          label="publisher"
+          title={version.version.publisherPrincipalId}
+          value={version.version.publisherDisplayName ?? version.version.publisherPrincipalId}
+        />
         <InspectorRow label="saved" title={formatTimestamp(version.version.createdAt)} value={formatTimestamp(version.version.createdAt)} />
         <InspectorRow label="entry" mono title={version.manifest.entryPath} value={version.manifest.entryPath} />
         <InspectorRow label="routing" title={version.version.routingMode} value={version.version.routingMode} />
@@ -194,6 +203,28 @@ export function TombstoneArtifactControl({
   readonly onConfirm: () => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button className="w-fit" onClick={() => setOpen(true)} size="sm" type="button" variant="destructive">
+        Delete artifact
+      </Button>
+      <DeleteArtifactDialog artifact={artifact} onConfirm={onConfirm} onOpenChange={setOpen} open={open} />
+    </>
+  );
+}
+
+/** Confirm a tombstone by typing the artifact name. */
+export function DeleteArtifactDialog({
+  artifact,
+  onConfirm,
+  onOpenChange,
+  open,
+}: {
+  readonly artifact: Pick<ArtifactDetails["artifact"], "id" | "name">;
+  readonly onConfirm: () => Promise<boolean>;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly open: boolean;
+}) {
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(false);
   const confirm = async (): Promise<void> => {
@@ -201,19 +232,20 @@ export function TombstoneArtifactControl({
     setPending(true);
     const removed = await onConfirm();
     setPending(false);
-    if (removed) setOpen(false);
+    if (removed) {
+      setValue("");
+      onOpenChange(false);
+    }
   };
   return (
     <AlertDialog
       onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
+        if (pending) return;
+        onOpenChange(nextOpen);
         if (!nextOpen) setValue("");
       }}
       open={open}
     >
-      <AlertDialogTrigger render={<Button className="w-fit" size="sm" variant="destructive" />}>
-        Delete artifact
-      </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {artifact.name}?</AlertDialogTitle>
