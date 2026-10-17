@@ -78,6 +78,7 @@
     "test:helm": "scripts/with-kubernetes-test-tools.sh scripts/run-helm-integration.sh",
     "test:gcp-pulumi": "pnpm --dir deploy/pulumi/gcp verify",
     "test:storage-s3": "bash scripts/run-minio-integration.sh",
+    "test:storage-versity": "bash scripts/run-versity-integration.sh",
     "test:storage-native-cloud": "bash scripts/run-native-cloud-storage-integration.sh",
     "test:external-storage-runtime": "bash scripts/run-external-storage-runtime-integration.sh",
     "test:local-package": "vitest run --config tests/configs/vitest.release.config.ts --reporter=default --reporter=json --outputFile.json=project/evidence/local-package.json",

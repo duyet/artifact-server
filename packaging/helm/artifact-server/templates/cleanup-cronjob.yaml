@@ -23,6 +23,7 @@ spec:
             app.kubernetes.io/component: cleanup
         spec:
           restartPolicy: Never
+          enableServiceLinks: false
           serviceAccountName: {{ include "artifact-server.serviceAccountName" . }}
           automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
           securityContext:

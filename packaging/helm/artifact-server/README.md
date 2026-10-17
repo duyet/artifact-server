@@ -7,7 +7,7 @@ already exist.
 ## Supported versions
 
 - Helm 4.2.x is the release baseline.
-- Kubernetes 1.34, 1.35, and 1.36 are supported by this chart version.
+- Kubernetes 1.33, 1.34, 1.35, and 1.36 are supported by this chart version.
 - The chart uses stable chart API `v2`. Chart API `v3` is still experimental.
 
 The chart may render with other versions, but that is not a support claim.
@@ -95,16 +95,65 @@ the values file. Disabling it is safe only when an operator runs the same
 
 The Service is private `ClusterIP`. Choose one routing path:
 
-- Enable the included Ingress and provide application and wildcard-content TLS
-  Secret names.
+- Enable the included Ingress and provide the application TLS Secret name. Add
+  the wildcard-content TLS Secret name when a content domain is set.
 - Leave it disabled and point an existing Ingress or Gateway at the Service.
 - On a managed cluster, leave it disabled and use the provider load balancer or
   edge configuration.
 
-Both `artifacts.example.com` and `*.content.example.net` route to the same
-Service. An enabled Ingress requires the application origin to have no path or
-explicit port. The two hosts remain separate registrable domains for browser
-isolation.
+With a content domain, both `artifacts.example.com` and
+`*.content.example.net` route to the same Service. The two hosts remain
+separate registrable domains for browser isolation. An enabled Ingress requires
+the application origin to have no path or explicit port.
+
+### One host, no content domain
+
+Leave `configuration.contentDomain` empty to serve everything from the
+application host. The chart then renders one Ingress host and one TLS entry, so
+only `ingress.applicationTlsSecretName` is needed. Leave
+`ingress.contentTlsSecretName` empty. The chart does not set
+`ARTIFACT_SERVER_CONTENT_DOMAIN`.
+
+The server serves published content on the application host under paths. A CSP
+sandbox isolates each artifact from the application and from other artifacts.
+This is weaker than separate registrable domains, so use it only when you
+cannot get a wildcard content domain.
+
+### Uploads behind ingress-nginx
+
+ingress-nginx limits request bodies to 1 MiB by default and buffers uploads.
+Artifact uploads have no application size limit, so turn both off:
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+```
+
+## S3-compatible storage
+
+For a server that is not AWS S3, set `configuration.s3.endpoint` to its URL.
+Both `https://` and plain `http://` endpoints are accepted. Set
+`configuration.s3.forcePathStyle` to `true` when the server does not support
+bucket names in the host.
+
+```yaml
+configuration:
+  s3:
+    bucket: artifact-server
+    region: us-east-1
+    endpoint: http://s3.example.internal:7070
+    forcePathStyle: true
+```
+
+`configuration.s3.region` must match the region the server expects. Some servers
+reject a request signed for another region. A server that needs static keys
+uses `secret.keys.s3AccessKeyId` and `secret.keys.s3SecretAccessKey`.
+
+When NetworkPolicy is enabled, allow egress to the S3 port, for example 7070.
 
 ## Workload identity
 
@@ -115,8 +164,8 @@ mechanism requires the projected Kubernetes token.
 
 ## WorkOS authentication
 
-Private-team deployments require exactly one browser identity provider. To use
-WorkOS, set `identity.workosClientId`, `identity.workosIssuer`, and
+A browser identity provider is optional, and an installation has at most one. To
+use WorkOS, set `identity.workosClientId`, `identity.workosIssuer`, and
 `secret.keys.workosApiKey`. `identity.workosIssuer` is the exact HTTPS AuthKit
 origin for this environment, and `secret.keys.workosApiKey` names a key in the
 existing Kubernetes Secret. The chart rejects a partial WorkOS configuration.
@@ -142,7 +191,14 @@ followed by `/mcp` in `aud`, which the provider produces from an audience mapper
 or an RFC 8707 resource indicator.
 
 One installation has one browser-login provider. The chart rejects values that
-configure neither provider or configure WorkOS and OIDC together.
+configure WorkOS and OIDC together.
+
+## No identity provider
+
+Leave every `identity` value and `secret.keys.workosApiKey` and
+`secret.keys.oidcClientSecret` empty to run without browser login. Browser login
+is then off, and people publish with the API key from the `api-token` Secret
+value. All publishers share that one key.
 
 ## NetworkPolicy
 
@@ -150,7 +206,8 @@ NetworkPolicy is disabled by default. Standard Kubernetes policies cannot allow
 external services by DNS name, so the chart cannot safely invent rules for a
 managed database, bucket, WorkOS, or an OTLP collector. Operators can enable the
 template and provide exact native `ingress` and `egress` rules for their CNI and
-network. An empty enabled rule set is default-deny.
+network. An empty enabled rule set is default-deny. An S3 server on a custom port
+needs an egress rule for that port.
 
 ## Scaling and resources
 

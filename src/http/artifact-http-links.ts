@@ -1,9 +1,16 @@
+import {artifactFolder, sameHostVersionPath} from "./same-host-content.js";
+
 /** Build the stable browser URL for an artifact's current version. */
 export function artifactBrowserUrl(
   applicationUrl: URL,
-  artifactId: string,
+  contentDomain: string | null,
+  artifact: {readonly id: string; readonly name: string},
 ): string {
-  return new URL(`/artifacts/${artifactId}`, applicationUrl).toString();
+  const folder = contentDomain === null ? artifactFolder(artifact) : null;
+  return new URL(
+    folder === null ? `/artifacts/${artifact.id}` : `/${folder}/`,
+    applicationUrl,
+  ).toString();
 }
 
 /** Build the authenticated, exact-version review URL used for review and comments. */
@@ -26,9 +33,12 @@ export function artifactReviewUrl(
 /** Build the browser origin for one exact immutable version. */
 export function versionBrowserUrl(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   contentToken: string,
 ): string {
+  if (contentDomain === null) {
+    return new URL(sameHostVersionPath(contentToken), applicationUrl).toString();
+  }
   const versionUrl = new URL(applicationUrl);
   versionUrl.hostname = `${contentToken}.${contentDomain}`;
   versionUrl.pathname = "/";
@@ -40,10 +50,16 @@ export function versionBrowserUrl(
 /** Build the browser URL for one file within an immutable version. */
 export function versionFileBrowserUrl(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   contentToken: string,
   manifestPath: string,
 ): string {
+  if (contentDomain === null) {
+    return new URL(
+      sameHostVersionPath(contentToken, manifestPath),
+      applicationUrl,
+    ).toString();
+  }
   const fileUrl = new URL(
     versionBrowserUrl(applicationUrl, contentDomain, contentToken),
   );
@@ -74,7 +90,7 @@ export function contentBootstrapBrowserUrl(
 /** Build the content-host base URL for one short-lived embedded Review lease. */
 export function previewLeaseBrowserUrl(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   leaseToken: string,
 ): string {
   return versionBrowserUrl(applicationUrl, contentDomain, leaseToken);

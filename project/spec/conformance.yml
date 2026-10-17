@@ -4871,3 +4871,88 @@ requirements:
         result: pass
         run: project/evidence/browser.json
         recorded_at: "2026-08-24T03:47:04.897Z"
+
+  # Fork requirements for the same-host external-storage deployment (docs/fork/DESIGN.md).
+  - id: FRK-000
+    kind: deployment
+    behavior: The S3 object-storage adapter stores, reads, ranges, and removes objects with their metadata on a Versity S3 gateway 1.4.1 posix backend under the SDK default checksums.
+    owner: blob-storage
+    source: {file: ../../docs/fork/DESIGN.md, anchor: storage-on-versity}
+    acceptance:
+      behavior: {id: FRK-000-B, description: "Write a small single-PUT blob, then read a byte range and its metadata back through the adapter."}
+      failure: {id: FRK-000-F, description: "A range outside the stored object fails with a typed error and leaves the object readable."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: No run against Versity exists yet; the fork CI container run and one run against the real gateway are pending.
+    depends_on: [DEP-011]
+    evidence: []
+
+  - id: FRK-001
+    kind: behavior
+    behavior: Without a content domain, every immutable version is served on the application origin under /v/<token>/ with upstream content-host semantics, and cookie-based content sessions are unavailable.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: same-host-url-shape}
+    acceptance:
+      behavior: {id: FRK-001-B, description: "Publish a public multi-file artifact and read its entry, nested files, SPA fallback, and Review lease under /v/ on the application origin."}
+      failure: {id: FRK-001-F, description: "Unknown tokens return 404, private versions without a credential are refused, bootstrap and content-session requests return CapabilityUnavailable, and application routes are unchanged."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [CNT-001]
+    evidence: []
+
+  - id: FRK-002
+    kind: security
+    behavior: Every response from the same-host content router carries a CSP sandbox without allow-same-origin, so artifact code runs in an opaque origin that cannot use application cookies, storage, or credentialed API requests.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: isolation-on-one-origin}
+    acceptance:
+      behavior: {id: FRK-002-B, description: "Every same-host content response, including 206, 304, 404, 401, HEAD, redirects, and the SPA fallback, carries the sandbox policy and Access-Control-Allow-Origin."}
+      failure: {id: FRK-002-F, description: "Hostile artifact JavaScript opened at top level cannot read cookies or storage, make a credentialed API read, submit a credentialed mutation, or register a service worker."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; the browser probe runs only in Chromium.
+    depends_on: [FRK-001, CMT-014]
+    evidence: []
+
+  - id: FRK-003
+    kind: behavior
+    behavior: Without a content domain, the current version of a public-link artifact is served at the readable folder /<name-slug>-<uuid>/, and the artifact link points there.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: folder-name}
+    acceptance:
+      behavior: {id: FRK-003-B, description: "Publish, open the folder link, publish a new version, and observe that the same folder serves the new version."}
+      failure: {id: FRK-003-F, description: "A private artifact folder is refused, a wrong name part or a missing trailing slash redirects to the canonical folder, and no application route can match a content path."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [FRK-001, AUTH-004]
+    evidence: []
+
+  - id: FRK-004
+    kind: behavior
+    behavior: Compact and external-storage servers start without a browser login provider, report login kind none, and accept API-key publishing while browser login stays unavailable.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
+    acceptance:
+      behavior: {id: FRK-004-B, description: "Start with no provider, read login kind none from /auth/context, publish with the API key, and follow a Review link to the artifact folder."}
+      failure: {id: FRK-004-F, description: "Browser login returns InteractiveLoginUnavailable, and a partial OIDC or WorkOS configuration still fails startup."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [AUTH-025]
+    evidence: []
+
+  - id: FRK-005
+    kind: behavior
+    behavior: When the browser login kind is none, new artifacts published over HTTP, MCP, or the CLI without an access setting default to public_link; with login on, the default stays account_required.
+    owner: publishing
+    source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
+    acceptance:
+      behavior: {id: FRK-005-B, description: "Publish without an access setting over HTTP, MCP, and the CLI against a no-login server and observe public_link."}
+      failure: {id: FRK-005-F, description: "The same publishes against a server with login on produce account_required, and an explicit setting always wins."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Tests are not written yet; no deployed run exists.
+    depends_on: [AUTH-002, FRK-004]
+    evidence: []

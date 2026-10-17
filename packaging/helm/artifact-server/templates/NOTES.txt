@@ -12,8 +12,10 @@ Inspect readiness:
 
 {{- if .Values.ingress.enabled }}
 Application: {{ .Values.configuration.applicationOrigin }}
+{{- if .Values.configuration.contentDomain }}
 Content: https://*.{{ .Values.configuration.contentDomain }}
+{{- end }}
 {{- else }}
 Ingress is disabled. Route the private Service through your Ingress, Gateway,
-or provider edge using the configured application and wildcard content hosts.
+or provider edge using the configured application{{ if .Values.configuration.contentDomain }} and wildcard content hosts{{ else }} host{{ end }}.
 {{- end }}

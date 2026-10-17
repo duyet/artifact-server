@@ -50,6 +50,7 @@ import {
   commentClearScopes,
   commentThreadStates,
   dispatchedThreadFilters,
+  type AccessSetting,
   type AgentDispatchRecord,
   type AgentDispatchState,
   type ArtifactVersion,
@@ -93,6 +94,7 @@ import {
   versionBrowserUrl,
   versionFileBrowserUrl,
 } from "../http/artifact-http-links.js";
+import {assertCookieSessionsAvailable} from "../http/same-host-content.js";
 import {artifactServerFailureResponse} from "../http/artifact-http-failure.js";
 import {
   renderBundleMessage,
@@ -376,7 +378,9 @@ const manifestResource = new ResourceTemplate(
 export interface ArtifactMcpServerDependencies {
   readonly applicationOrigin: string;
   readonly applicationRuntime: ApplicationRuntime;
-  readonly contentDomain: string;
+  readonly contentDomain: string | null;
+  /** The access setting `artifact_commit_upload` applies when the caller names none. */
+  readonly defaultAccessSetting: AccessSetting;
   /** Secret-free optional Git state exposed by capability discovery. */
   readonly gitHistory: GitHistoryCapability;
   /** Advertises the local linked-artifact capability in discovery. */
@@ -894,7 +898,11 @@ export function createArtifactMcpServer(
       return {
         artifacts: page.items.map((artifact) => ({
           accessSetting: artifact.accessSetting,
-          browserUrl: artifactBrowserUrl(applicationUrl, artifact.id),
+          browserUrl: artifactBrowserUrl(
+            applicationUrl,
+            dependencies.contentDomain,
+            artifact,
+          ),
           createdAt: artifact.createdAt,
           currentVersionId: artifact.currentVersionId,
           id: artifact.id,
@@ -952,7 +960,11 @@ export function createArtifactMcpServer(
           details.current,
         ),
         links: {
-          artifact: artifactBrowserUrl(applicationUrl, details.artifact.id),
+          artifact: artifactBrowserUrl(
+            applicationUrl,
+            dependencies.contentDomain,
+            details.artifact,
+          ),
         },
       };
     }),
@@ -1248,7 +1260,7 @@ export function createArtifactMcpServer(
         target: z.discriminatedUnion("kind", [
           z.object({
             accessSetting: accessSettingSchema.default(
-              accessSettings.accountRequired,
+              dependencies.defaultAccessSetting,
             ),
             kind: z.literal("new_artifact"),
             name: z.string().min(1).max(200),
@@ -1315,7 +1327,11 @@ export function createArtifactMcpServer(
       return {
         artifact: state.artifact,
         links: {
-          artifact: artifactBrowserUrl(applicationUrl, state.artifact.id),
+          artifact: artifactBrowserUrl(
+            applicationUrl,
+            dependencies.contentDomain,
+            state.artifact,
+          ),
           version: versionBrowserUrl(
             applicationUrl,
             dependencies.contentDomain,
@@ -2423,13 +2439,17 @@ function projectProjection(project: ProjectRecord) {
 
 function publishedVersionProjection(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   published: PublishedVersion,
 ) {
   return {
     artifact: published.artifact,
     links: {
-      artifact: artifactBrowserUrl(applicationUrl, published.artifact.id),
+      artifact: artifactBrowserUrl(
+        applicationUrl,
+        contentDomain,
+        published.artifact,
+      ),
       review: artifactReviewUrl(
         applicationUrl,
         published.version.projectId,
@@ -2457,7 +2477,7 @@ function sourceBindingProjection(binding: SourceBindingRecord) {
 
 function linkedPublicationProjection(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   linked: LinkedPublication,
 ) {
   const published = publishedVersionProjection(
@@ -2556,7 +2576,7 @@ function derivedIdempotencyKey(parts: readonly string[]): string {
 
 function versionProjection(
   applicationUrl: URL,
-  contentDomain: string,
+  contentDomain: string | null,
   artifactId: string,
   saved: ArtifactVersion,
 ) {
@@ -2638,8 +2658,13 @@ async function authorizedBrowserUrl(
         dependencies.contentDomain,
         saved.version.contentToken,
       )
-      : artifactBrowserUrl(applicationUrl, artifactId);
+      : artifactBrowserUrl(
+        applicationUrl,
+        dependencies.contentDomain,
+        details.artifact,
+      );
   }
+  assertCookieSessionsAvailable(dependencies.contentDomain);
   const issued = await runMcpApplicationEffect(
     dependencies,
     ContentAccessService.use((access) =>

@@ -11,11 +11,12 @@ secret-management system.
 
 The first chart is a stable chart API `v2` package. Helm 4.2 is the development
 and release baseline. Chart API `v3` remains experimental and is not used. The
-supported Kubernetes window is the three upstream-maintained minors at the time
-of this decision: 1.34, 1.35, and 1.36. Static rendering covers all three;
-release behavior runs in a pinned Kubernetes 1.36 kind cluster. A later release
-must move this window deliberately rather than silently claiming forward
-compatibility.
+supported Kubernetes window is 1.33 through 1.36. The original window was the
+three upstream-maintained minors at the time of this decision: 1.34, 1.35, and
+1.36. This fork moved it deliberately to add 1.33 for a 1.33 cluster. Static
+rendering covers all four; release behavior still runs in a pinned Kubernetes
+1.36 kind cluster. A later release must move this window deliberately rather
+than silently claiming forward compatibility.
 
 The default workload has two replicas, a zero-unavailable rolling strategy, a
 PodDisruptionBudget with `maxUnavailable: 1`, preferred node spreading, HTTP
@@ -39,8 +40,9 @@ schema and never apply migrations or fall back to local storage.
 The Service is private `ClusterIP`. Ingress is disabled by default. When enabled,
 one standard `networking.k8s.io/v1` Ingress routes the application host and the
 wildcard content host to the same Service and references operator-supplied TLS
-Secrets. A cluster that uses Gateway API or a managed provider edge leaves this
-template disabled and routes the Service itself.
+Secrets. The wildcard content host and its TLS Secret are present only when a
+content domain is configured. A cluster that uses Gateway API or a managed
+provider edge leaves this template disabled and routes the Service itself.
 
 NetworkPolicy is also disabled by default. Standard Kubernetes NetworkPolicy
 cannot express DNS-name egress rules for managed Postgres, S3, R2, WorkOS, or an
@@ -81,9 +83,9 @@ customers already run differently in every cluster.
 ## Verification
 
 The static gate uses pinned Helm 4.2 tooling to lint, package, and render the
-chart for Kubernetes 1.34, 1.35, and 1.36. It fails on mutable release images,
-ordinary-value credentials, incomplete S3 credentials, invalid drain timing,
-and incomplete ingress TLS configuration.
+chart for Kubernetes 1.33, 1.34, 1.35, and 1.36. It fails on mutable release
+images, ordinary-value credentials, incomplete S3 credentials, invalid drain
+timing, and incomplete ingress TLS configuration.
 
 The release gate creates a pinned Kubernetes 1.36 kind cluster with two worker
 nodes and independently managed Postgres and S3-compatible providers. It loads
