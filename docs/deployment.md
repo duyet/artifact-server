@@ -6,7 +6,6 @@ Artifact Server supports local, single-server, Kubernetes, and managed-cloud dep
 
 | Deployment | Data layer | Detailed guide |
 | --- | --- | --- |
-| Cloudflare | D1 and R2 | [Cloudflare](../deploy/cloudflare/README.md) |
 | Compact Compose | SQLite and one file volume | [Compose](../packaging/compose/README.md) |
 | External-storage Compose | PostgreSQL and S3-compatible storage | [Compose](../packaging/compose/README.md) |
 | Kubernetes | PostgreSQL and object storage | [Helm](../packaging/helm/artifact-server/README.md) |

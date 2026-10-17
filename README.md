@@ -6,7 +6,7 @@
 
 Artifact Server gives people and agents one place to publish, review, comment on, version, and share the artifacts they create while building products. Its built-in MCP server gives agents direct access to the same work.
 
-Run it on a laptop for one developer. Deploy it for a private team on Cloudflare, one server, Kubernetes, AWS, or Google Cloud.
+Run it on a laptop for one developer. Deploy it for a private team on one server, Kubernetes, AWS, or Google Cloud.
 
 <p align="center">
   <a href="https://github.com/backnotprop/plannotator"><img src="./docs/images/star-plannotator.svg" alt="Artifact Server is created with Plannotator" width="395"></a>
@@ -18,7 +18,6 @@ Run it on a laptop for one developer. Deploy it for a private team on Cloudflare
 
 - [Why Artifact Server](#why-artifact-server)
 - [Built for AI agents and team collaboration](#built-for-ai-agents-and-team-collaboration)
-- [Cloudflare and Artifact Server](#cloudflare-and-artifact-server)
 - [Deploy it for a team](#deploy-it-for-a-team)
 - [Run it locally](#run-it-locally)
 - [Usage](#usage)
@@ -93,29 +92,12 @@ Live session delivery is available from source for Pi and Claude Code Channels. 
   <a href="./integrations/opencode/README.md"><img src="./docs/assets/opencode-plugin-wanted.svg" alt="OpenCode live-host verification, features, and pull requests are welcome" width="268"></a>
 </p>
 
-## Cloudflare and Artifact Server
-
-Cloudflare is the main hosted deployment target. Cloudflare Artifacts can add private Git-backed history for selected projects. It is off by default and currently requires closed beta access.
-
-<p align="center">
-  <a href="./docs/cloudflare-artifacts.md"><img src="./docs/assets/cloudflare-artifacts-git-handoff.svg" alt="Cloudflare Artifacts provides optional Git-backed history" width="800"></a>
-</p>
-
-- [Deploy Artifact Server on Cloudflare](./deploy/cloudflare/README.md)
-- [Configure optional Git history](./docs/cloudflare-artifacts.md)
-- [Read the Cloudflare Artifacts documentation](https://developers.cloudflare.com/artifacts/)
-
-Cloudflare is optional. Artifact Server also runs locally, on Compose, on Kubernetes, on AWS, and on Google Cloud.
-
-[![Artifact Server supports Cloudflare, Docker Compose, Kubernetes, AWS, and Google Cloud](./docs/assets/supported-deployments.svg)](./docs/deployment.md)
-
 ## Deploy it for a team
 
 Every remote deployment uses one trusted application origin and one isolated wildcard content domain.
 
 | Deployment | Data layer | Guide |
 | --- | --- | --- |
-| Cloudflare | D1 and R2 | [Cloudflare guide](./deploy/cloudflare/README.md) |
 | Compact Compose | SQLite and one file volume | [Compose guide](./packaging/compose/README.md) |
 | External-storage Compose | PostgreSQL and S3-compatible storage | [Compose guide](./packaging/compose/README.md) |
 | Kubernetes | PostgreSQL and object storage | [Helm guide](./packaging/helm/artifact-server/README.md) |

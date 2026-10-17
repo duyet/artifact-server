@@ -7,14 +7,13 @@ restore do not require administrator instructions.
 ## Select the installation and deployment target
 
 Identify the exact installation before changing it. Determine whether it runs
-as a local package, Docker Compose, Kubernetes, Cloudflare, AWS, or Google
+as a local package, Docker Compose, Kubernetes, AWS, or Google
 Cloud. Inspect the matching repository guide instead of translating commands
 from another target:
 
 - local package: `docs/deployment.md`
 - Docker Compose: `packaging/compose/README.md`
 - Kubernetes: `packaging/helm/artifact-server/README.md`
-- Cloudflare: `deploy/cloudflare/README.md`
 - AWS: `deploy/pulumi/aws/README.md`
 - Google Cloud: `deploy/pulumi/gcp/README.md`
 
