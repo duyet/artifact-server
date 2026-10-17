@@ -37,6 +37,7 @@ import {IconButton, PreviewWelcome} from "../review-primitives.tsx";
 import {ReviewPanelEdge} from "../review-panel-edge.tsx";
 import {ReviewShareControl} from "../review-share.tsx";
 import {reviewShortcutBlocked} from "../review-shortcuts.tsx";
+import type {ArtifactCommandId, ArtifactCommands} from "../shell/command-palette.tsx";
 import type {NavigationMode} from "../use-review-navigation.ts";
 import {useReviewPanelMotion} from "../use-review-panel-motion.ts";
 import {useReviewResizablePanel} from "../use-review-resizable-panel.ts";
@@ -65,6 +66,7 @@ export function ArtifactViewer({
   onArtifactChanged,
   onArtifactDeleted,
   onCatalogStale,
+  onCommandsChange,
   path,
   permissions,
   projectId,
@@ -80,6 +82,8 @@ export function ArtifactViewer({
   readonly onArtifactDeleted: (artifactId: string) => void;
   /** Another artifact appeared (a duplicate), so the list is out of date. */
   readonly onCatalogStale: () => void;
+  /** What the command palette may do to this artifact; null once it closes. */
+  readonly onCommandsChange: (commands: ArtifactCommands | null) => void;
   readonly path: string | null;
   readonly permissions: ReviewPermissions;
   readonly projectId: string;
@@ -270,6 +274,22 @@ export function ArtifactViewer({
     return removed;
   };
   const canAct = permissions.canManageArtifacts && details !== null && selectedVersion !== null;
+  const hasDetails = details !== null;
+  useEffect(() => {
+    const available: ArtifactCommandId[] = [];
+    if (canAct) available.push("rename");
+    if (canAct && editable) available.push("edit");
+    if (canAct) available.push("duplicate");
+    if (hasDetails) available.push("share");
+    onCommandsChange({
+      available,
+      run: (command) => {
+        if (command === "share") setShareOpen(true);
+        else setAction(command);
+      },
+    });
+    return () => onCommandsChange(null);
+  }, [canAct, editable, hasDetails, onCommandsChange]);
   const closeAction = (open: boolean): void => {
     if (!open) setAction(null);
   };

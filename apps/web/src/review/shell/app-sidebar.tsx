@@ -38,11 +38,13 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import {Kbd} from "@/components/ui/kbd";
 import {ArtifactMark} from "../artifact-mark.tsx";
 import type {ArtifactCatalog} from "../catalog/use-artifact-catalog.ts";
 import {principalInitials} from "../principal-name.ts";
 import {ReviewProjectPicker} from "../review-project-picker.tsx";
 import {analyticsPath, artifactsPath, settingsPath, withProject, type ReviewRoute} from "../review-routes.ts";
+import {paletteShortcutHint} from "../review-shortcuts.tsx";
 import {ArtifactTree} from "./artifact-tree.tsx";
 
 /** The review application's left rail: project, destinations, artifacts, and you. */
@@ -119,6 +121,9 @@ export function AppSidebar({
               value={catalog.query}
             />
             <IconSearch className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 opacity-50 select-none" />
+            {catalog.query === "" ? (
+              <Kbd className="absolute top-1/2 right-2 hidden -translate-y-1/2 md:inline-flex">{paletteShortcutHint()}</Kbd>
+            ) : null}
           </form>
         </SidebarHeader>
         <SidebarContent>

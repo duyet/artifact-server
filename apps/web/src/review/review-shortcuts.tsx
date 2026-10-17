@@ -5,16 +5,25 @@ import {Kbd, KbdGroup} from "@/components/ui/kbd";
 
 /** Whether a single-key review shortcut must yield to typing or an open layer. */
 export function reviewShortcutBlocked(event: KeyboardEvent): boolean {
-  if (
-    event.defaultPrevented
-    || event.isComposing
-    || event.altKey
+  return event.altKey
     || event.ctrlKey
     || event.metaKey
     || event.shiftKey
-  ) {
-    return true;
-  }
+    || typingOrLayerBlocked(event);
+}
+
+/** Whether the command palette shortcut must yield to typing or an open layer. */
+export function paletteShortcutBlocked(event: KeyboardEvent): boolean {
+  return event.altKey || event.shiftKey || typingOrLayerBlocked(event);
+}
+
+/** The palette shortcut as this platform writes it. */
+export function paletteShortcutHint(): string {
+  return /Mac|iPhone|iPad/u.test(navigator.userAgent) ? "⌘K" : "Ctrl K";
+}
+
+function typingOrLayerBlocked(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.isComposing) return true;
 
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest([
@@ -47,6 +56,7 @@ const shortcutGroups = [
     shortcuts: [
       {keys: [["K"], ["↑"]], label: "Previous artifact"},
       {keys: [["J"], ["↓"]], label: "Next artifact"},
+      {keys: [["⌘ / Ctrl", "K"]], label: "Search and commands"},
     ],
     title: "Navigate",
   },

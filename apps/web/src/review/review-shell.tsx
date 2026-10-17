@@ -1,4 +1,4 @@
-import {Fragment, useCallback, useEffect, useRef, useState} from "react";
+import {Fragment, useCallback, useEffect, useMemo, useRef, useState} from "react";
 
 import type {Project, Session} from "@/api/client";
 import {AnalyticsPage} from "@/analytics/analytics-page";
@@ -14,13 +14,16 @@ import {SidebarInset, SidebarProvider, SidebarTrigger, useSidebar} from "@/compo
 import {Toaster} from "@/components/ui/sonner";
 import {TooltipProvider} from "@/components/ui/tooltip";
 import {ArtifactsPage} from "./catalog/artifacts-page.tsx";
+import {ownedArtifactCounts} from "./catalog/owner-counts.ts";
 import {useArtifactCatalog} from "./catalog/use-artifact-catalog.ts";
+import {OwnerCountsContext} from "./owner-hover-card.tsx";
 import {readReviewLocation, reviewHref, type ReviewLocation} from "./review-location.ts";
 import {reviewPermissions} from "./review-permissions.ts";
 import {parseReviewRoute, withProject} from "./review-routes.ts";
 import {ReviewSettings} from "./review-settings.tsx";
-import {KeyboardShortcutsDialog, reviewShortcutBlocked} from "./review-shortcuts.tsx";
+import {KeyboardShortcutsDialog, paletteShortcutBlocked, reviewShortcutBlocked} from "./review-shortcuts.tsx";
 import {AppSidebar} from "./shell/app-sidebar.tsx";
+import {CommandPalette, type ArtifactCommands} from "./shell/command-palette.tsx";
 import {HomeDialog} from "./shell/home-dialog.tsx";
 import {useReviewNavigation, useSameAppLinks, type NavigationMode} from "./use-review-navigation.ts";
 import {ArtifactViewer} from "./viewer/artifact-viewer.tsx";
@@ -66,8 +69,17 @@ export function ReviewShell({
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const permissions = reviewPermissions(session, project);
   const catalog = useArtifactCatalog(projectId);
+  const {error, filtered, items, loading, nextCursor, ownerScope} = catalog;
+  const ownerCounts = useMemo(
+    () => ownedArtifactCounts({error, filtered, items, loading, nextCursor, ownerScope}),
+    [error, filtered, items, loading, nextCursor, ownerScope],
+  );
   const [homeOpen, setHomeOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  // The open artifact's viewer reports what the palette may do to it.
+  const [artifactCommands, setArtifactCommands] = useState<ArtifactCommands | null>(null);
   const focus = route.kind === "artifacts" && location.artifactId !== null && location.view === "focus";
 
   // Every artifacts and analytics URL names its project, so a copied link
@@ -100,82 +112,94 @@ export function ReviewShell({
 
   return (
     <TooltipProvider>
-      <SidebarProvider className="h-svh overflow-hidden">
-        <SidebarShortcut disabled={focus} />
-        <AppSidebar
-          canManageProjects={permissions.canManageProjects}
-          catalog={catalog}
-          onCreateProject={onCreateProject}
-          onOpenHome={() => setHomeOpen(true)}
-          onOpenShortcuts={() => setShortcutsOpen(true)}
-          onSelectProject={selectProject}
-          onThemeChange={onThemeChange}
-          projectId={projectId}
-          projects={projects}
-          route={route}
-          selectedArtifactId={route.kind === "artifacts" ? location.artifactId : null}
-          session={session}
-          theme={theme}
-        />
-        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
-          {route.kind === "artifacts" && location.artifactId !== null ? (
-            <ArtifactViewer
-              artifactId={location.artifactId}
-              focus={focus}
-              go={go}
-              key={location.artifactId}
-              navItems={catalog.items}
-              onArtifactChanged={catalog.updateArtifact}
-              onArtifactDeleted={(artifactId) => {
-                catalog.removeArtifact(artifactId);
-                go({artifactId: null, path: null, versionId: null, view: null}, "push");
-              }}
-              onCatalogStale={() => void catalog.refresh()}
-              path={location.path}
-              permissions={permissions}
-              projectId={projectId}
-              session={session}
-              theme={theme}
-              versionId={location.versionId}
-            />
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <PageHeader
-                crumbs={route.kind === "artifacts"
-                  ? ["Artifacts"]
-                  : route.kind === "analytics"
-                    ? ["Analytics"]
-                    : ["Settings", settingsTitles[route.settings.kind]]}
-                projectName={route.kind === "settings" ? null : project?.name ?? null}
+      <OwnerCountsContext value={ownerCounts}>
+        <SidebarProvider className="h-svh overflow-hidden">
+          <SidebarShortcut disabled={focus} />
+          <PaletteShortcut onOpen={openPalette} />
+          <AppSidebar
+            canManageProjects={permissions.canManageProjects}
+            catalog={catalog}
+            onCreateProject={onCreateProject}
+            onOpenHome={() => setHomeOpen(true)}
+            onOpenShortcuts={() => setShortcutsOpen(true)}
+            onSelectProject={selectProject}
+            onThemeChange={onThemeChange}
+            projectId={projectId}
+            projects={projects}
+            route={route}
+            selectedArtifactId={route.kind === "artifacts" ? location.artifactId : null}
+            session={session}
+            theme={theme}
+          />
+          <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
+            {route.kind === "artifacts" && location.artifactId !== null ? (
+              <ArtifactViewer
+                artifactId={location.artifactId}
+                focus={focus}
+                go={go}
+                key={location.artifactId}
+                navItems={catalog.items}
+                onArtifactChanged={catalog.updateArtifact}
+                onArtifactDeleted={(artifactId) => {
+                  catalog.removeArtifact(artifactId);
+                  go({artifactId: null, path: null, versionId: null, view: null}, "push");
+                }}
+                onCatalogStale={() => void catalog.refresh()}
+                onCommandsChange={setArtifactCommands}
+                path={location.path}
+                permissions={permissions}
+                projectId={projectId}
+                session={session}
+                theme={theme}
+                versionId={location.versionId}
               />
-              <div className="min-h-0 flex-1 overflow-y-auto" id="main-content">
-                {route.kind === "artifacts" ? (
-                  <ArtifactsPage
-                    catalog={catalog}
-                    onCatalogStale={() => void catalog.refresh()}
-                    onOpenArtifact={openArtifact}
-                    permissions={permissions}
-                    project={project}
-                    projectId={projectId}
-                    session={session}
-                  />
-                ) : route.kind === "analytics" ? (
-                  <AnalyticsPage key={projectId} projectId={projectId} />
-                ) : (
-                  <ReviewSettings
-                    onProjectsChanged={onProjectsChanged}
-                    projects={projects}
-                    route={route.settings}
-                    session={session}
-                  />
-                )}
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <PageHeader
+                  crumbs={route.kind === "artifacts"
+                    ? ["Artifacts"]
+                    : route.kind === "analytics"
+                      ? ["Analytics"]
+                      : ["Settings", settingsTitles[route.settings.kind]]}
+                  projectName={route.kind === "settings" ? null : project?.name ?? null}
+                />
+                <div className="min-h-0 flex-1 overflow-y-auto" id="main-content">
+                  {route.kind === "artifacts" ? (
+                    <ArtifactsPage
+                      catalog={catalog}
+                      onCatalogStale={() => void catalog.refresh()}
+                      onOpenArtifact={openArtifact}
+                      permissions={permissions}
+                      project={project}
+                      projectId={projectId}
+                      session={session}
+                    />
+                  ) : route.kind === "analytics" ? (
+                    <AnalyticsPage key={projectId} projectId={projectId} />
+                  ) : (
+                    <ReviewSettings
+                      onProjectsChanged={onProjectsChanged}
+                      projects={projects}
+                      route={route.settings}
+                      session={session}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </SidebarInset>
-      </SidebarProvider>
+            )}
+          </SidebarInset>
+        </SidebarProvider>
+      </OwnerCountsContext>
       <HomeDialog onOpenChange={setHomeOpen} open={homeOpen} />
       <KeyboardShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
+      <CommandPalette
+        artifactCommands={route.kind === "artifacts" && location.artifactId !== null ? artifactCommands : null}
+        onNavigate={navigate}
+        onOpenArtifact={(artifactId) => openArtifact(artifactId, null)}
+        onOpenChange={setPaletteOpen}
+        open={paletteOpen}
+        projectId={projectId}
+      />
       <Toaster position="bottom-right" theme={theme === "moon" ? "dark" : "light"} />
     </TooltipProvider>
   );
@@ -194,6 +218,20 @@ function SidebarShortcut({disabled}: {readonly disabled: boolean}) {
     window.addEventListener("keydown", toggle);
     return () => window.removeEventListener("keydown", toggle);
   }, [disabled, toggleSidebar]);
+  return null;
+}
+
+/** ⌘K or Ctrl+K opens the command palette, unless you are typing or a layer is open. */
+function PaletteShortcut({onOpen}: {readonly onOpen: () => void}) {
+  useEffect(() => {
+    const open = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey) || paletteShortcutBlocked(event)) return;
+      event.preventDefault();
+      onOpen();
+    };
+    window.addEventListener("keydown", open);
+    return () => window.removeEventListener("keydown", open);
+  }, [onOpen]);
   return null;
 }
 
