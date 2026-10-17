@@ -56,6 +56,11 @@ import {
   PublishArtifactService,
 } from "../application/publish-artifact.js";
 import {
+  PublicArtifactCatalogService,
+  publicCatalogRecentDays,
+  publicCatalogWindowDays,
+} from "../application/public-artifact-catalog.js";
+import {
   type StagedUploadDependencies,
   StagedUploadService,
 } from "../application/staged-upload.js";
@@ -116,6 +121,7 @@ import {
 import type {
   AgentDispatchRepository,
   ArtifactRepository,
+  ArtifactViewRepository,
   BlobStore,
   Clock,
   CommentRepository,
@@ -174,6 +180,7 @@ export interface ApplicationAdapters {
   readonly localBootstrapCredential: Redacted.Redacted | null;
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: ArtifactRepository &
+    ArtifactViewRepository &
     CommentRepository &
     ContentSessionRepository &
     ProjectRepository &
@@ -220,6 +227,7 @@ export function createApplicationLayer(
   | PublishArtifactService
   | ProjectGitHistoryService
   | ProjectManagementService
+  | PublicArtifactCatalogService
   | PublicLinkAdministrationService
   | StagedUploadService
 > {
@@ -1027,6 +1035,12 @@ export function createApplicationLayer(
   const contentLayer = ContentAccessService.layer(contentDependencies).pipe(
     Layer.provideMerge(Layer.mergeAll(authorizationLayer, projectLayer)),
   );
+  const publicCatalogLayer = PublicArtifactCatalogService.layer({
+    clock,
+    recentDays: publicCatalogRecentDays,
+    repository: adapters.repository,
+    windowDays: publicCatalogWindowDays,
+  });
   const managementLayer = ArtifactManagementService.layer(
     managementDependencies,
   ).pipe(
@@ -1143,6 +1157,7 @@ export function createApplicationLayer(
     gitHistoryAccessLayer,
     projectGitHistoryLayer,
     projectLayer,
+    publicCatalogLayer,
   );
 }
 

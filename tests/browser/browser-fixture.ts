@@ -44,7 +44,8 @@ export async function localLogin(
   fixture: BrowserFixture,
   waitForApplication = true,
 ): Promise<void> {
-  await fixture.page.goto(fixture.server.baseUrl);
+  // `/` is the public home page now, so sign-in tests open Review by name.
+  await fixture.page.goto(`${fixture.server.baseUrl}/review`);
   if (waitForApplication) {
     await expect(fixture.page.getByRole("link", {name: "Artifact Server"})).toBeVisible();
     await expect(fixture.page).toHaveURL(/\/review\?project=prj_default/u);

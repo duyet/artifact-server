@@ -156,6 +156,54 @@ export interface ArtifactActionPage {
   readonly nextCursor: PageCursor | null;
 }
 
+/** One artifact's stored views on one UTC day. */
+export interface ArtifactViewDay {
+  readonly artifactId: string;
+  readonly count: number;
+  /** The UTC calendar day, as `YYYY-MM-DD`. */
+  readonly day: string;
+}
+
+/** One artifact's all-time view total. */
+export interface ArtifactViewTotal {
+  readonly artifactId: string;
+  readonly count: number;
+}
+
+/** One artifact's view counts over the reported windows. */
+export interface ArtifactViewCounts {
+  readonly last7Days: number;
+  readonly last30Days: number;
+  readonly total: number;
+}
+
+/** A live public artifact with the facts the home page tree shows. */
+export interface PublicArtifactSummary {
+  readonly accessSetting: AccessSetting;
+  /** The current version's creation time, which is the artifact's last change. */
+  readonly currentVersionCreatedAt: string;
+  readonly id: string;
+  readonly name: string;
+  readonly path: string | null;
+}
+
+/** One public artifact with its sparse daily series and its window counts. */
+export interface PublicArtifactCatalogItem {
+  readonly artifact: PublicArtifactSummary;
+  /** Only the days inside the window that have views, ascending. */
+  readonly series: readonly ArtifactViewDay[];
+  readonly views: ArtifactViewCounts;
+}
+
+/** Every live public artifact with its counts, newest first. */
+export interface PublicArtifactCatalog {
+  readonly artifacts: readonly PublicArtifactCatalogItem[];
+  readonly generatedAt: string;
+  /** True when the installation holds more public artifacts than were read. */
+  readonly truncated: boolean;
+  readonly windowDays: number;
+}
+
 /** The durable tombstone returned by an artifact deletion. */
 export interface ArtifactDeletion {
   readonly artifact: ArtifactTombstone;
@@ -215,7 +263,14 @@ export interface VersionContent {
   readonly accessSetting: AccessSetting;
   readonly artifactId: string;
   readonly contentToken: string;
+  /** The manifest entry this request resolved to, which may be an asset. */
   readonly entry: ManifestEntry;
+  /**
+   * The version's declared entry document. `entry` is this value only when the
+   * request asked for the document; a delivery caller needs both to tell a
+   * page apart from an asset.
+   */
+  readonly entryPath: string;
   readonly isCurrent: boolean;
   readonly projectId: string;
   readonly versionId: string;

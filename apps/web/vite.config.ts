@@ -9,8 +9,10 @@ export default defineConfig({
     rollupOptions: {
       // Review is the only trusted application. The isolated frame remains a
       // separate entry so untrusted artifact rendering never carries the
-      // application's API client.
+      // application's API client. The public home page is a third entry so an
+      // anonymous viewer on the VPN never downloads Review's bundle.
       input: {
+        index: new URL("./index.html", import.meta.url).pathname,
         "review-frame": new URL("./review-frame.html", import.meta.url).pathname,
         review: new URL("./review.html", import.meta.url).pathname,
       },
@@ -37,10 +39,10 @@ export default defineConfig({
 });
 
 /**
- * Production publishes extensionless routes for Artifact Server review and
- * its isolated frame. Vite resolves multi-page entries by file name, so
- * development maps the public routes onto those documents and redirects the
- * former route to its canonical replacement.
+ * Production publishes extensionless routes for the public home page, Artifact
+ * Server review, and its isolated frame. Vite resolves multi-page entries by
+ * file name, so development maps the public routes onto those documents and
+ * redirects the former route to its canonical replacement.
  */
 function documentRoutes(): Plugin {
   return {
@@ -75,7 +77,6 @@ function documentRoutes(): Plugin {
 }
 
 function legacyReviewRoute(pathname: string, query: string): string | null {
-  if (pathname === "/") return `/review${query}`;
   if (pathname === "/projects") return `/review/settings/projects${query}`;
   if (pathname === "/administration/members") return `/review/settings/members${query}`;
   if (pathname === "/administration/api-keys") return `/review/settings/api-keys${query}`;

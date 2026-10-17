@@ -43,6 +43,8 @@ export interface RunningTestServer {
   readonly baseUrl: string;
   readonly hostname: string;
   readonly port: number;
+  /** Write buffered entry-document view counts now, without waiting for a drain. */
+  flushArtifactViews(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -193,6 +195,9 @@ export async function startTestServer(
 
   return {
     baseUrl: `http://${server.hostname}:${server.port}`,
+    flushArtifactViews: async () => {
+      await server.flushArtifactViews();
+    },
     hostname: server.hostname,
     port: server.port,
     stop: () => server.close(),

@@ -18,6 +18,8 @@ import type {ExpiredStagingCleanupService} from "./expired-staging-cleanup.js";
 import type {GitHistoryAccessService} from "./git-history-access.js";
 import type {PublicLinkAdministrationService} from
   "./public-link-administration.js";
+import type {PublicArtifactCatalogService} from
+  "./public-artifact-catalog.js";
 
 /** Application services shared by every Artifact Server entry point. */
 export type ApplicationServices =
@@ -36,6 +38,7 @@ export type ApplicationServices =
   | PublishArtifactService
   | ProjectManagementService
   | ProjectGitHistoryService
+  | PublicArtifactCatalogService
   | PublicLinkAdministrationService
   | StagedUploadService;
 

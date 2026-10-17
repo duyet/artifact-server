@@ -56,6 +56,8 @@ import {
   type ArtifactState,
   type ArtifactTombstone,
   type ArtifactVersion,
+  type ArtifactViewDay,
+  type ArtifactViewTotal,
   type CommentAuthor,
   type CommentReplyCreation,
   type CommentReplyRecord,
@@ -69,6 +71,7 @@ import {
   type ManifestEntry,
   type PageCursor,
   type PublishedVersion,
+  type PublicArtifactSummary,
   type ProjectRecord,
   type RegisteredAgentPresence,
   type RegisteredAgentRecord,
@@ -81,6 +84,8 @@ import {
 import type {
   AgentDispatchRepository,
   ArtifactRepository,
+  ArtifactViewDelta,
+  ArtifactViewRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
@@ -108,6 +113,7 @@ import type {
   ListCommentThreads,
   MarkDispatchDelivered,
   MarkDispatchFailed,
+  ReadArtifactViewDays,
   RecordAgentActivity,
   RecordSourceFreshness,
   RegisterAgent,
@@ -262,6 +268,22 @@ const artifactRowSchema = z.object({
   projectId: z.string(),
 });
 const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
+const artifactViewDayRowSchema = z.object({
+  artifactId: z.string(),
+  count: z.number().int().nonnegative(),
+  day: z.string(),
+});
+const artifactViewTotalRowSchema = z.object({
+  artifactId: z.string(),
+  count: z.number().int().nonnegative(),
+});
+const publicArtifactSummaryRowSchema = z.object({
+  accessSetting: accessSettingSchema,
+  currentVersionCreatedAt: z.string(),
+  id: z.string(),
+  name: z.string(),
+  path: z.string().nullable(),
+});
 const artifactListRowSchema = artifactRowSchema.extend({
   commentCount: z.number().int().nonnegative(),
   versionCount: z.number().int().positive(),
@@ -294,6 +316,7 @@ const versionContentRowSchema = z.object({
   artifactId: z.string(),
   contentToken: z.string(),
   disposition: dispositionSchema,
+  entryPath: z.string(),
   isCurrent: z.union([z.literal(0), z.literal(1)]).transform((value) => value === 1),
   mediaType: z.string(),
   path: z.string(),
@@ -546,6 +569,7 @@ interface PageResult<Item> {
 export class SqliteArtifactRepository implements
   AgentDispatchRepository,
   ArtifactRepository,
+  ArtifactViewRepository,
   CommentRepository,
   ContentSessionRepository,
   GitHistoryMirrorStore,
@@ -1795,6 +1819,82 @@ export class SqliteArtifactRepository implements
     });
   }
 
+  listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]> {
+    return Promise.resolve().then(() =>
+      z.array(publicArtifactSummaryRowSchema).parse(this.#database
+        .prepare(
+          `SELECT
+             artifacts.id,
+             artifacts.name,
+             artifacts.path,
+             artifacts.access_setting AS accessSetting,
+             versions.created_at AS currentVersionCreatedAt
+           FROM artifacts
+           JOIN versions ON versions.id = artifacts.current_version_id
+           WHERE artifacts.deleted_at IS NULL
+             AND artifacts.access_setting = 'public_link'
+           ORDER BY artifacts.created_at DESC, artifacts.id DESC
+           LIMIT ?`,
+        )
+        .all(limit)));
+  }
+
+  readArtifactViewDays(
+    command: ReadArtifactViewDays,
+  ): Promise<readonly ArtifactViewDay[]> {
+    if (command.artifactIds.length === 0) return Promise.resolve([]);
+    return Promise.resolve().then(() => {
+      const placeholders = command.artifactIds.map(() => "?").join(", ");
+      const rows = this.#database
+        .prepare(
+          `SELECT artifact_id AS artifactId, day, count
+           FROM artifact_views
+           WHERE artifact_id IN (${placeholders}) AND day >= ? AND day <= ?
+           ORDER BY artifact_id, day`,
+        )
+        .all(...command.artifactIds, command.sinceDay, command.untilDay);
+      return z.array(artifactViewDayRowSchema).parse(rows);
+    });
+  }
+
+  readArtifactViewTotals(
+    artifactIds: readonly string[],
+  ): Promise<readonly ArtifactViewTotal[]> {
+    if (artifactIds.length === 0) return Promise.resolve([]);
+    return Promise.resolve().then(() => {
+      const placeholders = artifactIds.map(() => "?").join(", ");
+      const rows = this.#database
+        .prepare(
+          `SELECT artifact_id AS artifactId, SUM(count) AS count
+           FROM artifact_views
+           WHERE artifact_id IN (${placeholders})
+           GROUP BY artifact_id`,
+        )
+        .all(...artifactIds);
+      return z.array(artifactViewTotalRowSchema).parse(rows);
+    });
+  }
+
+  recordArtifactViews(
+    deltas: readonly ArtifactViewDelta[],
+  ): Promise<void> {
+    if (deltas.length === 0) return Promise.resolve();
+    return Promise.resolve().then(() => {
+      const insert = this.#database.prepare(
+        `INSERT INTO artifact_views (artifact_id, day, count)
+         VALUES (?, ?, ?)
+         ON CONFLICT(artifact_id, day) DO UPDATE SET count = count + excluded.count`,
+      );
+      // One writer acquisition for the whole batch, so a burst is one
+      // `BEGIN IMMEDIATE` rather than one per artifact.
+      return this.#transaction(() => {
+        for (const delta of deltas) {
+          insert.run(delta.artifactId, delta.day, delta.count);
+        }
+      });
+    });
+  }
+
   findVersionRecord(
     projectId: string,
     artifactId: string,
@@ -2161,6 +2261,7 @@ export class SqliteArtifactRepository implements
             a.project_id AS projectId,
             v.content_token AS contentToken,
             v.id AS versionId,
+            v.entry_path AS entryPath,
             e.path AS path,
             e.size AS size,
             e.media_type AS mediaType,
@@ -2204,6 +2305,7 @@ export class SqliteArtifactRepository implements
         artifactId: parsed.artifactId,
         contentToken: parsed.contentToken,
         entry,
+        entryPath: parsed.entryPath,
         isCurrent: parsed.isCurrent,
         projectId: parsed.projectId,
         versionId: parsed.versionId,
@@ -4814,6 +4916,14 @@ export class SqliteArtifactRepository implements
         artifact_id TEXT NOT NULL REFERENCES artifacts(id),
         tag TEXT NOT NULL,
         PRIMARY KEY (artifact_id, tag)
+      ) STRICT;
+
+      -- One row is one artifact on one UTC day. Nothing here names a viewer.
+      CREATE TABLE IF NOT EXISTS artifact_views (
+        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+        day TEXT NOT NULL,
+        count INTEGER NOT NULL CHECK (count >= 0),
+        PRIMARY KEY (artifact_id, day)
       ) STRICT;
 
       CREATE TABLE IF NOT EXISTS idempotency_records (

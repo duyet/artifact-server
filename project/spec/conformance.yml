@@ -4995,7 +4995,7 @@ requirements:
       failure: {id: FRK-008-F, description: "HEAD, an asset, a 404, and a Review lease add nothing, a private artifact is never counted, a burst larger than one drain chunk lands exactly once per artifact, and the stored row carries only artifact id, day, and count."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: Tests are not written yet. Proved locally against SQLite only; the Postgres migration and upsert, and the D1 table, run in CI with Docker, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server with temporary disk storage, including the buffered drain, the day boundary, a burst larger than one chunk, and every request shape that must not count. The Postgres migration 0013 and the D1 table run only in CI with Docker, the browser captures run only in CI, and no deployed run exists.
     depends_on: [CNT-001]
     evidence: []
 
@@ -5009,6 +5009,6 @@ requirements:
       failure: {id: FRK-009-F, description: "A private or deleted artifact is absent, the endpoint needs no credential while /api/v1/artifacts still does, an artifact path cannot shadow the endpoint, and / carries the application policy and not the content sandbox."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: Tests are not written yet. The tree builder is proved locally with no database; the Postgres read path and the light and dark screenshots run in CI, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server, including the ordering, both windows, the sparse series, an anonymous read, a private and a deleted artifact, the application policy on /, and the pure tree and chart builders with no server and no browser. The Postgres read path and the light and dark browser captures run only in CI, and no deployed run exists.
     depends_on: [FRK-008, FRK-007, FRK-002]
     evidence: []

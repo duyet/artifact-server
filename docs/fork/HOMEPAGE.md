@@ -90,12 +90,12 @@ The call sits in `serveVersionContent` after `authorizeVersionContent` returns a
 
 ```ts
 if (context.req.method === "GET" &&
-    (requestedPath === "" || requestedPath === content.entry.path)) {
+    (requestedPath === "" || requestedPath === content.entryPath)) {
   dependencies.artifactViews?.record(content.artifactId);
 }
 ```
 
-`requestedPath` is `""` for `/` and the manifest path otherwise (`src/manifest/create-manifest.ts:73`). `content.entry.path` is the version's own entry path, so the check names the document rather than a URL shape.
+`requestedPath` is `""` for `/` and the manifest path otherwise (`src/manifest/create-manifest.ts:73`). `content.entryPath` is the version's declared entry document, which is why `VersionContent` carries it beside `entry`: `entry` is whichever manifest entry the request resolved to, so it equals `entryPath` for the page and differs from it for every asset.
 
 ### Written without blocking the response
 
@@ -114,7 +114,7 @@ Losses are bounded and stated: a process killed between a record and its drain l
 
 ## 2. The tree endpoint
 
-`GET /api/v1/public/tree` is anonymous. It returns public artifacts as a nested folder tree with counts.
+`GET /api/v1/public/tree` is anonymous. It returns every public artifact with its view counts, newest first.
 
 ### Why `/api/v1/public/` is anonymous
 
@@ -135,34 +135,25 @@ A prefix rule rather than an allowlist of exact paths, so the next anonymous rea
 ```jsonc
 {
   "artifactCount": 4,
-  "folders": [
+  "artifacts": [
     {
-      "artifacts": [
-        {
-          "access": "public_link",
-          "name": "Agent console",
-          "path": "2026/10/agent-console",
-          "series": [{"count": 2, "day": "2026-10-17"}],
-          "updatedAt": "2026-10-17T07:41:02.113Z",
-          "url": "https://artifacts.example.internal/2026/10/agent-console/",
-          "views": {"last7Days": 3, "last30Days": 9, "total": 41}
-        }
-      ],
-      "folders": [],
-      "label": "10",
-      "path": "2026/10",
+      "access": "public_link",
+      "name": "Agent console",
+      "path": "2026/10/agent-console",
+      "series": [{"count": 2, "day": "2026-10-17"}],
+      "updatedAt": "2026-10-17T07:41:02.113Z",
+      "url": "https://artifacts.example.internal/2026/10/agent-console/",
       "views": {"last7Days": 3, "last30Days": 9, "total": 41}
     }
   ],
   "generatedAt": "2026-10-17T08:00:00.000Z",
   "loginKind": "none",
-  "series": [{"count": 2, "day": "2026-10-17"}],
   "truncated": false,
-  "ungrouped": {"artifacts": [], "folders": [], "label": "Ungrouped", "path": null, "views": null},
-  "views": {"last7Days": 3, "last30Days": 9, "total": 41},
   "windowDays": 30
 }
 ```
+
+A flat list, not a nested tree. The endpoint reads and shapes; the browser groups and renders. That split keeps the wire format to what the database already returns, keeps one definition of "newest first" instead of two, and lets the grouping be tested as a pure function with no server and no browser.
 
 Field decisions:
 
@@ -171,12 +162,11 @@ Field decisions:
 - **`series` is sparse and ascending.** Days with no views are absent, so the payload stays small on a quiet server. The client densifies against `windowDays`. A dense 30-element array per artifact would be 30 times the bytes for the same information.
 - **`url` is absolute** and comes from `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`), the same builder `links.artifact` uses, so the home page can never advertise a URL the server would not serve. In path mode it is `/<path>/`, otherwise `/<folder>/`.
 - **`access` is always `public_link`.** The field exists so the client does not have to assume, and so issue 4 can widen the endpoint to authenticated callers without changing the item shape.
-- **`ungrouped` has `path: null` and `views: null`.** Its `views` is null because summing the artifacts' own totals would need a second aggregate and no caller needs it; the page shows the artifacts.
 - **`loginKind` is `none`, `oidc`, or `workos`** from `dependencies.browserAccess` (`src/core/browser-access.ts`). The home page reads it to decide whether to offer a sign-in link. Issue 4 owns the link itself.
 - **`windowDays` is 30** and is echoed so the client never hard-codes it.
 - **`truncated` is a boolean, never absent.** A client must not have to tell "not truncated" from "the server did not say".
 
-There is no `nextCursor`. The tree is the whole public catalog for one installation, capped at the 500 newest public artifacts. When more exist, `truncated` is `true`, so a partial list never reads as a complete one.
+There is no `nextCursor`. The response is the whole public catalog for one installation, capped at the 500 newest public artifacts. When more exist, `truncated` is `true`, so a partial list never reads as a complete one.
 
 ### Reading it
 
@@ -184,10 +174,10 @@ One query for the artifacts, one for the window rows, one for the totals.
 
 ```sql
 -- artifacts: the 500 newest live public artifacts, in every project
-SELECT id, name, path, access_setting, current_version_id
-  FROM artifacts
- WHERE deleted_at IS NULL AND access_setting = 'public_link'
- ORDER BY created_at DESC, id DESC
+SELECT a.id, a.name, a.path, a.access_setting, v.created_at
+  FROM artifacts a JOIN versions v ON v.id = a.current_version_id
+ WHERE a.deleted_at IS NULL AND a.access_setting = 'public_link'
+ ORDER BY a.created_at DESC, a.id DESC
  LIMIT 500;
 
 -- window rows for exactly those artifacts
@@ -195,35 +185,37 @@ SELECT artifact_id, day, count FROM artifact_views
  WHERE artifact_id = ANY(…) AND day >= ? AND day <= ?;
 
 -- all-time totals for exactly those artifacts
-SELECT artifact_id, SUM(count) AS total FROM artifact_views
+SELECT artifact_id, SUM(count) FROM artifact_views
  WHERE artifact_id = ANY(…) GROUP BY artifact_id;
 ```
 
 Both view queries are bounded by the artifact set the first query returned, so the payload is `O(artifacts × days actually used)`, not `O(all history)`. The totals query has no day bound because "total" is not a window; it reads at most one row per artifact.
 
+The 7-day and 30-day counts are `SUM(count)` over the window's first 7 and all 30 days, computed from the rows the second query already returned. No third query, and the numbers cannot disagree with `series`.
+
 ### Grouping
 
-The grouping is a pure function, not SQL, because it is the product behavior and it must be unit-tested without a database.
+The grouping is a pure function on the client, because it is display order and display order has one owner.
 
 1. Split each artifact's `path` on `/`. `2026/10/agent-console` yields `["2026", "10", "agent-console"]`.
-2. The last element is the leaf; the leading elements are the folder chain. An artifact with `path === null` goes to `ungrouped`.
-3. Folders are keyed by their full path, so `2026` and `2026/10` are separate nodes and a child always has one parent.
+2. The last element is the leaf and the leading elements are the folder chain. An artifact with `path === null` goes to the ungrouped list, which renders last under its own label.
+3. Folders are keyed by their full path, so `2026` and `2026/10` are separate nodes and a child always has exactly one parent.
 4. Order artifacts by `updatedAt` descending, then `id`. That is "newest first", and `id` breaks ties so the order is total.
 5. Order sibling folders by the newest `updatedAt` anywhere beneath them, descending, then `label`. A folder with no artifacts cannot occur, because a folder exists only when an artifact creates it.
 6. Label a folder with its last segment, so `2026/10` reads `10` under `2026`, as the brief's `2026` › `10` requires.
 
 Prefix-free paths (section 11) make step 3 unambiguous: no folder path is also an artifact path, so no node is both a leaf and a branch.
 
-The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPublicArtifactTree`, `densifyDailySeries`, and `sparklineHeights`. All three are pure and are tested from `tests/web/home-tree.test.ts`, which imports them directly — the vitest root includes only `tests/**/*.test.ts`.
+The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPublicArtifactTree`, `densifyDailySeries`, and `sparklineBars`. All three are pure and are tested from `tests/web/home-tree.test.ts`, which imports them directly — the vitest root includes only `tests/**/*.test.ts`.
 
 ### The chart
 
-`views` is a per-day count, not a rate, and a server is not busy enough for a log scale to matter.
+`views` is a per-day count, not a rate, and one internal server is not busy enough for a log scale to matter.
 
-- **Home page.** One bar per day across all public artifacts, 30 days, `--chart-2` bars on `--muted` for zero days. Rendered as inline SVG from `sparklineHeights`, so it needs no chart library, no measurement, and no client bundle for a shape that is 30 `<rect>` elements.
-- **Each artifact row.** The same function at 30 bars in a fixed 96×24 box, beside the total. A row with no views renders a flat baseline rather than an empty box, so the column stays aligned.
+- **Home page.** One bar per day summed across every public artifact, 30 days, on `--chart-2`. The client sums the sparse series it already received, so the headline chart and the rows can never disagree. Rendered as inline SVG from `sparklineBars`: no chart library, no layout measurement, no client code beyond 30 `<rect>` elements.
+- **Each artifact row.** The same function at 30 bars in a fixed 96×24 box beside the total. A row with no views draws the bars at zero height, so the column stays aligned instead of collapsing.
 
-Both charts are labelled with `aria-label` carrying the numbers in words, and the SVG is `aria-hidden` with a visually hidden table beside it, because a chart nobody can read is not an accessible chart.
+Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that a screen reader reads, because a chart nobody can read is not an accessible chart.
 
 ## 3. The page
 
@@ -249,22 +241,19 @@ Two requirements, because the counting and the tree fail differently.
 
 Branch `feat/homepage-tree`, one pull request. Each commit adds its ledger entry with its tests, because `scripts/check-conformance-test-ids.rb` rejects unknown IDs. Local checks are single test files; Postgres and browser checks run in CI.
 
+The table is shorter than the shape of the change suggested. The counters, the endpoint, the page, and their tests share `src/http/create-http-app.ts`, `src/core/model.ts`, and `src/core/ports.ts`, so splitting them would mean staging hunks inside those files and shipping a commit whose page cannot render. Section 11's commits were split because each had its own file; this work has three files that belong together, so it lands as one commit with its tests, then the browser proof, then the operator docs.
+
 | # | Commit | Check |
 | --- | --- | --- |
 | 1 | `docs(fork): design the home page tree and view analytics` | This file and the two ledger entries. |
-| 2 | `feat(storage): add the artifact view table` | `tests/conformance/frk-008-artifact-views.test.ts` FRK-008-B builds the table by starting a server on an empty directory, publishes two artifacts, reads entry documents, and observes the counts through the tree endpoint. `pnpm typecheck` covers all three backends. CI: `tests/integration/external-storage-runtime.test.ts` migrates to `requiredPostgresSchemaVersion`, so `0013` runs. |
-| 3 | `feat(views): record entry-document views without blocking` | FRK-008-F. B: views stay buffered until a drain, and a burst larger than the drain chunk lands exactly once per artifact. F: HEAD, assets, 404s, private artifacts, and Review leases add nothing; the table holds exactly three columns; a content response never waits for the drain. |
-| 4 | `feat(http): serve the public artifact tree` | `tests/conformance/frk-009-artifact-tree.test.ts` FRK-009-B. B: nesting, `2026` › `10` labels, newest-first order, the ungrouped group, sparse series, 7/30-day and all-time totals, and `url` from `artifactBrowserUrl`. F: a private or deleted artifact is absent, no credential is needed, `/api/v1/artifacts` still needs one, `/` carries no sandbox header, and a path-shaped artifact cannot shadow the endpoint. |
-| 5 | `feat(web): render the home page tree` | `tests/web/home-tree.test.ts` proves the pure tree builder, the series densifier, and the chart geometry. `pnpm --filter @artifact-server/web typecheck`. |
-| 6 | `test(web): screenshot the home page light and dark` | CI only. The axe run must be clean in both themes. |
-| 7 | `docs: document the home page tree` | This file, `README.md`, and `docs/fork/RUNBOOK.md`. |
-
-The `PublishedVersion` used for `updatedAt` needs no new read: `listPublicArtifacts` returns the artifact row and its current version in one query, the same shape `ArtifactListItem` already has (`src/core/model.ts:141`).
+| 2 | `feat(home): list public artifacts as a tree and count their views` | `pnpm typecheck` and `pnpm lint` across all three backends and the web app. `tests/conformance/frk-008-artifact-views.test.ts` (FRK-008-B, FRK-008-F) and `tests/conformance/frk-009-artifact-tree.test.ts` (FRK-009-B, FRK-009-F) drive a real server over temporary disk storage and a temporary SQLite database. `tests/http/artifact-view-recorder.test.ts` drives the recorder against that database: coalescing, one row per day across a midnight, a drain larger than one chunk, and a view recorded while a drain is in flight. `tests/web/home-tree.test.ts` proves the nesting, the `2026` › `10` labels, the one-segment group, the ungrouped list, the series densifier, and the chart geometry with no server and no browser. The SQLite table joins the `CREATE TABLE IF NOT EXISTS` baseline, so `tests/conformance/storage-migration.test.ts` keeps passing unchanged. CI: `tests/integration/external-storage-runtime.test.ts` migrates to `requiredPostgresSchemaVersion`, so `0013` runs. |
+| 3 | `test(web): screenshot the home page light and dark` | CI only. `tests/browser/frk-009-home-page.spec.ts` captures the page in both themes and requires a clean axe run in each. |
+| 4 | `docs: document the home page tree` | `docs/fork/RUNBOOK.md`. The upstream `README.md` is untouched, because the fork does not modify it. |
 
 ## Open decisions
 
 1. **The anonymous prefix is `/api/v1/public/`, not a `/public` first segment.** A first-segment route would need an entry in `reservedPathRoots` (section 11), and the reserved list is deliberately short.
-2. **`ungrouped` is one group, not one group per artifact.** An artifact with no path has no folder to nest under, so they collect under one label at the end.
+2. **The endpoint returns a flat list and the browser groups it.** Two definitions of folder order would drift; one owner cannot.
 3. **Counts are lost on an unclean shutdown, bounded by one drain interval.** Writing inline would put a database write on every content response.
-4. **The tree is the 500 newest public artifacts and says so.** A silent cap would read as completeness.
+4. **The response is capped at the 500 newest public artifacts and says so.** A silent cap would read as completeness.
 5. **A `304` counts as a view.** A reload is a page load.
