@@ -49,6 +49,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AccessBadge } from "./access-badge.tsx";
+import { apiKeySettingsLabel, claudeCodeMcpCommand, mcpAddress, mcpAuthorizationHeader } from "./mcp-connection.ts";
 import { AgentLogos } from "./share/agent-logos.tsx";
 import { CopyField } from "./share/copy-field.tsx";
 import { buildAgentReviewPrompt, exactReviewLink } from "./share/review-links.ts";
@@ -217,7 +218,6 @@ export function ReviewShareControl({
 
   const publicArtifact = details?.artifact.accessSetting === "public_link";
   const serverOrigin = details === null ? "" : new URL(details.links.artifact).origin;
-  const mcpAddress = `${serverOrigin}/mcp`;
   const versionLabel = selectedVersion?.version.number ?? "—";
 
   return (
@@ -418,29 +418,29 @@ export function ReviewShareControl({
         ) : screen === "agents" ? (
           <>
             <p className="text-sm text-muted-foreground">
-              Choose the connection that matches where Artifact Server is running.
+              Connect over MCP with an API key from {apiKeySettingsLabel}.
             </p>
             <ItemGroup className="gap-2">
               <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>
-                    <span>On this computer</span>
-                    <Badge variant="secondary">Recommended for local use</Badge>
+                    <span>Claude Code</span>
+                    <Badge variant="secondary">MCP</Badge>
                   </ItemTitle>
                   <ItemDescription className="line-clamp-none">
-                    Detect a supported client, install its private MCP connection, and verify it without copying a token.
+                    Run this, replacing &lt;key&gt; with your API key.
                   </ItemDescription>
                 </ItemContent>
                 <ItemFooter>
                   <CopyField
-                    copyLabel="Copy local connection command"
-                    inputLabel="Local connection command"
+                    copyLabel="Copy Claude Code command"
+                    inputLabel="Claude Code command"
                     onCopy={() => void copyText(
-                      "artifactserver connect",
-                      "The local connection command could not be copied.",
+                      claudeCodeMcpCommand(serverOrigin),
+                      "The Claude Code command could not be copied.",
                       { kind: "toast", message: "Command copied" },
                     )}
-                    value="artifactserver connect"
+                    value={claudeCodeMcpCommand(serverOrigin)}
                   />
                 </ItemFooter>
               </Item>
@@ -448,11 +448,11 @@ export function ReviewShareControl({
               <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>
-                    <span>Team or remote server</span>
+                    <span>Codex, Cursor, and other clients</span>
                     <Badge variant="secondary">MCP</Badge>
                   </ItemTitle>
                   <ItemDescription className="line-clamp-none">
-                    Add this server address to the agent. Compatible deployments open browser sign-in; other self-hosted deployments use an administrator-issued scoped key.
+                    Add this address as a remote HTTP MCP server with the header <code>{mcpAuthorizationHeader}</code>.
                   </ItemDescription>
                 </ItemContent>
                 <ItemFooter>
@@ -460,11 +460,11 @@ export function ReviewShareControl({
                     copyLabel="Copy MCP server address"
                     inputLabel="MCP server address"
                     onCopy={() => void copyText(
-                      mcpAddress,
+                      mcpAddress(serverOrigin),
                       "The MCP server address could not be copied.",
                       { kind: "toast", message: "Address copied" },
                     )}
-                    value={mcpAddress}
+                    value={mcpAddress(serverOrigin)}
                   />
                 </ItemFooter>
               </Item>

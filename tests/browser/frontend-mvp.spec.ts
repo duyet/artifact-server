@@ -1117,15 +1117,20 @@ test.describe("Artifact Server frontend MVP", () => {
         expect(agentPrompt).toContain(exactReviewLink.toString());
         expect(agentPrompt).toContain(published.body.links.version);
         expect(agentPrompt).toContain(`${fixture.server.baseUrl}/mcp`);
-        expect(agentPrompt).toContain("artifactserver connect");
+        expect(agentPrompt).toContain("Authorization: Bearer <key>");
       }
 
       await share.getByRole("button", {name: "Connect MCP"}).click();
       await expect(share.getByRole("heading", {name: "Connect MCP"})).toBeVisible();
-      await expect(share.getByText("On this computer", {exact: true})).toBeVisible();
-      await expect(share.getByText("Team or remote server", {exact: true})).toBeVisible();
+      await expect(share.getByText("Claude Code", {exact: true})).toBeVisible();
+      await expect(share.getByText("Codex, Cursor, and other clients", {exact: true}))
+        .toBeVisible();
       await expect(share.getByText("Without MCP", {exact: true})).toBeVisible();
       if (canInspectClipboard) {
+        await share.getByRole("button", {name: "Copy Claude Code command"}).click();
+        expect(await fixture.page.evaluate(() => navigator.clipboard.readText())).toBe(
+          `claude mcp add --transport http artifact-server ${fixture.server.baseUrl}/mcp --header "Authorization: Bearer <key>"`,
+        );
         await share.getByRole("button", {name: "Copy MCP server address"}).click();
         expect(await fixture.page.evaluate(() => navigator.clipboard.readText())).toBe(
           `${fixture.server.baseUrl}/mcp`,

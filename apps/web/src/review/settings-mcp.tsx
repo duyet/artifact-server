@@ -14,8 +14,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {InputGroup, InputGroupAddon} from "@/components/ui/input-group";
+import {claudeCodeMcpCommand, mcpAddress, mcpAuthorizationHeader} from "./mcp-connection.ts";
 
-type CopyTarget = "doctor" | "local" | "remote" | "skill";
+type CopyTarget = "claude" | "remote" | "skill";
 
 const copiedResetMilliseconds = 1_600;
 
@@ -23,7 +24,7 @@ const copiedResetMilliseconds = 1_600;
 export function McpScreen({administrator}: {readonly administrator: boolean}) {
   const [copiedTarget, setCopiedTarget] = useState<CopyTarget | null>(null);
   const copiedResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mcpAddress = `${window.location.origin}/mcp`;
+  const origin = window.location.origin;
 
   useEffect(() => () => {
     if (copiedResetTimer.current !== null) clearTimeout(copiedResetTimer.current);
@@ -51,43 +52,39 @@ export function McpScreen({administrator}: {readonly administrator: boolean}) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        description="Give your coding agent (Codex, Claude Code, Cursor, VS Code) authenticated access to projects, artifacts, versions, and comments. Choose the setup that matches where Artifact Server runs."
+        description="Give your coding agent (Codex, Claude Code, Cursor, VS Code) authenticated access to projects, artifacts, versions, and comments. Every client connects to the same address with an API key sent as a bearer token."
         eyebrow="Connections"
         title="Connect agents with MCP"
       />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <ConnectionCard
-          badge="Local installation"
-          description="Run this on the computer where Artifact Server and your AI client are installed. It detects Codex, Claude Code, Cursor, or VS Code, updates the client configuration, and verifies the connection."
-          title="Connect automatically"
+          badge="Claude Code"
+          description="Run this in a terminal, replacing <key> with an API key."
+          title="Add the server to Claude Code"
         >
           <CopyableValue
-            copied={copiedTarget === "local"}
-            label="Copy local connection command"
-            onCopy={() => void copy("artifactserver connect", "local")}
-            value="artifactserver connect"
+            copied={copiedTarget === "claude"}
+            label="Copy Claude Code command"
+            onCopy={() => void copy(claudeCodeMcpCommand(origin), "claude")}
+            value={claudeCodeMcpCommand(origin)}
           />
-          <p className="text-xs leading-5 text-muted-foreground text-pretty">
-            If more than one supported client is installed, add its name: <code>codex</code>,{" "}
-            <code>claude</code>, <code>cursor</code>, or <code>vscode</code>.
-          </p>
         </ConnectionCard>
 
         <ConnectionCard
-          badge="Team or remote server"
-          description="Add this exact address in your client’s MCP settings. The client should open browser sign-in when it connects."
+          badge="Codex, Cursor, VS Code"
+          description="Add this address as a remote HTTP MCP server in the client’s MCP settings."
           title="Connect with the server address"
         >
           <CopyableValue
             copied={copiedTarget === "remote"}
             label="Copy MCP server address"
-            onCopy={() => void copy(mcpAddress, "remote")}
-            value={mcpAddress}
+            onCopy={() => void copy(mcpAddress(origin), "remote")}
+            value={mcpAddress(origin)}
           />
           <p className="text-xs leading-5 text-muted-foreground text-pretty">
-            If the client cannot use browser authentication, ask an administrator for a scoped
-            API key. Never paste a key into chat.
+            Send the header <code>{mcpAuthorizationHeader}</code>. Administrators create API keys;
+            never paste a key into chat.
           </p>
           {administrator ? (
             <ButtonLink className="self-start" href="/review/settings/api-keys" size="xs" variant="outline">
@@ -96,28 +93,6 @@ export function McpScreen({administrator}: {readonly administrator: boolean}) {
           ) : null}
         </ConnectionCard>
       </div>
-
-      <Card role="region" aria-labelledby="mcp-after-connection">
-        <CardHeader>
-          <CardTitle aria-level={2} id="mcp-after-connection" role="heading">
-            Check the connection
-          </CardTitle>
-          <CardDescription>
-            Inspect the managed service and client registration without changing either one.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <CopyableValue
-            copied={copiedTarget === "doctor"}
-            label="Copy connection check command"
-            onCopy={() => void copy("artifactserver doctor", "doctor")}
-            value="artifactserver doctor"
-          />
-          <p className="text-xs leading-5 text-muted-foreground text-pretty">
-            To remove a managed local connection, run <code>artifactserver disconnect</code>.
-          </p>
-        </CardContent>
-      </Card>
 
       <Card role="region" aria-labelledby="mcp-agent-skill">
         <CardHeader>
@@ -182,9 +157,9 @@ function CopyableValue({
   readonly value: string;
 }) {
   return (
-    <InputGroup>
-      <InputGroupAddon className="min-w-0 flex-1 cursor-auto justify-start overflow-x-auto">
-        <code className="font-mono text-xs whitespace-nowrap text-foreground">{value}</code>
+    <InputGroup className="h-auto">
+      <InputGroupAddon className="min-w-0 flex-1 cursor-auto justify-start py-2">
+        <code className="font-mono text-xs break-all text-foreground">{value}</code>
       </InputGroupAddon>
       <InputGroupAddon align="inline-end">
         <Button

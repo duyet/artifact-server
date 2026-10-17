@@ -1,4 +1,5 @@
 import type {ArtifactDetails, ArtifactVersion} from "@/api/client";
+import {mcpConnectionInstructions} from "../mcp-connection.ts";
 
 export function exactReviewLink(
   selectedVersion: ArtifactVersion,
@@ -50,8 +51,7 @@ Preferred path — Artifact Server MCP:
 5. Review the artifact and report findings in priority order. When comment tools are available, use comment_create against this exact version for precise, actionable findings.
 
 If Artifact Server MCP is not connected:
-- Local setup: run artifactserver connect, then retry with MCP.
-- Remote or team setup: add ${serverOrigin}/mcp to the agent and complete browser sign-in, or use an administrator-issued scoped key when OAuth is unavailable.
+- ${mcpConnectionInstructions(serverOrigin)} Then retry with MCP.
 - Direct HTTP fallback: GET ${apiUrl.toString()} with an admitted session or scoped API key.
 - curl example: curl --fail-with-body --header "Authorization: Bearer $ARTIFACT_SERVER_API_KEY" '${apiUrl.toString()}'
 

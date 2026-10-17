@@ -5,6 +5,7 @@ import {toast} from "sonner";
 import {Button, ButtonLink} from "@/components/ui/button";
 import {Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle} from "@/components/ui/card";
 import {InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea} from "@/components/ui/input-group";
+import {mcpConnectionInstructions} from "../mcp-connection.ts";
 import {mcpSettingsPath} from "../review-routes.ts";
 
 const dismissedKey = "artifact-review-onboarding-dismissed";
@@ -13,12 +14,12 @@ const dismissedKey = "artifact-review-onboarding-dismissed";
 export function agentConnectionPrompt(origin: string, projectId: string): string {
   return `Connect to my Artifact Server and use it to publish and share finished work.
 
-1. Add the MCP server ${origin}/mcp to this agent (Claude Code: claude mcp add --transport http artifact-server ${origin}/mcp; Codex and Cursor: add it as a remote HTTP MCP server). Complete the browser sign-in when asked. On this computer you can instead run: artifactserver connect
+1. ${mcpConnectionInstructions(origin)}
 2. Call artifact_capabilities to learn this installation's limits, then project_list. Use project "${projectId}" unless I name another.
 3. To publish, upload the real files with artifact_create_upload, PUT each file, then artifact_commit_upload. To update, call artifact_get first and pass its current version as expectedCurrentVersionId.
 4. After publishing, give me links.review first so I can read and comment. Use artifact_set_visibility only when I ask to share a public link.
 
-Never paste credentials into chat or files.`;
+Never paste the API key into chat.`;
 }
 
 function readDismissed(): boolean {
