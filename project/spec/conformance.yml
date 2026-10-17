@@ -4963,8 +4963,8 @@ requirements:
     owner: publishing
     source: {file: ../../docs/fork/DESIGN.md, anchor: readable-artifact-paths}
     acceptance:
-      behavior: {id: FRK-006-B, description: "Create an artifact with a path, publish a new version, retry the create, and observe the stored normalized path each time."}
-      failure: {id: FRK-006-F, description: "An equal, ancestor, or descendant path is 409, a concurrent claim of one path admits one create, malformed paths and a path on a new version are 422, a host-mode server answers CapabilityUnavailable, and a deleted artifact frees its path."}
+      behavior: {id: FRK-006-B, description: "Create artifacts with a path over HTTP, MCP, and the CLI, publish a new version, retry the create, and observe the stored normalized path each time."}
+      failure: {id: FRK-006-F, description: "An equal, ancestor, or descendant path is 409, a concurrent claim of one path admits one create, malformed paths over HTTP or MCP and a path on a new version are refused, the CLI refuses --path with --artifact, a host-mode server answers CapabilityUnavailable, and a deleted artifact frees its path."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite only. The Postgres race between two server processes runs in CI with Docker, and no deployed run exists.

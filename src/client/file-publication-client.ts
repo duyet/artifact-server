@@ -191,6 +191,7 @@ export type FilePublicationTarget =
     readonly accessSetting?: "account_required" | "public_link";
     readonly kind: "new_artifact";
     readonly name?: string;
+    readonly path?: string;
     readonly tags: readonly string[];
   }
   | {
@@ -265,6 +266,7 @@ type CommitPublicationTarget =
     readonly accessSetting?: "account_required" | "public_link";
     readonly kind: "new_artifact";
     readonly name: string;
+    readonly path?: string;
     readonly tags: readonly string[];
   }
   | {
@@ -393,9 +395,10 @@ function effectiveCommitTarget(
     name: target.name ?? defaultName,
     tags: target.tags,
   };
-  return target.accessSetting === undefined
+  const accessed = target.accessSetting === undefined
     ? named
     : {...named, accessSetting: target.accessSetting};
+  return target.path === undefined ? accessed : {...accessed, path: target.path};
 }
 
 /** Infer a deterministic browser media type from one file name. */

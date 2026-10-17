@@ -1,5 +1,13 @@
-import {randomUUID} from "node:crypto";
+import {spawn} from "node:child_process";
+import {createHash, randomUUID} from "node:crypto";
+import {mkdtemp, rm, writeFile} from "node:fs/promises";
+import {tmpdir} from "node:os";
+import path from "node:path";
 
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
@@ -27,6 +35,14 @@ const publishedSchema = z.object({
 const errorBodySchema = z.object({
   error: z.object({code: z.string(), message: z.string()}),
 });
+const mcpUploadSchema = z.object({
+  files: z.array(z.object({method: z.literal("PUT"), uploadUrl: z.url()})).min(1),
+  uploadId: z.string(),
+});
+const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+const mcpProtocolVersion = "2026-07-28";
+const newVersionGuard =
+  "--name, --path, --public, and --tag apply only when creating a new artifact.";
 
 type CommitTarget =
   | {
@@ -79,17 +95,126 @@ async function commitAt(
   return {body: await response.json(), commitUrl, status: response.status};
 }
 
-function newArtifact(path?: string): CommitTarget {
+function newArtifact(artifactPath?: string): CommitTarget {
   const target = {
     accessSetting: "public_link" as const,
     kind: "new_artifact" as const,
     name: `Report ${randomUUID()}`,
   };
-  return path === undefined ? target : {...target, path};
+  return artifactPath === undefined ? target : {...target, path: artifactPath};
 }
 
 function refusal(attempt: Attempt) {
   return {...errorBodySchema.parse(attempt.body).error, status: attempt.status};
+}
+
+/** Stage and commit one page through the MCP tools an agent uses. */
+async function commitOverMcp(
+  server: RunningTestServer,
+  installation: TestInstallation,
+  artifactPath: string,
+): Promise<{readonly isError: boolean; readonly structuredContent: unknown}> {
+  const client = new Client(
+    {name: "frk-006-artifact-path-client", version: "1"},
+    {versionNegotiation: {mode: {pin: mcpProtocolVersion}}},
+  );
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${server.baseUrl}/mcp`), {
+        authProvider: {token: async () => installation.apiToken},
+      }),
+    );
+    const bytes = new TextEncoder().encode(`<!doctype html><title>${randomUUID()}</title>`);
+    const planned = await client.callTool({
+      arguments: {
+        entryPath: "index.html",
+        files: [{
+          mediaType: "text/html; charset=utf-8",
+          path: "index.html",
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          size: bytes.byteLength,
+        }],
+      },
+      name: "artifact_create_upload",
+    });
+    const upload = mcpUploadSchema.parse(planned.structuredContent);
+    const [plannedFile] = upload.files;
+    if (plannedFile === undefined) throw new Error("The MCP upload plan has no file.");
+    const uploaded = await fetch(plannedFile.uploadUrl, {
+      body: bytes,
+      headers: {Authorization: `Bearer ${installation.apiToken}`},
+      method: plannedFile.method,
+    });
+    expect(uploaded.status).toBe(200);
+    const committed = await client.callTool({
+      arguments: {
+        idempotencyKey: `frk-006-${randomUUID()}`,
+        target: {
+          accessSetting: "public_link",
+          kind: "new_artifact",
+          name: `MCP report ${randomUUID()}`,
+          path: artifactPath,
+        },
+        uploadId: upload.uploadId,
+      },
+      name: "artifact_commit_upload",
+    });
+    return {
+      isError: committed.isError === true,
+      structuredContent: committed.structuredContent,
+    };
+  } finally {
+    await client.close();
+  }
+}
+
+/** Run the real CLI `publish` on one page, so its flag-to-request mapping is part of the proof. */
+async function publishOverCli(
+  server: RunningTestServer,
+  installation: TestInstallation,
+  cliArguments: readonly string[],
+): Promise<{readonly exitCode: number; readonly stderr: string; readonly stdout: string}> {
+  const workDirectory = await mkdtemp(path.join(tmpdir(), "frk-006-"));
+  try {
+    const entry = path.join(workDirectory, "index.html");
+    await writeFile(entry, `<!doctype html><title>${randomUUID()}</title>`);
+    return await runCli([
+      "publish",
+      entry,
+      "--profile-data",
+      path.join(workDirectory, "profiles"),
+      ...cliArguments,
+    ], {
+      ...process.env,
+      ARTIFACT_SERVER_API_TOKEN: installation.apiToken,
+      ARTIFACT_SERVER_URL: server.baseUrl,
+    });
+  } finally {
+    await rm(workDirectory, {force: true, recursive: true});
+  }
+}
+
+function runCli(
+  cliArguments: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): Promise<{readonly exitCode: number; readonly stderr: string; readonly stdout: string}> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      path.join(repositoryRoot, "node_modules/.bin/tsx"),
+      [path.join(repositoryRoot, "src/cli/main.ts"), ...cliArguments],
+      {cwd: repositoryRoot, env: environment, stdio: ["ignore", "pipe", "pipe"]},
+    );
+    const stdout: Uint8Array[] = [];
+    const stderr: Uint8Array[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("close", (exitCode) => resolve({
+      exitCode: exitCode ?? -1,
+      stderr: Buffer.concat(stderr).toString("utf8"),
+      stdout: Buffer.concat(stdout).toString("utf8"),
+    }));
+  });
 }
 
 describe("readable artifact paths at creation", () => {
@@ -106,7 +231,7 @@ describe("readable artifact paths at creation", () => {
     await removeTestInstallation(installation);
   });
 
-  test("FRK-006-B: an HTTP create stores its normalized path, a new version keeps it, and a retried create replays", async () => {
+  test("FRK-006-B: HTTP, MCP, and CLI creates store their normalized paths, a new version keeps one, and a retried create replays", async () => {
     const idempotencyKey = `frk-006-${randomUUID()}`;
     const target = newArtifact("/2026/10/agent-console/");
     const created = await commit(server, installation, target, idempotencyKey);
@@ -144,6 +269,25 @@ describe("readable artifact paths at creation", () => {
     const pathless = await commit(server, installation, newArtifact());
     expect(pathless.status).toBe(201);
     expect(publishedSchema.parse(pathless.body).artifact.path).toBeNull();
+
+    const overMcp = await commitOverMcp(server, installation, "2026/10/mcp-report/");
+    expect(overMcp.isError).toBe(false);
+    expect(publishedSchema.parse(overMcp.structuredContent).artifact.path)
+      .toBe("2026/10/mcp-report");
+
+    const overCli = await publishOverCli(server, installation, [
+      "--name",
+      "CLI report",
+      "--path",
+      "2026/10/cli-report",
+      "--public",
+    ]);
+    expect({exitCode: overCli.exitCode, stderr: overCli.stderr}).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(publishedSchema.parse(JSON.parse(overCli.stdout)).artifact.path)
+      .toBe("2026/10/cli-report");
   });
 
   test("FRK-006-F: overlapping, malformed, version-scoped, and host-mode paths are refused, and a deleted artifact frees its path", async () => {
@@ -155,7 +299,8 @@ describe("readable artifact paths at creation", () => {
       "2026/10/agent-console",
       "2026/10",
       "2026/10/agent-console/shots",
-    ].map(async (path) => refusal(await commit(server, installation, newArtifact(path)))));
+    ].map(async (artifactPath) =>
+      refusal(await commit(server, installation, newArtifact(artifactPath)))));
     expect(overlaps).toEqual([
       {
         code: "ARTIFACT_PATH_TAKEN",
@@ -188,7 +333,8 @@ describe("readable artifact paths at creation", () => {
       "2026/Oct",
       "2026//report",
       "a/b/c/d/e/f/g",
-    ].map(async (path) => refusal(await commit(server, installation, newArtifact(path)))));
+    ].map(async (artifactPath) =>
+      refusal(await commit(server, installation, newArtifact(artifactPath)))));
     expect(malformed).toEqual([
       {
         code: "INVALID_INPUT",
@@ -224,6 +370,27 @@ describe("readable artifact paths at creation", () => {
       path: "2026/12/elsewhere",
     });
     expect(refusal(onVersion)).toMatchObject({code: "INVALID_INPUT", status: 422});
+
+    const reservedOverMcp = await commitOverMcp(server, installation, "api/report");
+    expect(reservedOverMcp).toEqual({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "INVALID_INPUT",
+          message: 'The first path segment "api" is reserved by the application.',
+        },
+      },
+    });
+    const versionOverCli = await publishOverCli(server, installation, [
+      "--artifact",
+      holder.artifact.id,
+      "--expected-version",
+      holder.artifact.currentVersionId,
+      "--path",
+      "2026/12/elsewhere",
+    ]);
+    expect(versionOverCli.exitCode).not.toBe(0);
+    expect(versionOverCli.stderr).toContain(newVersionGuard);
 
     const reusedKey = `frk-006-${randomUUID()}`;
     const keyedTarget = newArtifact("2026/12/keyed");
