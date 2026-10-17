@@ -10,6 +10,7 @@ import {
   type BlobStorageFailure,
   type CapabilityUnavailable,
   type IdempotencyConflict,
+  type InvalidArtifactEdit,
   InvalidArtifactName,
   type InvalidArtifactTags,
   type InvalidIdempotencyKey,
@@ -20,10 +21,12 @@ import {
   type UploadExpired,
   type UploadIncomplete,
   type UploadNotFound,
+  VersionNotFound,
 } from "../core/errors.js";
 import type { Principal } from "../core/identity.js";
 import type {
   AccessSetting,
+  ArtifactVersion,
   CanonicalManifest,
   PublishedVersion,
 } from "../core/model.js";
@@ -35,7 +38,8 @@ import type {
   PublicationSource,
   StoredBlob,
 } from "../core/ports.js";
-import type {ManifestFailure} from "./parse-manifest.js";
+import {type ManifestFailure, parseManifest} from "./parse-manifest.js";
+import {editedManifestInput} from "./artifact-edit.js";
 import {
   type AuthorizationOperations,
   AuthorizationService,
@@ -78,6 +82,24 @@ export interface PublishPreparedVersionCommand {
   readonly principal: Principal;
   readonly projectId: string;
   readonly source: PublicationSource;
+}
+
+/**
+ * Input for publishing one edited text file: the base version's manifest with
+ * the entry at `path` replaced by the staged upload's single file.
+ */
+export interface PublishPreparedEditCommand {
+  readonly artifactId: string;
+  readonly baseVersionId: string;
+  readonly expectedCurrentVersionId: string;
+  /** The staged sources, which hold exactly the replacement file. */
+  readonly files: readonly PublicationFileSource[];
+  readonly idempotencyKey: string;
+  readonly path: string;
+  readonly principal: Principal;
+  readonly projectId: string;
+  readonly source: PublicationSource;
+  readonly stagedManifest: CanonicalManifest;
 }
 
 type SourceReadinessFailure =
@@ -123,6 +145,11 @@ export interface PublishArtifactRepository {
     projectId: string,
     artifactId: string,
   ): Effect.Effect<PublishedVersion | null, ArtifactRepositoryFailure>;
+  findVersionRecord(
+    projectId: string,
+    artifactId: string,
+    versionId: string,
+  ): Effect.Effect<ArtifactVersion | null, ArtifactRepositoryFailure>;
 }
 
 /** Immutable blob capability required by publication. */
@@ -140,6 +167,7 @@ export interface PublishArtifactDependencies {
 
 /** Expected failures produced by the publication application service. */
 export type PublishArtifactFailure =
+  | InvalidArtifactEdit
   | InvalidArtifactName
   | InvalidArtifactTags
   | InvalidIdempotencyKey
@@ -153,9 +181,13 @@ export type PublishArtifactFailure =
   | ProjectArchived
   | BlobStorageFailure
   | StagingStorageFailure
+  | VersionNotFound
   | AuthorizationDenied;
 
 interface PublishArtifactOperations {
+  readonly publishPreparedEdit: (
+    command: PublishPreparedEditCommand,
+  ) => Effect.Effect<PublishedVersion, PublishArtifactFailure>;
   readonly publishPreparedNew: (
     command: PublishPreparedNewArtifactCommand,
   ) => Effect.Effect<PublishedVersion, PublishArtifactFailure>;
@@ -346,10 +378,87 @@ function makePublishArtifactService(
       authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
       source: command.source,
       versionId: dependencies.ids.versionId(),
+      edit: null,
+    });
+  });
+
+  const publishPreparedEdit = Effect.fn(
+    "PublishArtifactService.publishPreparedEdit",
+  )(function*(
+    command: PublishPreparedEditCommand,
+  ): Effect.fn.Return<PublishedVersion, PublishArtifactFailure> {
+    const current = yield* dependencies.repository.findCurrentVersion(
+      command.projectId,
+      command.artifactId,
+    );
+    if (current === null) {
+      return yield* new ArtifactNotFound({message: "The artifact does not exist."});
+    }
+    yield* authorization.requireVersionPublication(command.principal);
+    const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
+    const inputDigest = artifactEditInputDigest({
+      artifactId: command.artifactId,
+      baseVersionId: command.baseVersionId,
+      expectedCurrentVersionId: command.expectedCurrentVersionId,
+      path: command.path,
+      principalId: command.principal.id,
+      projectId: command.projectId,
+      stagedManifestDigest: command.stagedManifest.digest,
+    });
+    const replayed = yield* dependencies.repository.findIdempotentPublication(
+      command.projectId,
+      idempotencyKey,
+      inputDigest,
+    );
+    if (replayed !== null) return replayed;
+
+    const base = yield* dependencies.repository.findVersionRecord(
+      command.projectId,
+      command.artifactId,
+      command.baseVersionId,
+    );
+    if (base === null) {
+      return yield* new VersionNotFound({
+        message: "The base version does not exist on this artifact.",
+      });
+    }
+    const manifest = yield* editedManifestInput(
+      base.manifest,
+      command.stagedManifest,
+      command.path,
+    ).pipe(Effect.flatMap(parseManifest));
+
+    const sourceCheckTime = DateTime.formatIso(yield* dependencies.clock.now);
+    yield* dependencies.repository.assertPublicationSourceReady(
+      command.source,
+      command.stagedManifest.digest,
+      sourceCheckTime,
+    );
+    // Only the replacement is new. Every other entry names bytes the base
+    // version already stored.
+    yield* storeFiles(command.stagedManifest, command.files);
+
+    const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
+    return yield* dependencies.repository.commitVersion({
+      artifactId: command.artifactId,
+      authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
+      contentToken: dependencies.ids.contentToken(),
+      createdAt,
+      edit: {stagedManifestDigest: command.stagedManifest.digest},
+      expectedCurrentVersionId: command.expectedCurrentVersionId,
+      idempotencyKey,
+      inputDigest,
+      manifest,
+      principalDisplayName: command.principal.displayName,
+      principalId: command.principal.id,
+      projectId: command.projectId,
+      source: command.source,
+      versionId: dependencies.ids.versionId(),
     });
   });
 
   return PublishArtifactService.of({
+    publishPreparedEdit,
     publishPreparedNew,
     publishPreparedVersion,
   });
@@ -398,6 +507,21 @@ function artifactVersionInputDigest(input: ArtifactVersionDigestInput): string {
     principalId: input.principalId,
     projectId: input.projectId,
   });
+  return createHash("sha256").update(canonicalInput).digest("hex");
+}
+
+interface ArtifactEditDigestInput {
+  readonly artifactId: string;
+  readonly baseVersionId: string;
+  readonly expectedCurrentVersionId: string;
+  readonly path: string;
+  readonly principalId: string;
+  readonly projectId: string;
+  readonly stagedManifestDigest: string;
+}
+
+function artifactEditInputDigest(input: ArtifactEditDigestInput): string {
+  const canonicalInput = JSON.stringify({kind: "edit", ...input});
   return createHash("sha256").update(canonicalInput).digest("hex");
 }
 

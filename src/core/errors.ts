@@ -185,6 +185,12 @@ export class InvalidArtifactName extends Schema.TaggedError<InvalidArtifactName>
   messageField,
 ) {}
 
+/** An edit commit does not name one editable text file of its base version. */
+export class InvalidArtifactEdit extends Schema.TaggedError<InvalidArtifactEdit>()(
+  "InvalidArtifactEdit",
+  messageField,
+) {}
+
 /** A requested artifact path does not meet the readable path grammar. */
 export class InvalidArtifactPath extends Schema.TaggedError<InvalidArtifactPath>()(
   "InvalidArtifactPath",
@@ -513,6 +519,7 @@ const artifactServerFailureSchema = Schema.Union([
   AuthorizationDenied,
   ContentBootstrapRejected,
   ContentSessionRequired,
+  InvalidArtifactEdit,
   InvalidArtifactName,
   InvalidArtifactPath,
   InvalidProjectName,

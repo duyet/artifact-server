@@ -1293,7 +1293,9 @@ export class SqliteArtifactRepository implements
     command: CommitCapturedVersion,
   ): Promise<PublishedVersion> {
     return Promise.resolve().then(() =>
-      this.#transaction(() => this.#applyVersionCommit(command, command.binding)),
+      this.#transaction(() =>
+        this.#applyVersionCommit({...command, edit: null}, command.binding)
+      ),
     );
   }
 
@@ -1488,7 +1490,7 @@ export class SqliteArtifactRepository implements
     this.#assertProjectActive(command.projectId);
     this.#assertStagedUploadReady(
       command.source,
-      command.manifest.digest,
+      command.edit?.stagedManifestDigest ?? command.manifest.digest,
       command.createdAt,
     );
 
@@ -1565,9 +1567,11 @@ export class SqliteArtifactRepository implements
       command.versionId,
       command.idempotencyKey,
       command.createdAt,
-      binding === null
+      binding !== null
+        ? artifactActionKinds.capture
+        : command.edit === null
         ? artifactActionKinds.publish
-        : artifactActionKinds.capture,
+        : artifactActionKinds.edited,
       command.principalId,
       command.authorizedByPrincipalId,
     );

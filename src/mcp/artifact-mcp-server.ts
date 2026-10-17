@@ -76,6 +76,7 @@ import {
   maximumDispatchBundleSize,
   maximumDispatchFailureReasonCharacters,
   maximumDispatchNoteCharacters,
+  maximumEditableTextBytes,
   maximumUploadPlanRequestBytes,
 } from "../core/publishing-limits.js";
 import {
@@ -600,6 +601,11 @@ export function createArtifactMcpServer(
         }),
         comparison: z.object({maximumTextFileBytes: z.number()}),
         deployment: z.object({mode: z.enum(["local", "remote"])}),
+        editing: z.object({
+          maximumTextFileBytes: z.number(),
+          mcpTool: z.literal(false),
+          workflow: z.string(),
+        }),
         gitHistory: z.object({
           limits: z.object({
             fileCopyBytes: z.number().int().nonnegative(),
@@ -2438,6 +2444,12 @@ function capabilities(
     },
     comparison: {maximumTextFileBytes: maximumTextDiffBytes},
     deployment: {mode},
+    editing: {
+      maximumTextFileBytes: maximumEditableTextBytes,
+      mcpTool: false as const,
+      workflow:
+        "The web editor stages one text file and commits it over HTTP with target kind edit. MCP never carries file contents, so no tool edits a file.",
+    },
     publishing: {
       acceptsInlineContent: false as const,
       localPathTool: false as const,

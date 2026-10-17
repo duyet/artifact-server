@@ -132,6 +132,7 @@ import {permitsSpaEntryFallback} from "./spa-navigation.js";
 import {
   maximumCommentPageSize,
   maximumDeclaredFiles,
+  maximumEditableTextBytes,
   maximumUploadPlanRequestBytes,
 } from "../core/publishing-limits.js";
 import {
@@ -224,6 +225,13 @@ const commitUploadSchema = z.object({
       artifactId: z.string().min(1).max(200),
       expectedCurrentVersionId: z.string().min(1).max(200),
       kind: z.literal("new_version"),
+    }).strict(),
+    z.object({
+      artifactId: z.string().min(1).max(200),
+      baseVersionId: z.string().min(1).max(200),
+      expectedCurrentVersionId: z.string().min(1).max(200),
+      kind: z.literal("edit"),
+      path: z.string().min(1).max(1_024),
     }).strict(),
   ]),
 }).strict();
@@ -1211,6 +1219,7 @@ export function createHttpApp(
     context.json({
       authenticationMethod: context.get("authenticationMethod"),
       capabilities: {
+        editing: {maximumTextFileBytes: maximumEditableTextBytes},
         gitHistory: gitHistory.read(),
         linkedArtifacts: dependencies.linkedArtifacts === true,
       },

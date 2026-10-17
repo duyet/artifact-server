@@ -129,10 +129,21 @@ export interface CommitNewArtifact {
   readonly versionId: string;
 }
 
+/**
+ * Marks a version commit as an edit: the committed manifest is the base
+ * version's with one entry replaced, so it differs from the staged upload's
+ * manifest, which holds only the replacement file.
+ */
+export interface ArtifactEditCommit {
+  readonly stagedManifestDigest: string;
+}
+
 export interface CommitArtifactVersion {
   readonly artifactId: string;
   readonly contentToken: string;
   readonly createdAt: string;
+  /** Null for an ordinary publish or capture. */
+  readonly edit: ArtifactEditCommit | null;
   readonly expectedCurrentVersionId: string;
   readonly idempotencyKey: string;
   readonly inputDigest: string;
@@ -416,7 +427,8 @@ export interface CommitLinkedArtifact extends CommitNewArtifact {
  * Values used to atomically commit one captured version while refreshing the
  * binding's fingerprint and freshness in the same transaction.
  */
-export interface CommitCapturedVersion extends CommitArtifactVersion {
+export interface CommitCapturedVersion
+  extends Omit<CommitArtifactVersion, "edit"> {
   readonly binding: SourceBindingWrite;
 }
 

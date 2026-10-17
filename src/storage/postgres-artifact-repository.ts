@@ -1408,7 +1408,7 @@ export class PostgresArtifactRepository implements
         yield* this.#assertProjectActive(command.projectId);
         yield* this.#assertStagedUploadReady(
           command.source,
-          command.manifest.digest,
+          command.edit?.stagedManifestDigest ?? command.manifest.digest,
           command.createdAt,
         );
         const currentRows = yield* sql.unsafe<{currentVersionId: string}>(
@@ -1461,7 +1461,11 @@ export class PostgresArtifactRepository implements
             message: "The artifact changed during publication.",
           });
         }
-        yield* this.#insertAction(command, "publish", command.versionId);
+        yield* this.#insertAction(
+          command,
+          command.edit === null ? "publish" : artifactActionKinds.edited,
+          command.versionId,
+        );
         yield* this.#insertIdempotency({
           accessSetting: null,
           artifactId: command.artifactId,

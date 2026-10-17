@@ -4782,7 +4782,8 @@ requirements:
       behavior: {id: EDT-001-B, description: "Edit one text entry of a multi-file version and receive a new version identical to the base except that entry, with its action record and replayable idempotency result."}
       failure: {id: EDT-001-F, description: "An edit naming a path absent from the base manifest, a missing upload, or an aborted transaction creates no version, and no stored version's bytes ever change."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server, covering the copied manifest, the replaced bytes, the unchanged base, the edited action, the replay, and absent-path, mismatched, extra-file, unknown-base, and unverified uploads saving nothing. An aborted transaction is not exercised directly. The Postgres and D1 commit paths compile and pass the existing suites but no test runs an edit on them, and no deployed run exists.
     depends_on: [PUB-001, PUB-006, VER-001]
     evidence: []
 
@@ -4795,7 +4796,8 @@ requirements:
       behavior: {id: EDT-002-B, description: "Round-trip files with and without a byte order mark and with CRLF and LF endings, changing one line, and verify untouched lines are byte-identical."}
       failure: {id: EDT-002-F, description: "A save whose expected current version is stale returns the publish conflict shape with the actual current version and writes nothing; it never silently overwrites newer work."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: The server half is proved locally against SQLite. Committed bytes keep a byte order mark and CRLF endings exactly, and a stale save is the 409 publish conflict naming the actual current version with nothing saved. That the web editor preserves the mark and line endings when it builds the bytes is the client helper's job in apps/web/src/artifact-actions and is not proved by this ID. Postgres, D1, and deployed runs are unproved.
     depends_on: [EDT-001]
     evidence: []
 
@@ -4808,7 +4810,8 @@ requirements:
       behavior: {id: EDT-003-B, description: "Edit a markdown, plain-text, and JSON entry within the size bound through the staging-upload flow and verify the committed bytes hash-match the upload."}
       failure: {id: EDT-003-F, description: "An edit of a binary media type or an oversize text entry is rejected, and no MCP tool accepts edited file contents as an argument."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: Proved locally against SQLite. Markdown, plain text at exactly the 1 MiB bound, and JSON commit with hash-matching bytes; binary, text over binary, and one byte over the bound are 422; MCP capabilities advertise the bound with no edit tool and artifact_commit_upload refuses an edit target against a real staged upload. Postgres, D1, and deployed runs are unproved.
     depends_on: [EDT-001, MAN-001]
     evidence: []
 

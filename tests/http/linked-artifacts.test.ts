@@ -168,6 +168,7 @@ describe("linked artifacts over the local HTTP boundary", () => {
     });
     const sessionBody = z.object({
       capabilities: z.object({
+        editing: z.object({maximumTextFileBytes: z.number()}).strict(),
         gitHistory: z.unknown(),
         linkedArtifacts: z.boolean(),
       }).strict(),

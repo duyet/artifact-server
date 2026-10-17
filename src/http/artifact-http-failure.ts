@@ -47,6 +47,7 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
     case "ContentSessionRequired":
     case "ContentNotPublic":
       return {code: errorCodes.contentNotPublic, message: failure.message, status: 401};
+    case "InvalidArtifactEdit":
     case "InvalidArtifactName":
     case "InvalidArtifactPath":
     case "InvalidProjectName":

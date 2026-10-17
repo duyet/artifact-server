@@ -78,6 +78,15 @@ export type CommitStagedUploadTarget =
     readonly artifactId: string;
     readonly expectedCurrentVersionId: string;
     readonly kind: "new_version";
+  }
+  | {
+    readonly artifactId: string;
+    /** The version whose files the edit copies. */
+    readonly baseVersionId: string;
+    readonly expectedCurrentVersionId: string;
+    readonly kind: "edit";
+    /** The one file the upload replaces. */
+    readonly path: string;
   };
 
 /** Input for committing a complete staged upload. */
@@ -411,6 +420,20 @@ function makeStagedUploadService(
             principal: command.principal,
             projectId: project.id,
             source,
+            }));
+        case "edit":
+          return yield* expirePublicationAtDeadline(signal,
+            publish.publishPreparedEdit({
+            artifactId: command.target.artifactId,
+            baseVersionId: command.target.baseVersionId,
+            expectedCurrentVersionId: command.target.expectedCurrentVersionId,
+            files,
+            idempotencyKey: command.idempotencyKey,
+            path: command.target.path,
+            principal: command.principal,
+            projectId: project.id,
+            source,
+            stagedManifest: upload.manifest,
             }));
       }
       return yield* Effect.die(

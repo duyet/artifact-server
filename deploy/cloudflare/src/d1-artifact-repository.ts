@@ -2357,7 +2357,11 @@ export function createD1ArtifactRepository(
       );
       if (replay !== null) return replay;
       await assertProjectActive(command.projectId);
-      await assertSourceReady(command.source, command.manifest.digest, command.createdAt);
+      await assertSourceReady(
+        command.source,
+        command.edit?.stagedManifestDigest ?? command.manifest.digest,
+        command.createdAt,
+      );
       const artifact = await readArtifact(command.projectId, command.artifactId);
       if (artifact.currentVersionId !== command.expectedCurrentVersionId) {
         throw new PublishConflict({message: `The artifact moved to version ${artifact.currentVersionId}.`});
@@ -2379,7 +2383,11 @@ export function createD1ArtifactRepository(
             command.expectedCurrentVersionId,
           ),
           ...versionStatements(command, nextNumber),
-          actionStatement(command, command.versionId, artifactActionKinds.publish),
+          actionStatement(
+            command,
+            command.versionId,
+            command.edit === null ? artifactActionKinds.publish : artifactActionKinds.edited,
+          ),
           idempotencyStatement(command, command.versionId, artifactActionKinds.publish),
           database.prepare(`
             UPDATE staged_uploads SET status = 'committed', committed_version_id = ?

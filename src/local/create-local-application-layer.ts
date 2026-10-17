@@ -286,6 +286,12 @@ export function createApplicationLayer(
               ? cause
               : repositoryFailure("findIdempotentPublication", cause),
         }),
+      findVersionRecord: (projectId, artifactId, versionId) =>
+        Effect.tryPromise({
+          try: () =>
+            adapters.repository.findVersionRecord(projectId, artifactId, versionId),
+          catch: (cause) => repositoryFailure("findVersionRecord", cause),
+        }),
       findCurrentVersion: (projectId, artifactId) =>
         Effect.tryPromise({
           try: () => adapters.repository.findCurrentVersion(projectId, artifactId),
