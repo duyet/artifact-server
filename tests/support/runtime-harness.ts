@@ -30,6 +30,8 @@ import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
 import {defaultCompletedRequestLogSampleRate} from
   "../../src/observability/application-observability.js";
+import type {ArtifactViewCollectionPolicy} from
+  "../../src/lifecycle/artifact-view-collection.js";
 
 const assignedAddressSchema = z.object({port: z.number().int().positive()});
 
@@ -85,6 +87,7 @@ export async function startTestServer(
   installation: TestInstallation,
   options: {
     readonly applicationOrigin?: string;
+    readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
     readonly bootstrapAdministratorEmail?: string;
     readonly browserAccess?: BrowserAccess;
     readonly contentDomain?: string | null;
@@ -127,6 +130,12 @@ export async function startTestServer(
   let config: LocalServerConfig = baseConfig;
   if (options.applicationOrigin !== undefined) {
     config = {...config, applicationOrigin: options.applicationOrigin};
+  }
+  if (options.artifactViewCollectionPolicy !== undefined) {
+    config = {
+      ...config,
+      artifactViewCollectionPolicy: options.artifactViewCollectionPolicy,
+    };
   }
   if (options.clock !== undefined) {
     config = {...config, clock: options.clock};
