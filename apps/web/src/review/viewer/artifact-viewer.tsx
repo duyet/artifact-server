@@ -363,7 +363,7 @@ export function ArtifactViewer({
       )}
       <div className="flex min-h-0 flex-1">
         <section
-          className="as-preview-panel relative flex min-w-0 flex-1 flex-col outline-none"
+          className="as-preview-panel relative flex min-w-0 flex-1 flex-col overflow-clip outline-none"
           id="review-preview"
           ref={previewPanelRef}
           tabIndex={-1}

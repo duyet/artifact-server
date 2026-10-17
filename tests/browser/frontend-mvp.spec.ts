@@ -777,7 +777,9 @@ test.describe("Artifact Server frontend MVP", () => {
       await fixture.page.getByRole("button", {name: "Hide viewer controls"}).click();
       await expect(focusViewerDock).toHaveAttribute("data-hover-armed", "false");
       await expect(restoreFocusViewer).toHaveCSS("opacity", "0");
-      await expect.poll(() => fixture.page.locator(".as-preview-panel")
+      // The tucked-away controls and comments drawer sit past the right edge;
+      // hiding the controls must not scroll the viewer sideways to them.
+      await expect.poll(() => fixture.page.locator('[data-slot="sidebar-inset"]')
         .evaluate((node) => node.scrollLeft)).toBe(0);
       await fixture.page.mouse.move(100, 160);
       await expect(focusViewerDock).toHaveAttribute("data-hover-armed", "true");
