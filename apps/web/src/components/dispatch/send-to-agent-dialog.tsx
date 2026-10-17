@@ -11,7 +11,9 @@ import {
 } from "@/components/dispatch/dispatch-limits";
 import type {DispatchFeedback} from "@/components/dispatch/dispatch-toast";
 import {PresenceGlyph, presenceRing} from "@/components/dispatch/presence-avatar";
+import {Alert, AlertDescription} from "@/components/ui/alert";
 import {Button} from "@/components/ui/button";
+import {ButtonGroup} from "@/components/ui/button-group";
 import {
   Dialog,
   DialogClose,
@@ -23,6 +25,8 @@ import {
 } from "@/components/ui/dialog";
 import {Label} from "@/components/ui/label";
 import {Popover, PopoverContent, PopoverTrigger} from "@/components/ui/popover";
+import {Separator} from "@/components/ui/separator";
+import {Spinner} from "@/components/ui/spinner";
 import {Textarea} from "@/components/ui/textarea";
 import {errorMessage, formatRelativeTime} from "@/lib/presentation";
 
@@ -365,11 +369,10 @@ export function SendToAgentControl({
   const caretDisabled = agents === null || noAgents || nothingToSend || quickPending;
 
   return (
-    <div className="as-send-to-agent inline-flex flex-wrap items-center gap-2">
-      <span className="as-send-to-agent__buttons inline-flex">
+    <div className="inline-flex flex-wrap items-center gap-2">
+      <ButtonGroup>
         <Button
           aria-busy={quickPending || agents === null}
-          className="as-send-to-agent__primary"
           disabled={mainAgent === null || mainReason !== null || quickPending}
           onClick={() => {
             if (mainAgent !== null) void quickSend(mainAgent);
@@ -379,10 +382,7 @@ export function SendToAgentControl({
           variant={buttonVariant}
         >
           {agents === null ? (
-            <span
-              aria-hidden
-              className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none"
-            />
+            <Spinner aria-hidden data-icon="inline-start" />
           ) : mainAgent === null ? null : (
             <PresenceGlyph
               className="-my-1"
@@ -399,7 +399,7 @@ export function SendToAgentControl({
             render={(
               <Button
                 aria-label="Choose agent or send with a note"
-                className="as-send-to-agent__menu -ml-px px-1.5"
+                className="px-1.5"
                 disabled={caretDisabled}
                 size={buttonSize}
                 type="button"
@@ -413,14 +413,15 @@ export function SendToAgentControl({
             {menuAgents.length === 0 ? null : (
               <div className="grid gap-1">
                 {menuAgents.map((agent) => (
-                  <button
-                    className="flex items-center gap-3 p-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+                  <Button
+                    className="h-auto justify-start gap-3 p-2 text-left font-normal"
                     key={agent.id}
                     onClick={() => {
                       setMenuOpen(false);
                       void quickSend(agent);
                     }}
                     type="button"
+                    variant="ghost"
                   >
                     <PresenceGlyph kind={agent.kind} ring={presenceRing(agent)} />
                     <span className="min-w-0">
@@ -429,23 +430,25 @@ export function SendToAgentControl({
                         {agent.workingDirectory}
                       </span>
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
-            <button
-              className="border-t p-2 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+            {menuAgents.length === 0 ? null : <Separator />}
+            <Button
+              className="justify-start"
               onClick={() => {
                 setMenuOpen(false);
                 changeNoteOpen(true);
               }}
               type="button"
+              variant="ghost"
             >
               Send with a note…
-            </button>
+            </Button>
           </PopoverContent>
         </Popover>
-      </span>
+      </ButtonGroup>
       {mainReason === null || reasonDisplay === "hidden" ? null : (
         <span className="text-xs text-muted-foreground" role="status">
           {mainReason}
@@ -463,7 +466,9 @@ export function SendToAgentControl({
           </DialogHeader>
 
           {error === null ? null : (
-            <p className="text-sm leading-6 text-destructive">{errorMessage(error)}</p>
+            <Alert variant="destructive">
+              <AlertDescription>{errorMessage(error)}</AlertDescription>
+            </Alert>
           )}
 
           {loading ? (
