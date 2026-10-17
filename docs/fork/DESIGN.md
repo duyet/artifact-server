@@ -358,7 +358,7 @@ The runbook lists these steps. Each one is a setting outside the repository:
 
 ## 11. Readable artifact paths
 
-This section is a proposal for brief r3. Nothing in it is implemented. Citations are against `b644213`.
+This section was the design for brief r3. Citations are against `b644213`. Branch `feat/artifact-paths` implements it. As built, one test differs: FRK-002-B probed `/not-a-route` as an application route, but that URL is now a path request that carries the sandbox headers, so the probe moved to `/not-a-route.txt`.
 
 The operator is moving 29 static reports from `docs/artifacts/<yyyy>/<mm>/<slug>.html` and wants URLs of the same shape, for example `https://artifacts.example.internal/2026/10/agent-console/` with an asset at `/2026/10/agent-console/shots/a.jpg`. An artifact may therefore claim one optional path when it is created. A path is guessable. The server is VPN-only with no login, and the operator accepts that.
 
