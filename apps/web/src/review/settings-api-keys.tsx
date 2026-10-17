@@ -1,4 +1,5 @@
 import {useEffect, useState} from "react";
+import {toast} from "sonner";
 
 import {
   api,
@@ -7,8 +8,20 @@ import {
   type ManagedApiKey,
   type PrincipalCapability,
 } from "@/api/client";
-import { ErrorPanel, PageHeader, StatePanel, StatusBadge } from "@/components/product";
+import { ButtonSpinner, ErrorPanel, PageHeader, StatusBadge } from "@/components/product";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -19,9 +32,28 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+  FieldTitle,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { formatTimestamp } from "@/lib/presentation";
 
 const capabilities: readonly {
@@ -51,6 +83,7 @@ export function ApiKeysScreen() {
   const [members, setMembers] = useState<readonly InstallationMember[]>([]);
   const [issued, setIssued] = useState<IssuedApiKey | null>(null);
   const [issueOpen, setIssueOpen] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
@@ -131,6 +164,8 @@ export function ApiKeysScreen() {
     setError(null);
     try {
       await api.revokeApiKey(keyId);
+      setRevoking(null);
+      toast.success("API key revoked.");
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught : new Error("API key revocation failed."));
@@ -140,7 +175,7 @@ export function ApiKeysScreen() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <PageHeader
         actions={(
           <Dialog onOpenChange={setIssueOpen} open={issueOpen}>
@@ -153,18 +188,18 @@ export function ApiKeysScreen() {
                   a future expiration.
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid max-h-[60svh] gap-5 overflow-y-auto pr-1">
-                <div className="grid gap-2">
-                  <Label htmlFor="api-key-name">Name</Label>
+              <FieldGroup className="max-h-[60svh] overflow-y-auto pr-1">
+                <Field>
+                  <FieldLabel htmlFor="api-key-name">Name</FieldLabel>
                   <Input
                     id="api-key-name"
                     maxLength={200}
                     onChange={(event) => setName(event.currentTarget.value)}
                     value={name}
                   />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="api-key-expiration">Expires at</Label>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="api-key-expiration">Expires at</FieldLabel>
                   <Input
                     id="api-key-expiration"
                     min={formatDatetimeLocalMinimum(new Date())}
@@ -172,9 +207,9 @@ export function ApiKeysScreen() {
                     type="datetime-local"
                     value={expiration}
                   />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="api-key-owner">Owner</Label>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="api-key-owner">Owner</FieldLabel>
                   <NativeSelect
                     className="w-full"
                     id="api-key-owner"
@@ -188,31 +223,32 @@ export function ApiKeysScreen() {
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
-                </div>
-                <fieldset className="grid gap-3">
-                  <legend className="text-sm font-medium">Capabilities</legend>
-                  {capabilities.map((capability) => {
-                    const checked = selectedCapabilities.includes(capability.value);
-                    return (
-                      <label
-                        className="group/field grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border p-3"
-                        key={capability.value}
-                      >
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={(next) => toggleCapability(capability.value, next)}
-                        />
-                        <span>
-                          <span className="block text-sm font-medium">{capability.label}</span>
-                          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                            {capability.description}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </fieldset>
-              </div>
+                </Field>
+                <FieldSet>
+                  <FieldLegend variant="label">Capabilities</FieldLegend>
+                  <FieldGroup className="gap-3" data-slot="checkbox-group">
+                    {capabilities.map((capability) => {
+                      const checked = selectedCapabilities.includes(capability.value);
+                      const id = `api-key-capability-${capability.value}`;
+                      return (
+                        <FieldLabel htmlFor={id} key={capability.value}>
+                          <Field orientation="horizontal">
+                            <Checkbox
+                              checked={checked}
+                              id={id}
+                              onCheckedChange={(next) => toggleCapability(capability.value, next)}
+                            />
+                            <FieldContent>
+                              <FieldTitle>{capability.label}</FieldTitle>
+                              <FieldDescription>{capability.description}</FieldDescription>
+                            </FieldContent>
+                          </Field>
+                        </FieldLabel>
+                      );
+                    })}
+                  </FieldGroup>
+                </FieldSet>
+              </FieldGroup>
               <DialogFooter>
                 <Button
                   disabled={pending
@@ -222,6 +258,7 @@ export function ApiKeysScreen() {
                   onClick={() => void issue()}
                   type="button"
                 >
+                  {pending ? <ButtonSpinner /> : null}
                   {pending ? "Issuing…" : "Issue API key"}
                 </Button>
               </DialogFooter>
@@ -237,80 +274,113 @@ export function ApiKeysScreen() {
       {error === null ? null : <ErrorPanel error={error} onRetry={() => void load()} />}
       {loading && apiKeys.length === 0
         ? (
-          <StatePanel description="Loading managed API keys." title="Loading API keys" />
+          <Card aria-busy="true">
+            <CardContent className="flex flex-col gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
         )
         : apiKeys.length === 0
-          ? (
-            <StatePanel
-              description="Issue a scoped key for automation or a compatible self-hosted MCP client."
-              title="No managed API keys"
-            />
-          )
+          ? error === null
+            ? (
+              <Empty className="border">
+                <EmptyHeader>
+                  <EmptyTitle aria-level={2} role="heading">No managed API keys</EmptyTitle>
+                  <EmptyDescription>
+                    Issue a scoped key for automation or a compatible self-hosted MCP client.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )
+            : null
           : (
-            <div className="grid border">
-              {apiKeys.map((apiKey) => (
-                <article className="grid gap-4 border-b p-5 last:border-b-0 lg:grid-cols-[1fr_1.5fr_auto]" key={apiKey.id}>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="font-heading font-semibold">{apiKey.name}</h2>
-                      <StatusBadge tone={apiKey.revokedAt === null ? "primary" : "danger"}>
-                        {apiKey.revokedAt === null ? "Active" : "Revoked"}
-                      </StatusBadge>
-                    </div>
-                    <p className="mt-2 font-mono text-xs break-all text-muted-foreground">
-                      {apiKey.prefix}
-                    </p>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Expires {formatTimestamp(apiKey.expiresAt)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap content-start gap-x-3 gap-y-2">
-                    {apiKey.capabilities.map((capability) => (
-                      <StatusBadge key={capability}>{capability}</StatusBadge>
+            <Card>
+              <CardContent className="px-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="pl-4">Key</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Capabilities</TableHead>
+                      <TableHead>Expires</TableHead>
+                      <TableHead className="pr-4 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {apiKeys.map((apiKey) => (
+                      <TableRow key={apiKey.id}>
+                        <TableCell className="pl-4 align-top">
+                          <p className="font-medium">{apiKey.name}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{apiKey.prefix}</p>
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <StatusBadge tone={apiKey.revokedAt === null ? "primary" : "danger"}>
+                            {apiKey.revokedAt === null ? "Active" : "Revoked"}
+                          </StatusBadge>
+                        </TableCell>
+                        <TableCell className="max-w-sm align-top whitespace-normal">
+                          <div className="flex flex-wrap gap-1">
+                            {apiKey.capabilities.map((capability) => (
+                              <StatusBadge key={capability}>{capability}</StatusBadge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top text-muted-foreground">
+                          {formatTimestamp(apiKey.expiresAt)}
+                        </TableCell>
+                        <TableCell className="pr-4 align-top">
+                          {apiKey.revokedAt === null
+                            ? (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  disabled={pending}
+                                  onClick={() => void rotate(apiKey.id)}
+                                  size="xs"
+                                  type="button"
+                                  variant="outline"
+                                >
+                                  Rotate
+                                </Button>
+                                <AlertDialog
+                                  onOpenChange={(open) => setRevoking(open ? apiKey.id : null)}
+                                  open={revoking === apiKey.id}
+                                >
+                                  <AlertDialogTrigger render={<Button size="xs" type="button" variant="ghost" />}>
+                                    Revoke
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Revoke API key</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        Requests using {apiKey.name} will stop immediately. Revocation does
+                                        not remove prior action attribution.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        disabled={pending}
+                                        onClick={() => void revoke(apiKey.id)}
+                                        variant="destructive"
+                                      >
+                                        {pending ? <ButtonSpinner /> : null}
+                                        {pending ? "Revoking…" : "Revoke API key"}
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
+                            )
+                            : null}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </div>
-                  {apiKey.revokedAt === null
-                    ? (
-                      <div className="flex gap-2 lg:justify-end">
-                        <Button
-                          disabled={pending}
-                          onClick={() => void rotate(apiKey.id)}
-                          size="xs"
-                          type="button"
-                          variant="outline"
-                        >
-                          Rotate
-                        </Button>
-                        <Dialog>
-                          <DialogTrigger render={<Button size="xs" type="button" variant="ghost" />}>
-                            Revoke
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Revoke API key</DialogTitle>
-                              <DialogDescription>
-                                Requests using {apiKey.name} will stop immediately. Revocation does
-                                not remove prior action attribution.
-                              </DialogDescription>
-                            </DialogHeader>
-                            <DialogFooter>
-                              <Button
-                                disabled={pending}
-                                onClick={() => void revoke(apiKey.id)}
-                                type="button"
-                                variant="destructive"
-                              >
-                                {pending ? "Revoking…" : "Revoke API key"}
-                              </Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                      </div>
-                    )
-                    : null}
-                </article>
-              ))}
-            </div>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
     </div>
   );
@@ -325,6 +395,15 @@ function SecretDialog({
 }) {
   const [copied, setCopied] = useState(false);
   if (issued === null) return null;
+  const copyToken = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(issued.token);
+      setCopied(true);
+      toast.success("API key copied.");
+    } catch {
+      toast.error("Unable to copy. Select the key and copy it manually.");
+    }
+  };
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -343,14 +422,12 @@ function SecretDialog({
             deployment secret manager. Artifact Server cannot show it again.
           </DialogDescription>
         </DialogHeader>
-        <code className="max-h-32 overflow-auto border bg-muted p-3 font-mono text-xs break-all">
+        <code className="max-h-32 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs break-all">
           {issued.token}
         </code>
         <DialogFooter>
           <Button
-            onClick={() => {
-              void navigator.clipboard.writeText(issued.token).then(() => setCopied(true));
-            }}
+            onClick={() => void copyToken()}
             type="button"
           >
             {copied ? "Copied" : "Copy API key"}
