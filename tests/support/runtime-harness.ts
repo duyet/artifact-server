@@ -11,12 +11,6 @@ import {
   startLocalServer,
 } from "../../src/local/start-local-server.js";
 import type {BearerCredentialVerifier} from "../../src/application/authentication.js";
-import type {NodeGitHistoryConfiguration} from
-  "../../src/git-history/node-git-history-configuration.js";
-import type {GitHistoryProviderHealthProbe} from
-  "../../src/git-history/git-history-provider-health.js";
-import type {GitHistoryProvider} from
-  "../../src/git-history/git-history-mirror.js";
 import type {Clock} from "../../src/core/ports.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
@@ -88,9 +82,6 @@ export async function startTestServer(
     readonly developmentProxyCredential?: string;
     readonly externalApiBearerVerifier?: BearerCredentialVerifier;
     readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
-    readonly gitHistory?: NodeGitHistoryConfiguration;
-    readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
-    readonly gitHistoryProvider?: GitHistoryProvider;
     readonly hostname?: string;
     readonly observability?: boolean;
     readonly port?: number;
@@ -143,18 +134,6 @@ export async function startTestServer(
       ...config,
       externalMcpBearerVerifier: options.externalMcpBearerVerifier,
     };
-  }
-  if (options.gitHistory !== undefined) {
-    config = {...config, gitHistory: options.gitHistory};
-  }
-  if (options.gitHistoryHealthProbe !== undefined) {
-    config = {
-      ...config,
-      gitHistoryHealthProbe: options.gitHistoryHealthProbe,
-    };
-  }
-  if (options.gitHistoryProvider !== undefined) {
-    config = {...config, gitHistoryProvider: options.gitHistoryProvider};
   }
   if (options.hostname !== undefined) {
     config = {...config, hostname: options.hostname};

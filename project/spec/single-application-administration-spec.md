@@ -37,7 +37,7 @@ That is a security boundary, not a second application.
 | --- | --- | --- |
 | `/review` | Browse, inspect, review, and share artifacts. | Admitted humans and authorized service principals. |
 | `/review/settings/projects` | List active and archived projects; create a project. | Admitted humans and principals with `project:manage`. |
-| `/review/settings/projects/:projectId` | Rename, archive or unarchive, and manage optional Git history for one project. | Admitted humans and principals with `project:manage`. |
+| `/review/settings/projects/:projectId` | Rename, archive or unarchive one project. | Admitted humans and principals with `project:manage`. |
 | `/review/settings/mcp` | Show the exact MCP address, local connection and diagnostic commands, and agent-skill setup. | Admitted users. |
 | `/review/settings/members` | List, admit, and deactivate installation members. | Installation administrators. |
 | `/review/settings/api-keys` | Issue, rotate, and revoke scoped API keys. | Installation administrators. |
@@ -95,21 +95,12 @@ The page supports these existing operations:
 
 - rename the project without changing its ID;
 - archive it after confirmation;
-- unarchive it;
-- read its optional Git-history state;
-- request a Git-history estimate before enabling it;
-- enable Git history only after the user confirms that estimate;
-- disable Git history without deleting primary or remote data.
+- unarchive it.
 
 Archiving explains that new artifacts and versions stop while existing reads,
 links, and immutable history remain. The current project in Review may stay
 selected after archive, but creation and publication affordances must reflect
 the archived state.
-
-Git history is absent when no provider is configured. When a provider is
-configured but unavailable, the page shows its safe capability state and does
-not offer enablement. The UI must not expose credentials, provider coordinates,
-queue internals, or raw provider errors.
 
 Project-specific members, roles, or access-control lists are not part of this
 page. Projects use installation membership.
@@ -295,7 +286,6 @@ abstraction unless the current application proves unable to express the routes.
 ## Acceptance summary
 
 The work is complete when a clean build serves one Artifact Server application;
-all supported project, member, API-key, public-link, and optional Git operations
-are available from its canonical settings routes; old URLs redirect safely; an
+all supported project, member, API-key, and public-link operations are available from its canonical settings routes; old URLs redirect safely; an
 unauthorized direct route fails closed; equivalent browser behavior is proved;
 and no legacy React entry or screen is present in the shipped bundle.

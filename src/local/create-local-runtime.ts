@@ -39,29 +39,6 @@ import {browserAccessModes} from "../core/browser-access.js";
 import {ensureBootstrapManagedApiKey} from
   "../application/bootstrap-managed-api-key.js";
 import {
-  configuredNodeGitHistory,
-  offNodeGitHistoryConfiguration,
-  type NodeGitHistoryConfiguration,
-} from "../git-history/node-git-history-configuration.js";
-import {fixedGitHistoryCapabilityReader} from
-  "../git-history/git-history-capability.js";
-import type {GitHistoryProviderHealthProbe} from
-  "../git-history/git-history-provider-health.js";
-import {CloudflareArtifactsRestHealthProbe} from
-  "../git-history/cloudflare-artifacts-rest-health-probe.js";
-import {
-  startGitHistoryCapabilityMonitor,
-  type GitHistoryCapabilityMonitor,
-} from "../git-history/git-history-capability-monitor.js";
-import {SqliteGitHistoryProviderIdentityStore} from
-  "../storage/sqlite-git-history-provider-identity-store.js";
-import {
-  type GitHistoryProvider,
-  startGitHistoryMirrorWorker,
-} from "../git-history/git-history-mirror.js";
-import {CloudflareArtifactsGitHistoryProvider} from
-  "../git-history/cloudflare-artifacts-git-history-provider.js";
-import {
   type ArtifactViewDrainReport,
   createArtifactViewRecorder,
   defaultArtifactViewDrainChunkSize,
@@ -87,11 +64,6 @@ export interface LocalRuntimeConfig {
   readonly developmentProxyCredential?: string;
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
-  readonly gitHistory?: NodeGitHistoryConfiguration;
-  /** Optional provider seam for real-boundary tests; production composes REST. */
-  readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
-  /** Complete provider seam for conformance tests; production composes REST and Git. */
-  readonly gitHistoryProvider?: GitHistoryProvider;
   readonly localBootstrapToken?: string;
   readonly observability?: boolean;
   readonly runtimeLifecycle?: RuntimeLifecycle;
@@ -124,10 +96,6 @@ export async function createLocalRuntime(
   const runtimeClock = config.clock ?? new SystemClock();
   const stagingCleanupPolicy = config.stagingCleanupPolicy ??
     defaultStagingCleanupPolicy;
-  const gitHistory = config.gitHistory ?? offNodeGitHistoryConfiguration();
-  let applicationGitHistory = fixedGitHistoryCapabilityReader(
-    gitHistory.capability,
-  );
   const repository = new SqliteArtifactRepository(databasePath, installationId);
   const identityRepository = new SqliteIdentityRepository(databasePath);
   const artifactViewRecorder = createArtifactViewRecorder({
@@ -135,13 +103,6 @@ export async function createLocalRuntime(
     clock: runtimeClock,
     repository,
   });
-  const configuredGitHistory = configuredNodeGitHistory(gitHistory);
-  const gitHistoryProvider = configuredGitHistory === null
-    ? null
-    : config.gitHistoryProvider ?? new CloudflareArtifactsGitHistoryProvider({
-      apiToken: configuredGitHistory.apiToken,
-      identity: configuredGitHistory.identity,
-    });
   const apiToken = Redacted.make(config.apiToken, {label: "local-api-token"});
   if (config.browserAccess.mode === browserAccessModes.privateTeam) {
     try {
@@ -157,25 +118,10 @@ export async function createLocalRuntime(
       throw cause;
     }
   }
-  let gitHistoryIdentityStore: SqliteGitHistoryProviderIdentityStore | null;
-  try {
-    gitHistoryIdentityStore = configuredGitHistory === null
-      ? null
-      : new SqliteGitHistoryProviderIdentityStore(databasePath, installationId);
-  } catch (cause) {
-    identityRepository.close();
-    repository.close();
-    throw cause;
-  }
   const resourceLayer = Layer.effectDiscard(
     Effect.acquireRelease(
-      Effect.succeed({
-        gitHistoryIdentityStore,
-        identityRepository,
-        repository,
-      }),
+      Effect.succeed({identityRepository, repository}),
       (owned) => Effect.sync(() => {
-        owned.gitHistoryIdentityStore?.close();
         owned.identityRepository.close();
         owned.repository.close();
       }),
@@ -195,7 +141,6 @@ export async function createLocalRuntime(
     ids: new SystemIdGenerator(),
     identityRepository,
     installationId,
-    gitHistory: {read: () => applicationGitHistory.read()},
     localBootstrapCredential: config.localBootstrapToken === undefined
       ? null
       : Redacted.make(config.localBootstrapToken, {
@@ -207,9 +152,6 @@ export async function createLocalRuntime(
     staging,
     stagingCleanupPolicy,
   };
-  if (gitHistoryProvider !== null) {
-    Object.assign(applicationAdapters, {gitHistoryProvider});
-  }
   const applicationLayer = createLocalApplicationLayer(applicationAdapters);
   const telemetryLayer = config.observability === true
     ? otlpLayer({
@@ -221,35 +163,8 @@ export async function createLocalRuntime(
   const applicationRuntime: ApplicationRuntime = ManagedRuntime.make(
     Layer.mergeAll(applicationLayer, resourceLayer, telemetryLayer),
   );
-  let gitHistoryMonitor: GitHistoryCapabilityMonitor | null = null;
-  let gitHistoryWorker: Awaited<ReturnType<typeof startGitHistoryMirrorWorker>> | null = null;
   try {
     await applicationRuntime.context();
-    if (
-      configuredGitHistory !== null &&
-      gitHistoryIdentityStore !== null &&
-      gitHistoryProvider !== null
-    ) {
-      gitHistoryMonitor = startGitHistoryCapabilityMonitor(applicationRuntime, {
-        clock: runtimeClock,
-        identity: configuredGitHistory.identity,
-        identityStore: gitHistoryIdentityStore,
-        initialCapability: configuredGitHistory.capability,
-        providerHealth: config.gitHistoryHealthProbe ??
-          new CloudflareArtifactsRestHealthProbe({
-            apiToken: configuredGitHistory.apiToken,
-            identity: configuredGitHistory.identity,
-          }),
-      });
-      applicationGitHistory = gitHistoryMonitor.reader;
-      gitHistoryWorker = await startGitHistoryMirrorWorker({
-        blobs,
-        capability: applicationGitHistory,
-        installationId,
-        provider: gitHistoryProvider,
-        store: repository,
-      });
-    }
     let appDependencies: HttpAppDependencies = {
       applicationRuntime,
       artifactViews: artifactViewRecorder,
@@ -260,8 +175,6 @@ export async function createLocalRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
-      gitHistory: gitHistoryMonitor?.reader ??
-        fixedGitHistoryCapabilityReader(gitHistory.capability),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),
     };
@@ -301,14 +214,10 @@ export async function createLocalRuntime(
         // Drains what is buffered before the repository closes, so a clean
         // shutdown loses no counted view.
         await closeArtifactViewCollection();
-        if (gitHistoryWorker !== null) await gitHistoryWorker.close();
-        if (gitHistoryMonitor !== null) await gitHistoryMonitor.close();
         await applicationRuntime.dispose();
       },
     };
   } catch (error) {
-    if (gitHistoryWorker !== null) await gitHistoryWorker.close();
-    if (gitHistoryMonitor !== null) await gitHistoryMonitor.close();
     await applicationRuntime.dispose();
     throw error;
   }

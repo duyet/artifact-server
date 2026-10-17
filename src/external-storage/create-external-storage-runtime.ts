@@ -38,29 +38,6 @@ import {createNodeWebAssetStore} from "../http/node-web-assets.js";
 import {ensureBootstrapManagedApiKey} from
   "../application/bootstrap-managed-api-key.js";
 import {
-  configuredNodeGitHistory,
-  offNodeGitHistoryConfiguration,
-  type NodeGitHistoryConfiguration,
-} from "../git-history/node-git-history-configuration.js";
-import {fixedGitHistoryCapabilityReader} from
-  "../git-history/git-history-capability.js";
-import type {GitHistoryProviderHealthProbe} from
-  "../git-history/git-history-provider-health.js";
-import {CloudflareArtifactsRestHealthProbe} from
-  "../git-history/cloudflare-artifacts-rest-health-probe.js";
-import {
-  startGitHistoryCapabilityMonitor,
-  type GitHistoryCapabilityMonitor,
-} from "../git-history/git-history-capability-monitor.js";
-import {PostgresGitHistoryProviderIdentityStore} from
-  "../storage/postgres-git-history-provider-identity-store.js";
-import {
-  type GitHistoryProvider,
-  startGitHistoryMirrorWorker,
-} from "../git-history/git-history-mirror.js";
-import {CloudflareArtifactsGitHistoryProvider} from
-  "../git-history/cloudflare-artifacts-git-history-provider.js";
-import {
   type ArtifactViewDrainReport,
   createArtifactViewRecorder,
   defaultArtifactViewDrainChunkSize,
@@ -85,11 +62,6 @@ export interface ExternalStorageRuntimeConfig {
   readonly databaseUrl: Redacted.Redacted;
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
-  readonly gitHistory?: NodeGitHistoryConfiguration;
-  /** Optional provider seam for real-boundary tests; production composes REST. */
-  readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
-  /** Complete provider seam for conformance tests; production composes REST and Git. */
-  readonly gitHistoryProvider?: GitHistoryProvider;
   readonly installationId: string;
   readonly localBootstrapCredential?: Redacted.Redacted;
   readonly objectStorage: ObjectStorageProviderFactory;
@@ -118,10 +90,6 @@ export async function createExternalStorageRuntime(
   const runtimeClock = config.clock ?? new SystemClock();
   const stagingCleanupPolicy = config.stagingCleanupPolicy ??
     defaultStagingCleanupPolicy;
-  const gitHistory = config.gitHistory ?? offNodeGitHistoryConfiguration();
-  let applicationGitHistory = fixedGitHistoryCapabilityReader(
-    gitHistory.capability,
-  );
   const database = await PostgresDatabase.open({
     applicationName: `artifact-server:${config.installationId}`,
     maxConnections: config.postgresMaxConnections ?? 10,
@@ -129,8 +97,6 @@ export async function createExternalStorageRuntime(
   }, "validate");
   let objectStorage: ObjectStorageProvider | null = null;
   let applicationRuntime: ApplicationRuntime | null = null;
-  let gitHistoryMonitor: GitHistoryCapabilityMonitor | null = null;
-  let gitHistoryWorker: Awaited<ReturnType<typeof startGitHistoryMirrorWorker>> | null = null;
   try {
     const connectedObjectStorage = config.objectStorage.create(
       config.installationId,
@@ -148,19 +114,6 @@ export async function createExternalStorageRuntime(
       database,
       config.installationId,
     );
-    const configuredGitHistory = configuredNodeGitHistory(gitHistory);
-    const gitHistoryProvider = configuredGitHistory === null
-      ? null
-      : config.gitHistoryProvider ?? new CloudflareArtifactsGitHistoryProvider({
-        apiToken: configuredGitHistory.apiToken,
-        identity: configuredGitHistory.identity,
-      });
-    const gitHistoryIdentityStore = configuredGitHistory === null
-      ? null
-      : new PostgresGitHistoryProviderIdentityStore(
-        database,
-        config.installationId,
-      );
     await ensureBootstrapManagedApiKey({
       credential: config.apiToken,
       installationId: config.installationId,
@@ -179,16 +132,12 @@ export async function createExternalStorageRuntime(
       ids: new SystemIdGenerator(),
       identityRepository,
       installationId: config.installationId,
-      gitHistory: {read: () => applicationGitHistory.read()},
       localBootstrapCredential: config.localBootstrapCredential ?? null,
       protectBootstrapAdministrator: false,
       repository,
       staging,
       stagingCleanupPolicy,
     };
-    if (gitHistoryProvider !== null) {
-      Object.assign(applicationAdapters, {gitHistoryProvider});
-    }
     const applicationLayer = createApplicationLayer(applicationAdapters);
     const resources = Layer.effectDiscard(Effect.acquireRelease(
       Effect.void,
@@ -206,31 +155,6 @@ export async function createExternalStorageRuntime(
     );
     await applicationRuntime.context();
     const readyRuntime = applicationRuntime;
-    if (
-      configuredGitHistory !== null &&
-      gitHistoryIdentityStore !== null &&
-      gitHistoryProvider !== null
-    ) {
-      gitHistoryMonitor = startGitHistoryCapabilityMonitor(readyRuntime, {
-        clock: runtimeClock,
-        identity: configuredGitHistory.identity,
-        identityStore: gitHistoryIdentityStore,
-        initialCapability: configuredGitHistory.capability,
-        providerHealth: config.gitHistoryHealthProbe ??
-          new CloudflareArtifactsRestHealthProbe({
-            apiToken: configuredGitHistory.apiToken,
-            identity: configuredGitHistory.identity,
-          }),
-      });
-      applicationGitHistory = gitHistoryMonitor.reader;
-      gitHistoryWorker = await startGitHistoryMirrorWorker({
-        blobs,
-        capability: applicationGitHistory,
-        installationId: config.installationId,
-        provider: gitHistoryProvider,
-        store: repository,
-      });
-    }
     const artifactViewRecorder = createArtifactViewRecorder({
       chunkSize: defaultArtifactViewDrainChunkSize,
       clock: runtimeClock,
@@ -246,8 +170,6 @@ export async function createExternalStorageRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
-      gitHistory: gitHistoryMonitor?.reader ??
-        fixedGitHistoryCapabilityReader(gitHistory.capability),
       readiness: () => externalStorageReadiness(database, connectedObjectStorage),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(),
@@ -277,14 +199,10 @@ export async function createExternalStorageRuntime(
         // Drains what is buffered before the database closes, so a clean
         // shutdown loses no counted view.
         await closeArtifactViewCollection();
-        if (gitHistoryWorker !== null) await gitHistoryWorker.close();
-        if (gitHistoryMonitor !== null) await gitHistoryMonitor.close();
         await readyRuntime.dispose();
       },
     };
   } catch (cause) {
-    if (gitHistoryWorker !== null) await gitHistoryWorker.close();
-    if (gitHistoryMonitor !== null) await gitHistoryMonitor.close();
     if (applicationRuntime === null) {
       await Promise.all([
         objectStorage?.close() ?? Promise.resolve(),

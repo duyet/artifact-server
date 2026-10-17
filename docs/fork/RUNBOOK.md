@@ -120,6 +120,8 @@ The release that removes OIDC and WorkOS needs two checks before the upgrade:
 - Delete any `identity:` block from `artifact-server-values.yaml`. The chart schema rejects unknown keys, so the upgrade fails with it present.
 - Postgres migration `0017_drop_external_identities` drops the `external_identities` table. Run `SELECT count(*) FROM external_identities;` first. It should be 0 on a deployment that never used a browser identity provider. If it is not, back up the table before upgrading, because the drop cannot be undone.
 
+The release that removes Git history drops its tables in Postgres migration `0018_drop_git_history`: `git_history_budget_reservations`, `git_history_jobs`, `git_history_mappings`, `git_history_repositories`, `git_history_project_settings`, and `git_history_provider_identity`. They only tracked copies of versions in Cloudflare Artifacts, which this chart never configured. Run `SELECT count(*) FROM git_history_repositories;` first. If it is not 0, back up those tables before upgrading, because the drop cannot be undone. Repositories already created in Cloudflare Artifacts are not deleted.
+
 ## The API key
 
 Generate the key once, on a trusted machine.

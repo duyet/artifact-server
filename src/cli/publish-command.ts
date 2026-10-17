@@ -95,7 +95,7 @@ export function configurePublishCommand(
       ),
     )
     .action(async (inputPath: string, options: PublishOptions) => {
-      const connection = await resolveCliServerConnection(options, "publish");
+      const connection = await resolveCliServerConnection(options);
       const intent = publicationCommand(inputPath, options);
       const prepared = await preparePublication(intent);
       const operation = await resumePublicationOperation(

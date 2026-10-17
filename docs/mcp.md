@@ -82,9 +82,6 @@ opens its raw immutable content. Agents should hand people the Review URL.
 | Publication | `artifact_create_upload`, `artifact_commit_upload` |
 | Management | `artifact_set_visibility`, `artifact_set_tags`, `artifact_restore_version`, `artifact_delete` |
 | Comments | `comment_list`, `comment_get`, `comment_create`, `comment_reply`, `comment_update`, `comment_resolve`, `comment_delete` |
-| Git history planning | `project_git_history_status`, `project_git_history_estimate` |
-
-`project_set_git_history` enables one project only after an authorized caller confirms a fresh estimate. Provider configuration alone copies nothing. Agents should report the returned project state and must not describe `waiting`, `degraded`, or `budget-limited` history as ready.
 
 ## Install the Artifact Server skill
 

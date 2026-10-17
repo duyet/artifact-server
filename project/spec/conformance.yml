@@ -61,7 +61,6 @@ allowed_modules:
   - content-delivery
   - authorization
   - comparison
-  - git-history
   - web-application
   - http-api
   - mcp
@@ -71,7 +70,6 @@ allowed_modules:
   - agent-dispatch
   - agent-bridge
   - agent-presence
-  - local-workspace
   - kanban
   - plannotator-integration
   - database-adapters
@@ -83,7 +81,7 @@ required_source_sections:
   top: [PRD-001, PRD-002]
   product: [PRD-003]
   artifact: [PRJ-001, PRJ-002, PRJ-003, PRJ-004, ART-001, ART-002, ART-003, ART-004, ART-005, ART-008]
-  experience: [CNT-001, CNT-002, VER-001, DIF-001, GIT-001]
+  experience: [CNT-001, CNT-002, VER-001, DIF-001]
   sharing: [AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-018]
   plannotator: [PLN-001, PLN-002, PLN-003, PLN-004, PLN-005, PLN-017]
   architecture: [ARC-001, ARC-002, ARC-006, PUB-001, CNT-003]
@@ -947,12 +945,12 @@ requirements:
 
   - id: DIF-001
     kind: behavior
-    behavior: Comparisons use canonical manifests and do not require Git.
+    behavior: Comparisons use canonical manifests from primary version records and blobs.
     owner: comparison
     source: {file: artifact-server-product-spec.html, anchor: experience}
     acceptance:
-      behavior: {id: DIF-001-B, description: "Disable Git and compare two versions from primary records and blobs."}
-      failure: {id: DIF-001-F, description: "A missing or failed Git provider does not remove, change, or block comparison results."}
+      behavior: {id: DIF-001-B, description: "Compare two versions from primary records and blobs."}
+      failure: {id: DIF-001-F, description: "A comparison reads no copy of version bytes outside primary records and blobs, so nothing outside them can remove, change, or block its results."}
     deployments: *all
     status: behavior_verified
     depends_on: [MAN-001, VER-001]
@@ -1035,202 +1033,6 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
 
-  - id: GIT-001
-    kind: constraint
-    behavior: Git handoff is optional, private, disabled by default, and selected by explicit installation configuration; there is no automatic provider selection.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: experience}
-    acceptance:
-      behavior: {id: GIT-001-B, description: "Run with the provider variable absent and set to off; observe the disabled capability shape, identical artifact behavior, and no Git implementation load or provider request."}
-      failure: {id: GIT-001-F, description: "Missing, invalid, or inaccessible optional Git configuration cannot prevent the server from starting, publishing, opening, or comparing, and cannot trigger automatic provider selection."}
-    deployments: *all
-    status: implementing
-    proof_gap: Provider-off behavior, explicit configuration, and fail-open application startup are implemented for Node and Workers runtimes. The complete no-load/no-call and malformed-configuration acceptance matrix across every deployment remains unproved.
-    depends_on: [DIF-001]
-    evidence: []
-
-  - id: GIT-002
-    kind: behavior
-    behavior: Optional Git receives an asynchronous private copy only after the primary version is durable, with at most one commit mapped to each saved version.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-002-B, description: "Publish with Git enabled and confirm the browser link works before or independently of the recorded Git commit."}
-      failure: {id: GIT-002-F, description: "Retry and worker failures cannot create conflicting version-to-commit mappings or change the primary version."}
-    deployments: *all
-    status: implementing
-    proof_gap: SQLite, Postgres, and D1 atomically enqueue provider-neutral mirror jobs after primary publication, and deterministic mapping adoption prevents duplicate version commits across retries and restarts. Concurrent multi-worker convergence and the complete cross-deployment persistence matrix remain unproved.
-    depends_on: [PUB-005]
-    evidence: []
-
-  - id: GIT-003
-    kind: behavior
-    behavior: Git failure never blocks, deletes, or makes unavailable a primary saved version and is retried separately.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GIT-003-B, description: "Disable the configured Git provider during publish and confirm the version opens and the copy can retry later."}
-      failure: {id: GIT-003-F, description: "Git errors cannot roll back or corrupt the committed database and blob records."}
-    deployments: *all
-    status: implementing
-    proof_gap: Provider failures and logical budget exhaustion are isolated from primary publication and delivery, with durable retry and restart recovery proved on the local runtime. Sustained outage, database rollback, and all-deployment hostile recovery remain unproved.
-    depends_on: [GIT-002]
-    evidence: []
-
-  - id: GIT-004
-    kind: behavior
-    behavior: Files outside deterministic per-file and per-version copy limits remain only in primary blob storage while the Git manifest records their paths, media types, sizes, and fingerprints; each job snapshots the limits that define its retry-stable commit.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-004-B, description: "Publish above and below the configured per-file and per-version Git copy limits and verify deterministic copied-file and pointer representation across a retry and configuration change."}
-      failure: {id: GIT-004-F, description: "Excluded bytes cannot be silently omitted without path, media type, size, and fingerprint metadata, and a retry cannot change a commit because current limits differ from the job snapshot."}
-    deployments: *all
-    status: implementing
-    proof_gap: Mirror jobs snapshot copy limits, produce deterministic copied files and pointer metadata, and preserve the representation across a retry. Configuration changes after enqueue, maximum manifest size, and full adapter coverage remain unproved.
-    depends_on: [GIT-002]
-    evidence: []
-
-  - id: GIT-005
-    kind: security
-    behavior: Public artifact access never grants Git access or exposes earlier versions through a Git remote.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: safety}
-    acceptance:
-      behavior: {id: GIT-005-B, description: "Make an artifact public and confirm that only its current content path is available without authentication."}
-      failure: {id: GIT-005-F, description: "Probe Git protocols, repository paths, commit IDs, and earlier versions from a public session and receive no access."}
-    deployments: *all
-    status: implementing
-    proof_gap: Authenticated, short-lived clone credentials are scoped to one provisioned repository and public-link sessions are rejected. The complete Git-protocol, timing, log-redaction, and earlier-version probe matrix remains unproved.
-    depends_on: [GIT-001, AUTH-004]
-    evidence: []
-
-  - id: GIT-006
-    kind: deployment
-    behavior: The first managed Git handoff provider is Cloudflare Artifacts; additional provider names are not accepted or advertised until their adapters independently pass the common provider suite.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-006-B, description: "Run the Git provider conformance suite against every advertised provider for its deployment."}
-      failure: {id: GIT-006-F, description: "A deployment cannot advertise optional Git until its provider passes persistence, retry, upgrade, backup, and isolation tests."}
-    deployments: *all
-    status: implementing
-    proof_gap: Cloudflare Artifacts is the only accepted provider. The Node REST product path passed live availability, estimate, project enablement, backfill, two-version mirroring, read-only clone, disablement, artifact deletion, and cleanup; the remote Workers-binding path passed isolated live creation, deterministic commit, token, smart-HTTP, read, and cleanup qualification. Upgrade, backup, and the complete common provider suite remain unproved.
-    depends_on: [GIT-003]
-    evidence: []
-
-  - id: GIT-007
-    kind: release_gate
-    behavior: Cloudflare Artifacts ships only as an explicit off-by-default provider and remains non-authoritative while availability, pricing, limits, retry behavior, retention, regional behavior, Git compatibility, and production support are verified.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GIT-007-B, description: "Record verified Cloudflare Artifacts behavior and pass the optional Git provider suite without making it authoritative."}
-      failure: {id: GIT-007-F, description: "Every deployment remains complete and supported with Cloudflare Artifacts disabled or unavailable."}
-    deployments: *all
-    status: implementing
-    proof_gap: The provider remains explicit, private, off by default, and non-authoritative; checked-in evidence records successful isolated REST, Workers-binding, and bounded product-lifecycle qualification. Pricing, quota pressure, retention, regional behavior, sustained outage recovery, and Cloudflare production-support posture remain operator considerations rather than fully proved release evidence.
-    depends_on: [GIT-006]
-    evidence: []
-
-  - id: GIT-008
-    kind: behavior
-    behavior: Enabling Git handoff for a project with existing versions asynchronously backfills every unmapped version in that project in bounded, resumable, oldest-first order per artifact without delaying primary traffic or copying another project.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-008-B, description: "Enable one project after several versions exist and observe complete ordered repository history while new publishes continue and an unselected project remains untouched."}
-      failure: {id: GIT-008-F, description: "Crash and restart project reconciliation and race it with a new publish without losing a version, duplicating a commit mapping, exhausting foreground work, copying another project, or changing primary data."}
-    deployments: *all
-    status: implementing
-    proof_gap: Project enablement inserts bounded oldest-first jobs for existing versions, leaves other projects untouched, and resumes a failed mirror after restart without a duplicate mapping. Crash timing, foreground-work bounds, and complete SQLite/Postgres/D1 concurrency coverage remain unproved.
-    depends_on: [GIT-002, GIT-007]
-    evidence: []
-
-  - id: GIT-009
-    kind: behavior
-    behavior: Disabling Git handoff for a project or provider stops applicable mirror work without deleting remote data or durable state; deletion work stays durable, re-enabling the same project and provider resumes, and changing provider location requires an explicit migration.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-009-B, description: "Disable one project during backfill and the provider while idle, publish and delete while off, verify applicable calls stop and durable state remains, then re-enable the same project and provider and complete missing mirror and deletion work without duplicate commits."}
-      failure: {id: GIT-009-F, description: "A policy or configuration change cannot silently delete remote repositories, discard queued deletion work, or write persisted coordinates through a different provider, account, or namespace; an unsupported replacement reports migration-required while core behavior continues."}
-    deployments: *all
-    status: implementing
-    proof_gap: Project disablement preserves repositories and durable mappings, same-provider re-enable resumes work, artifact deletion queues repository deletion, and provider identity changes fail as migration-required. Provider-wide disablement during deletion and the complete cross-deployment lifecycle matrix remain unproved.
-    depends_on: [GIT-008]
-    evidence: []
-
-  - id: GIT-010
-    kind: behavior
-    behavior: Authenticated capability discovery separately reports provider availability, bounded limits and accounting, and each project's effective Git state without secrets, and optional Git health never controls application readiness.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-010-B, description: "Observe provider disabled, checking, available, degraded, misconfigured, and migration-required plus project disabled, waiting, backfilling, ready, degraded, and budget-limited through HTTP and MCP discovery with matching shapes."}
-      failure: {id: GIT-010-F, description: "Provider credentials, credential-bearing remotes, queue internals, or raw provider errors cannot appear in capability output, and no optional Git state can make readiness fail."}
-    deployments: *all
-    status: implementing
-    proof_gap: Node and Workers runtimes expose secret-free provider and project states through authenticated HTTP and MCP without joining readiness; SQLite, Postgres, and D1 persist provider identity, and both Cloudflare control planes passed live qualification. The complete state-transition, redaction, and cross-deployment readiness matrix remains unproved.
-    depends_on: [GIT-001, GIT-003]
-    evidence: []
-
-  - id: GIT-011
-    kind: security
-    behavior: Permanent removal of an installation's Git repositories requires an operator-only plan/apply command with exact installation confirmation; it is bounded and resumable and cannot delete primary data or the provider namespace.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-011-B, description: "Plan with no provider writes, apply with exact installation confirmation, interrupt the purge, and resume until every persisted repository is confirmed absent."}
-      failure: {id: GIT-011-F, description: "Reject a wrong confirmation or mismatched provider, never expose a purge through HTTP or MCP, and never delete primary artifacts, versions, blobs, backups, or the Cloudflare namespace."}
-    deployments: *all
-    status: implementing
-    proof_gap: Compact and external-storage operator commands provide read-only plans, exact installation and provider confirmation, bounded resumable deletion, and focused proof that planning makes no provider call and a partial purge resumes. The transient D1 operator path is typechecked but has not run against a dedicated live qualification database, and complete primary-data and backup invariance remain unproved.
-    depends_on: [GIT-006, GIT-009]
-    evidence: []
-
-  - id: GIT-012
-    kind: behavior
-    behavior: Provider availability and data selection are separate; configuration alone creates no repository or history job, every project has one off-by-default Git history setting, and an authorized project manager may enable one project only after reviewing and confirming an on-demand planning estimate.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-012-B, description: "Configure Cloudflare Artifacts with existing projects and observe zero copies, then read, estimate, enable, repeat, and disable one project through authorized, naturally idempotent HTTP and MCP operations with matching results while another and every newly created project remain disabled."}
-      failure: {id: GIT-012-F, description: "A missing estimate confirmation, unconfigured or invalid provider, unauthorized caller, project request, path, hostname, or ambient credential cannot enable a project or change another project's setting."}
-    deployments: *all
-    status: implementing
-    proof_gap: The real project setting, estimate confirmation, repository mirroring, and disablement are implemented through the Projects UI, authenticated HTTP, and MCP over SQLite, Postgres, and D1. The complete authorization, natural-idempotency, hostile-input, and cross-deployment parity matrix remains unproved.
-    depends_on: [GIT-001, GIT-008, AUTH-001, PRD-004, MCP-008, MCP-009]
-    evidence: []
-
-  - id: GIT-013
-    kind: security
-    behavior: Each Artifact Server installation environment uses one exclusive persisted Cloudflare account and namespace identity; the adapter is namespace-scoped, exposes no namespace or account-wide deletion, and live tests use a dedicated bounded run-manifest cleanup boundary.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: safety}
-    acceptance:
-      behavior: {id: GIT-013-B, description: "Run the bounded Node REST and remote Workers-binding suites in an artifact-server-test- namespace with unique run-prefixed repositories, a separate token, explicit opt-in, and resumable manifest-only cleanup."}
-      failure: {id: GIT-013-F, description: "A request-selected namespace, changed persisted location, wrong namespace prefix, missing opt-in, exceeded test bound, failed teardown, or cleanup manifest cannot cause writes or deletion in another namespace, another run, or the account at large."}
-    deployments: *all
-    status: implementing
-    proof_gap: SQLite, Postgres, and D1 persist immutable provider identity; both provider adapters are namespace scoped; and bounded REST and Workers-binding runs used unique repository prefixes and left the dedicated qualification namespace empty without deleting it. Wrong-prefix refusal, interrupted live cleanup recovery, and the complete isolation matrix remain unproved.
-    depends_on: [GIT-006, GIT-009, GIT-011]
-    evidence: []
-
-  - id: GIT-014
-    kind: constraint
-    behavior: Git handoff shows an on-demand planning estimate of repository, version, operation, copied-byte, and pointer-byte impact before project enablement; deterministic copy limits and an optional atomically reserved logical copied-byte budget bound provider work without changing primary behavior.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-014-B, description: "Confirm a current-inventory planning estimate labeled as non-billing guidance, race mirror workers at the configured budget, observe no overshoot and budget-limited, then increase capacity or delete repositories and resume."}
-      failure: {id: GIT-014-F, description: "Concurrent workers, retries, a lowered budget, provider pricing drift, or a hard provider limit cannot silently exceed configured logical capacity, rewrite mapped commits, block readiness, or change a saved primary version."}
-    deployments: *all
-    status: implementing
-    proof_gap: SQLite, Postgres, and D1 compute planning estimates, snapshot deterministic copy bounds, atomically reserve logical copied bytes, expose budget-limited, and can resume after an explicit budget increase. Multi-worker race proof, lowered-budget behavior, provider-pricing drift, and complete deployment coverage remain unproved.
-    depends_on: [GIT-004, GIT-012]
-    evidence: []
-
   - id: AUTH-001
     kind: behavior
     behavior: A standalone installation represents one person, team, or company and has no public self-sign-up or organization switcher; all projects use that installation membership group.
@@ -1282,12 +1084,12 @@ requirements:
 
   - id: AUTH-004
     kind: security
-    behavior: A public link opens only the current version; version lists, comparisons, earlier versions, mutations, and Git remain account-required.
+    behavior: A public link opens only the current version; version lists, comparisons, earlier versions, and mutations remain account-required.
     owner: authorization
     source: {file: artifact-server-product-spec.html, anchor: sharing}
     acceptance:
       behavior: {id: AUTH-004-B, description: "Open the public current version and confirm that no authenticated history or mutation surface is exposed."}
-      failure: {id: AUTH-004-F, description: "Probe earlier version hosts, comparison endpoints, mutation routes, and Git using only public access and receive no access."}
+      failure: {id: AUTH-004-F, description: "Probe earlier version hosts, comparison endpoints, and mutation routes using only public access and receive no access."}
     deployments: *all
     status: behavior_verified
     depends_on: [AUTH-003]
@@ -2430,16 +2232,16 @@ requirements:
 
   - id: ADM-002
     kind: behavior
-    behavior: Canonical settings list active and archived projects, create and open a project, and provide one project-local surface for rename, archive, unarchive, and capability-gated optional Git history with estimate confirmation before enablement.
+    behavior: Canonical settings list active and archived projects, create and open a project, and provide one project-local surface for rename, archive, and unarchive.
     owner: web-application
     source: {file: single-application-administration-spec.md, anchor: project-settings}
     acceptance:
-      behavior: {id: ADM-002-B, description: "Create and rename a project, archive and unarchive it, return to it in Review, and—when an optional Git provider is available—review an estimate before enabling and later disabling Git history while the displayed state follows the server result."}
-      failure: {id: ADM-002-F, description: "A failed create or rename preserves the entered name, archive cannot erase reads or immutable history, unavailable Git cannot be enabled, enablement without estimate confirmation is refused, and the interface never invents project ACLs or exposes provider secrets and internals."}
+      behavior: {id: ADM-002-B, description: "Create and rename a project, archive and unarchive it, and return to it in Review while the displayed state follows the server result."}
+      failure: {id: ADM-002-F, description: "A failed create or rename preserves the entered name, archive cannot erase reads or immutable history, and the interface never invents project ACLs."}
     deployments: *all
     status: behavior_verified
-    proof_gap: Local browser evidence proves project lifecycle behavior and the absent-provider boundary. A configured provider's estimate and enable-disable browser flow, plus team deployments, remain unrecorded.
-    depends_on: [PRJ-003, GIT-010, GIT-012]
+    proof_gap: Local browser evidence proves project lifecycle behavior. Team deployments remain unrecorded.
+    depends_on: [PRJ-003]
     evidence:
       - deployment: local
         tests: [ADM-002-B, ADM-002-F]
@@ -3078,7 +2880,7 @@ requirements:
     source: {file: artifact-server-product-spec.html, anchor: plannotator}
     acceptance:
       behavior: {id: PLN-002-B, description: "Trace pairing and managed operations and observe only connection identity and short-lived signed requests at Artifact Server."}
-      failure: {id: PLN-002-F, description: "Credential scanning finds no Plannotator or WorkOS user credential in Artifact Server records, logs, storage, content, or Git."}
+      failure: {id: PLN-002-F, description: "Credential scanning finds no Plannotator or WorkOS user credential in Artifact Server records, logs, storage, or content."}
     deployments: *plannotator_capable
     status: specified
     depends_on: [PLN-001]
@@ -3168,7 +2970,7 @@ requirements:
     owner: plannotator-integration
     source: {file: artifact-server-product-spec.html, anchor: plannotator}
     acceptance:
-      behavior: {id: PLN-009-B, description: "Compare stored bytes, normal responses, downloads, manifests, Git, and explicit review responses and observe the bridge only in review HTML."}
+      behavior: {id: PLN-009-B, description: "Compare stored bytes, normal responses, downloads, manifests, and explicit review responses and observe the bridge only in review HTML."}
       failure: {id: PLN-009-F, description: "Review mode cannot alter stored bytes, fingerprints, exact-version identity, normal caching, non-HTML files, or later normal requests."}
     deployments: *plannotator_capable
     status: specified
@@ -3281,7 +3083,7 @@ requirements:
 
   - id: ARC-001
     kind: constraint
-    behavior: The product core is one modular application and does not import a specific database, blob store, login provider, background-job system, Git provider, or deployment framework.
+    behavior: The product core is one modular application and does not import a specific database, blob store, login provider, background-job system, or deployment framework.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: architecture}
     acceptance:
@@ -3398,11 +3200,11 @@ requirements:
 
   - id: DEP-004
     kind: deployment
-    behavior: The default local target runs directly on the host without Docker, using SQLite, local blob storage, a local token, isolated localhost content origins, and Git handoff disabled by default. A local container is optional, and Cloudflare Artifacts may be configured separately through REST.
+    behavior: The default local target runs directly on the host without Docker, using SQLite, local blob storage, a local token, and isolated localhost content origins. A local container is optional.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
-      behavior: {id: DEP-004-B, description: "Install and complete the local publish, open, version, compare, visibility, MCP, restart, and optional-Git workflows without an external service."}
+      behavior: {id: DEP-004-B, description: "Install and complete the local publish, open, version, compare, visibility, MCP, and restart workflows without an external service."}
       failure: {id: DEP-004-F, description: "Local operation does not require Docker, another container runtime, browser OAuth, a cloud account, a hosted database, or internet access."}
     deployments: [local]
     status: specified
@@ -3782,7 +3584,7 @@ requirements:
 
   - id: REL-001
     kind: release_gate
-    behavior: The local-owner first-release mode includes automatic credential-free browser access, one-process offline operation, single-file and complete-site publishing, immutable versions, comparisons, restore, two read settings, HTTP, MCP, the artifact route of the Artifact Server skill, and browser isolation. Optional Git history is deferred and is not a first-release gate.
+    behavior: The local-owner first-release mode includes automatic credential-free browser access, one-process offline operation, single-file and complete-site publishing, immutable versions, comparisons, restore, two read settings, HTTP, MCP, the artifact route of the Artifact Server skill, and browser isolation.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: implementation}
     acceptance:
@@ -3884,26 +3686,13 @@ requirements:
     depends_on: [PLN-003]
     evidence: []
 
-  - id: SCP-004
-    kind: exclusion
-    behavior: Optional Git handoff is only a private derivative of Artifact Server versions and is not general-purpose source-code hosting.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: scope}
-    acceptance:
-      behavior: {id: SCP-004-B, description: "Create only Artifact Server-controlled version commits through the history adapter."}
-      failure: {id: SCP-004-F, description: "Users cannot push arbitrary branches, host unrelated repositories, make Git the render source, or bypass artifact authorization through Git."}
-    deployments: *all
-    status: specified
-    depends_on: [GIT-001, GIT-002]
-    evidence: []
-
   - id: SCP-005
     kind: exclusion
     behavior: Artifact Server does not run arbitrary add-ons or third-party programs inside the server.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: scope}
     acceptance:
-      behavior: {id: SCP-005-B, description: "Extend only through documented deployment, storage, auth, Git, MCP, and integration contracts."}
+      behavior: {id: SCP-005-B, description: "Extend only through documented deployment, storage, auth, MCP, and integration contracts."}
       failure: {id: SCP-005-F, description: "Configuration or uploaded content cannot load arbitrary server plugins, native modules, hooks, or executable extensions."}
     deployments: *all
     status: specified
@@ -3981,19 +3770,6 @@ requirements:
     depends_on: [DEP-014]
     evidence: []
 
-  - id: GATE-004
-    kind: release_gate
-    behavior: The off-by-default Cloudflare Artifacts adapter is advertised only after current access, pricing, repository and rate limits, token behavior, Git compatibility, project selection, estimate and budget behavior, namespace isolation, bounded live-test cleanup, failure containment, deletion, jurisdiction, cost, and recovery are verified.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-004-B, description: "Complete the bounded live Cloudflare Artifacts binding, REST, smart-HTTP, token, per-project switch, estimate, budget, namespace, run-manifest cleanup, backfill, disable, deletion, recovery, limit, and cost probes and document the supported envelope."}
-      failure: {id: GATE-004-F, description: "Absent beta access, invalid configuration, stale pricing, a provider or test bound, missing Git behavior, cleanup failure, or provider outage cannot touch another namespace or block startup, readiness, saved versions, delivery, or core comparison."}
-    deployments: *all
-    status: specified
-    depends_on: [GIT-007, GIT-012, GIT-013, GIT-014]
-    evidence: []
-
   - id: GATE-009
     kind: release_gate
     behavior: Default and maximum file count, file size, artifact size, version count, text-diff size, rate, retention, and egress limits come from measured tests and published cost envelopes.
@@ -4028,10 +3804,10 @@ requirements:
     source: {file: artifact-server-product-spec.html, anchor: decisions}
     acceptance:
       behavior: {id: GATE-011-B, description: "Trace each enterprise control through configuration, enforcement, storage, backup, export, deletion, monitoring, and customer-visible evidence."}
-      failure: {id: GATE-011-F, description: "Backups, replicas, CDN copies, Git history, logs, or integration references cannot be omitted from a claimed regional, hold, encryption, export, or deletion boundary."}
+      failure: {id: GATE-011-F, description: "Backups, replicas, CDN copies, logs, or integration references cannot be omitted from a claimed regional, hold, encryption, export, or deletion boundary."}
     deployments: *external_storage
     status: specified
-    depends_on: [OPS-003, GIT-001, AUD-001]
+    depends_on: [OPS-003, AUD-001]
     evidence: []
 
   - id: GATE-012

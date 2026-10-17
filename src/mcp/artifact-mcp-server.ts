@@ -29,13 +29,6 @@ import {ArtifactManagementService} from "../application/artifact-management.js";
 import {CompareArtifactService} from "../application/compare-artifact.js";
 import {ContentAccessService} from "../application/content-access.js";
 import {ProjectManagementService} from "../application/project-management.js";
-import {ProjectGitHistoryService} from
-  "../application/project-git-history.js";
-import {
-  defaultGitCloneCredentialTtlSeconds,
-  GitHistoryAccessService,
-  maximumGitCloneCredentialTtlSeconds,
-} from "../application/git-history-access.js";
 import {StagedUploadService} from "../application/staged-upload.js";
 import {
   accessSettings,
@@ -56,11 +49,6 @@ import {
   type StagedUpload,
 } from "../core/model.js";
 import {principalKinds, type Principal} from "../core/identity.js";
-import {
-  gitHistoryProviders,
-  gitHistoryProviderStates,
-  type GitHistoryCapability,
-} from "../git-history/git-history-capability.js";
 import {
   maximumCommentAnchorBytes,
   maximumCommentBodyCharacters,
@@ -157,27 +145,6 @@ const projectProjectionSchema = z.object({
   createdAt: z.string(),
   id: z.string(),
   name: z.string(),
-}).strict();
-const projectGitHistorySettingSchema = z.object({
-  enabled: z.boolean(),
-  projectId: z.string(),
-  state: z.enum([
-    "backfilling",
-    "budget-limited",
-    "degraded",
-    "disabled",
-    "ready",
-    "waiting",
-  ]),
-}).strict();
-const projectGitHistoryEstimateSchema = z.object({
-  estimatedCopiedBytes: z.number().int().nonnegative(),
-  estimatedPointerBytes: z.number().int().nonnegative(),
-  notice: z.string(),
-  operations: z.number().int().nonnegative(),
-  projectId: z.string(),
-  repositories: z.number().int().nonnegative(),
-  versions: z.number().int().nonnegative(),
 }).strict();
 const manifestEntrySchema = z.object({
   disposition: z.enum(["attachment", "inline"]),
@@ -367,8 +334,6 @@ export interface ArtifactMcpServerDependencies {
   readonly contentDomain: string | null;
   /** The access setting `artifact_commit_upload` applies when the caller names none. */
   readonly defaultAccessSetting: AccessSetting;
-  /** Secret-free optional Git state exposed by capability discovery. */
-  readonly gitHistory: GitHistoryCapability;
   readonly mode: "local" | "remote";
   readonly requestId: string;
 }
@@ -579,17 +544,6 @@ export function createArtifactMcpServer(
           mcpTool: z.literal(false),
           workflow: z.string(),
         }),
-        gitHistory: z.object({
-          limits: z.object({
-            fileCopyBytes: z.number().int().nonnegative(),
-            logicalCopiedBytes: z.number().int().nonnegative(),
-            logicalReservedBytes: z.number().int().nonnegative(),
-            storageBudgetBytes: z.number().int().nonnegative().nullable(),
-            versionCopyBytes: z.number().int().nonnegative(),
-          }).strict(),
-          provider: z.enum(gitHistoryProviders).nullable(),
-          providerState: z.enum(gitHistoryProviderStates),
-        }).strict(),
         publishing: z.object({
           acceptsInlineContent: z.literal(false),
           localPathTool: z.literal(false),
@@ -606,10 +560,7 @@ export function createArtifactMcpServer(
       annotations: readOnlyAnnotations,
     },
     () => successResult(
-      capabilities(
-        dependencies.mode,
-        dependencies.gitHistory,
-      ),
+      capabilities(dependencies.mode),
       "Artifact Server publishes actual files through an upload plan. It does not accept inline HTML, CSS, JavaScript, or base64 content."),
   );
 
@@ -720,125 +671,6 @@ export function createArtifactMcpServer(
       })),
     );
   }
-
-  registerNudgedTool(
-    "project_git_history_status",
-    {
-      title: "Read project Git history status",
-      description:
-        "Read whether this project is selected for optional derived Git history.",
-      inputSchema: z.object({projectId: projectIdSchema}).strict(),
-      outputSchema: z.object({
-        gitHistory: projectGitHistorySettingSchema,
-      }).strict(),
-      annotations: readOnlyAnnotations,
-    },
-    ({projectId}) => toolResult(async () => ({
-      gitHistory: await runMcpApplicationEffect(
-        dependencies,
-        ProjectGitHistoryService.use((service) => service.read({
-          principal: identity.principal,
-          projectId,
-        })),
-      ),
-    })),
-  );
-
-  registerNudgedTool(
-    "project_git_history_estimate",
-    {
-      title: "Estimate project Git history",
-      description:
-        "Estimate future repositories, versions, and copied bytes for planning. This does not enable Git history.",
-      inputSchema: z.object({projectId: projectIdSchema}).strict(),
-      outputSchema: z.object({estimate: projectGitHistoryEstimateSchema}).strict(),
-      annotations: readOnlyAnnotations,
-    },
-    ({projectId}) => toolResult(async () => ({
-      estimate: await runMcpApplicationEffect(
-        dependencies,
-        ProjectGitHistoryService.use((service) => service.estimate({
-          principal: identity.principal,
-          projectId,
-        })),
-      ),
-    })),
-  );
-
-  registerNudgedTool(
-    "project_set_git_history",
-    {
-      title: "Set project Git history",
-      description:
-        "Enable or disable optional derived Git history for one project. Enabling requires the current estimate to be confirmed.",
-      inputSchema: z.discriminatedUnion("enabled", [
-        z.object({enabled: z.literal(false), projectId: projectIdSchema}).strict(),
-        z.object({
-          confirmEstimate: z.literal(true),
-          enabled: z.literal(true),
-          projectId: projectIdSchema,
-        }).strict(),
-      ]),
-      outputSchema: z.object({
-        gitHistory: projectGitHistorySettingSchema,
-      }).strict(),
-      annotations: idempotentWriteAnnotations,
-    },
-    (input) => toolResult(async () => {
-      const command = input.enabled
-        ? {
-          confirmEstimate: true as const,
-          enabled: true as const,
-          principal: identity.principal,
-          projectId: input.projectId,
-        }
-        : {
-          enabled: false as const,
-          principal: identity.principal,
-          projectId: input.projectId,
-        };
-      return {
-        gitHistory: await runMcpApplicationEffect(
-          dependencies,
-          ProjectGitHistoryService.use((service) => service.set(command)),
-        ),
-      };
-    }),
-  );
-
-  registerNudgedTool(
-    "artifact_history_clone_token",
-    {
-      title: "Issue a Git history clone token",
-      description:
-        "Issue a short-lived read credential for this artifact's derived repository. Use it directly for a clone and never quote it to the user.",
-      inputSchema: z.object({
-        artifactId: artifactIdSchema,
-        projectId: projectIdSchema,
-        ttlSeconds: z.number().int().min(1)
-          .max(maximumGitCloneCredentialTtlSeconds)
-          .default(defaultGitCloneCredentialTtlSeconds),
-      }).strict(),
-      outputSchema: z.object({
-        defaultBranch: z.literal("main"),
-        expiresAt: z.string(),
-        remote: z.url(),
-        token: z.string().min(1),
-      }).strict(),
-      annotations: readOnlyAnnotations,
-    },
-    ({artifactId, projectId, ttlSeconds}) => toolResult(async () =>
-      runMcpApplicationEffect(
-        dependencies,
-        GitHistoryAccessService.use((service) => service.issueCloneCredential({
-          artifactId,
-          principal: identity.principal,
-          projectId,
-          ttlSeconds,
-        })),
-      )
-    ),
-  );
 
   registerNudgedTool(
     "artifact_list",
@@ -2269,12 +2101,8 @@ function agentInstructions(mode: "local" | "remote"): string {
   ].join("\n");
 }
 
-function capabilities(
-  mode: "local" | "remote",
-  gitHistory: GitHistoryCapability,
-) {
+function capabilities(mode: "local" | "remote") {
   return {
-    gitHistory,
     agentDispatch: {
       bundleThreadRule:
         "1..100 open, undispatched comment threads from one project per bundle",

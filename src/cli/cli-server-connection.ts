@@ -48,13 +48,10 @@ export const authenticatedCliHttpClientLayer = Layer.merge(
 /**
  * Resolve one credential only for the exact destination it is allowed to reach.
  *
- * Linked-file commands default to the local installation because the server
- * must read the selected path. Publication retains its existing default-profile
- * behavior when the caller omits a destination.
+ * Without a destination, the default profile wins, then the local installation.
  */
 export async function resolveCliServerConnection(
   options: CliServerConnectionOptions,
-  purpose: "history" | "link" | "publish",
 ): Promise<CliServerConnection> {
   const explicitToken = await loadExplicitApiToken(options);
   const profileDataDirectory = path.resolve(options.profileData);
@@ -93,14 +90,12 @@ export async function resolveCliServerConnection(
     return resolveProfileConnection(profileDataDirectory, profile);
   }
 
-  if (purpose === "history" || purpose === "publish") {
-    const state = await runCliEffect(readCliProfileState(profileDataDirectory));
-    const defaultProfile = state.profiles.find(
-      (profile) => profile.id === state.defaultProfileId,
-    );
-    if (defaultProfile !== undefined) {
-      return resolveProfileConnection(profileDataDirectory, defaultProfile);
-    }
+  const state = await runCliEffect(readCliProfileState(profileDataDirectory));
+  const defaultProfile = state.profiles.find(
+    (profile) => profile.id === state.defaultProfileId,
+  );
+  if (defaultProfile !== undefined) {
+    return resolveProfileConnection(profileDataDirectory, defaultProfile);
   }
 
   const managedOrigin = await readHealthyManagedOrigin(options.data);

@@ -56,7 +56,6 @@ export function ReviewSettings({
         onProjectsChanged={onProjectsChanged}
         projects={projects}
         route={route}
-        session={session}
       />
     </div>
   );
@@ -68,14 +67,12 @@ function SettingsContent({
   onProjectsChanged,
   projects,
   route,
-  session,
 }: {
   readonly administrator: boolean;
   readonly canManageProjects: boolean;
   readonly onProjectsChanged: () => Promise<readonly Project[]>;
   readonly projects: readonly Project[];
   readonly route: SettingsRoute;
-  readonly session: Session;
 }) {
   if (route.kind === "notFound") {
     return (
@@ -96,7 +93,6 @@ function SettingsContent({
       return (
         <SettingsProjects
           canManage={canManageProjects}
-          gitHistory={session.capabilities.gitHistory}
           onProjectsChanged={onProjectsChanged}
           projects={projects}
         />
@@ -105,7 +101,6 @@ function SettingsContent({
     return (
       <SettingsProject
         canManage={canManageProjects}
-        gitHistory={session.capabilities.gitHistory}
         onProjectsChanged={onProjectsChanged}
         projectId={route.projectId}
         projects={projects}

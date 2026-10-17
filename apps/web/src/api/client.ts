@@ -24,45 +24,10 @@ const principalSchema = z.object({
   membershipRole: membershipRoleSchema,
 });
 
-const disabledGitHistoryCapability = {
-  limits: {
-    fileCopyBytes: 10 * 1024 * 1024,
-    logicalCopiedBytes: 0,
-    logicalReservedBytes: 0,
-    storageBudgetBytes: null,
-    versionCopyBytes: 50 * 1024 * 1024,
-  },
-  provider: null,
-  providerState: "disabled" as const,
-};
-const gitHistoryCapabilitySchema = z.object({
-  limits: z.object({
-    fileCopyBytes: z.number().int().nonnegative(),
-    logicalCopiedBytes: z.number().int().nonnegative(),
-    logicalReservedBytes: z.number().int().nonnegative(),
-    storageBudgetBytes: z.number().int().nonnegative().nullable(),
-    versionCopyBytes: z.number().int().nonnegative(),
-  }),
-  provider: z.literal("cloudflare-artifacts").nullable(),
-  providerState: z.enum([
-    "disabled",
-    "checking",
-    "available",
-    "degraded",
-    "misconfigured",
-    "migration-required",
-  ]),
-});
-
-/**
- * What this deployment offers beyond the shared surface. A deployment that
- * never learned the field is a deployment without the capability, so the
- * default keeps every gated affordance hidden rather than guessed at.
- */
+/** What this deployment offers beyond the shared surface. */
 const deploymentCapabilitiesSchema = z.object({
   /** The largest text file one edit may save, as the server enforces it. */
   editing: z.object({maximumTextFileBytes: z.number().int().positive()}),
-  gitHistory: gitHistoryCapabilitySchema.default(disabledGitHistoryCapability),
 });
 
 const sessionSchema = z.object({
@@ -89,28 +54,6 @@ const projectSchema = z.object({
   installationId: z.string(),
   name: z.string(),
 });
-const projectGitHistorySettingSchema = z.object({
-  enabled: z.boolean(),
-  projectId: z.string(),
-  state: z.enum([
-    "backfilling",
-    "budget-limited",
-    "degraded",
-    "disabled",
-    "ready",
-    "waiting",
-  ]),
-});
-const projectGitHistoryEstimateSchema = z.object({
-  estimatedCopiedBytes: z.number().int().nonnegative(),
-  estimatedPointerBytes: z.number().int().nonnegative(),
-  notice: z.string(),
-  operations: z.number().int().nonnegative(),
-  projectId: z.string(),
-  repositories: z.number().int().nonnegative(),
-  versions: z.number().int().nonnegative(),
-});
-
 /** The principal who created an artifact; the name is null for old artifacts. */
 const artifactOwnerSchema = z.object({
   displayName: z.string().nullable(),
@@ -189,8 +132,6 @@ export type Principal = z.infer<typeof principalSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type AccessContext = z.infer<typeof accessContextSchema>;
 export type Project = z.infer<typeof projectSchema>;
-export type ProjectGitHistorySetting = z.infer<typeof projectGitHistorySettingSchema>;
-export type ProjectGitHistoryEstimate = z.infer<typeof projectGitHistoryEstimateSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
 export type ArtifactOwner = z.infer<typeof artifactOwnerSchema>;
 export type ManifestEntry = z.infer<typeof manifestEntrySchema>;
@@ -984,26 +925,6 @@ export const api = {
     `/api/v1/projects/${encodeURIComponent(projectId)}/unarchive`,
     { headers: mutationHeaders(), method: "POST" },
   ).then(({ project }) => project),
-  projectGitHistory: (projectId: string) => request(
-    z.object({gitHistory: projectGitHistorySettingSchema}),
-    `/api/v1/projects/${encodeURIComponent(projectId)}/git-history`,
-  ).then(({gitHistory}) => gitHistory),
-  estimateProjectGitHistory: (projectId: string) => request(
-    z.object({estimate: projectGitHistoryEstimateSchema}),
-    `/api/v1/projects/${encodeURIComponent(projectId)}/git-history/estimate`,
-    {headers: mutationHeaders(), method: "POST"},
-  ).then(({estimate}) => estimate),
-  setProjectGitHistory: (projectId: string, enabled: boolean) => request(
-    z.object({gitHistory: projectGitHistorySettingSchema}),
-    `/api/v1/projects/${encodeURIComponent(projectId)}/git-history`,
-    {
-      body: JSON.stringify(enabled
-        ? {confirmEstimate: true, enabled: true}
-        : {enabled: false}),
-      headers: mutationHeaders(),
-      method: "PUT",
-    },
-  ).then(({gitHistory}) => gitHistory),
   artifacts: (
     projectId: string,
     cursor: string | null,

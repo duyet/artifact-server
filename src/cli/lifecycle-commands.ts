@@ -40,8 +40,6 @@ import {
 import {PostgresDatabase} from "../storage/postgres-database.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
-import {writeGitHistoryConfigurationWarnings} from
-  "./git-history-configuration-warnings.js";
 import {
   browserLoginKinds,
   privateTeamBrowserAccess,
@@ -351,7 +349,6 @@ function configureExternalStorageStart(
     .addOption(portOption())
     .action(async (options: StartExternalStorageOptions) => {
       const parsed = await parseExternalConfiguration(options.host, options.port);
-      writeGitHistoryConfigurationWarnings(parsed.gitHistory);
       const server = await startExternalStorageServer({
         apiToken: parsed.apiToken,
         applicationOrigin: parsed.applicationOrigin,
@@ -360,7 +357,6 @@ function configureExternalStorageStart(
         completedRequestLogSampleRate: parsed.completedRequestLogSampleRate,
         contentDomain: parsed.contentDomain,
         databaseUrl: parsed.databaseUrl,
-        gitHistory: parsed.gitHistory,
         hostname: parsed.hostname,
         installationId: parsed.installationId,
         objectStorage: parsed.objectStorage,
@@ -385,7 +381,6 @@ async function startCompactServer(
   configuration: CompactRuntimeConfiguration,
   productVersion: string,
 ) {
-  writeGitHistoryConfigurationWarnings(configuration.gitHistory);
   return startLocalServer({
     apiToken: Redacted.value(configuration.apiToken),
     applicationOrigin: configuration.applicationOrigin,
@@ -394,7 +389,6 @@ async function startCompactServer(
     completedRequestLogSampleRate: configuration.completedRequestLogSampleRate,
     contentDomain: configuration.contentDomain,
     dataDirectory: configuration.dataDirectory,
-    gitHistory: configuration.gitHistory,
     hostname: configuration.hostname,
     installationId: configuration.installation.installationId,
     port: configuration.port,
@@ -430,7 +424,6 @@ function compactMaintenanceConfig(
     completedRequestLogSampleRate: 0,
     contentDomain: configuration.contentDomain,
     dataDirectory: configuration.dataDirectory,
-    gitHistory: configuration.gitHistory,
     installationId: configuration.installation.installationId,
     observability: true,
     stagingCleanupPolicy: {
@@ -451,7 +444,6 @@ function externalMaintenanceConfig(
     completedRequestLogSampleRate: 0,
     contentDomain: configuration.contentDomain,
     databaseUrl: configuration.databaseUrl,
-    gitHistory: configuration.gitHistory,
     installationId: configuration.installationId,
     objectStorage: configuration.objectStorage,
     postgresMaxConnections: configuration.postgresMaxConnections,

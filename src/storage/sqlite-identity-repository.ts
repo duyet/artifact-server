@@ -765,23 +765,6 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         expires_at TEXT NOT NULL,
         consumed_at TEXT
       );
-
-      CREATE TABLE IF NOT EXISTS git_history_provider_identity (
-        installation_id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL CHECK (provider = 'cloudflare-artifacts'),
-        account_id TEXT NOT NULL,
-        namespace TEXT NOT NULL,
-        activated_at TEXT NOT NULL,
-        UNIQUE (provider, account_id, namespace)
-      ) STRICT;
-
-      CREATE TABLE IF NOT EXISTS git_history_project_settings (
-        project_id TEXT PRIMARY KEY REFERENCES projects(id),
-        installation_id TEXT NOT NULL,
-        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-        updated_by_principal_id TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      ) STRICT;
     `);
     this.#addLoginAttemptNonceIfMissing();
     this.#database.exec(`PRAGMA user_version = ${requiredSqliteSchemaVersion};`);

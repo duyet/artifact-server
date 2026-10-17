@@ -3,8 +3,6 @@ import * as Migrator from "effect/unstable/sql/Migrator";
 import {SqlClient} from "effect/unstable/sql/SqlClient";
 
 import {normalizeArtifactSearchText} from "../application/artifact-tags.js";
-import {defaultGitHistoryMaximumCopiedFiles} from
-  "../git-history/git-history-capability.js";
 
 const initialSchema = Effect.gen(function*() {
   const sql = yield* SqlClient;
@@ -540,7 +538,7 @@ const addGitHistoryMirror = Effect.gen(function*() {
       ADD COLUMN file_copy_limit_bytes BIGINT NOT NULL DEFAULT 10485760,
       ADD COLUMN version_copy_limit_bytes BIGINT NOT NULL DEFAULT 52428800,
       ADD COLUMN maximum_copied_files INTEGER NOT NULL
-        DEFAULT ${defaultGitHistoryMaximumCopiedFiles},
+        DEFAULT 500,
       ADD COLUMN storage_budget_bytes BIGINT`,
     `CREATE TABLE git_history_repositories (
       installation_id TEXT NOT NULL REFERENCES artifact_installations(id),
@@ -767,6 +765,19 @@ const dropExternalIdentities = Effect.gen(function*() {
   yield* sql.unsafe("DROP TABLE IF EXISTS external_identities");
 });
 
+// Git history was removed. Its tables only described copies of versions in an
+// external provider, so they are dropped, children before parents.
+const dropGitHistory = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  yield* sql.unsafe(`DROP TABLE IF EXISTS
+    git_history_budget_reservations,
+    git_history_jobs,
+    git_history_mappings,
+    git_history_repositories,
+    git_history_project_settings,
+    git_history_provider_identity`);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -785,10 +796,11 @@ const migrationLoader = Migrator.fromRecord({
   "0015_artifact_owner": addArtifactOwner,
   "0016_rename_and_edit_actions": addRenameAndEditActions,
   "0017_drop_external_identities": dropExternalIdentities,
+  "0018_drop_git_history": dropGitHistory,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 17;
+export const requiredPostgresSchemaVersion = 18;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -894,6 +906,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 17,
     name: "drop_external_identities",
+  }, {
+    migration_id: 18,
+    name: "drop_git_history",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

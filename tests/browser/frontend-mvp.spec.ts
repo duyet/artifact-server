@@ -1630,7 +1630,6 @@ test.describe("Artifact Server frontend MVP", () => {
       const defaultProjectRow = fixture.page.getByRole("row").filter({hasText: "Default"});
       await defaultProjectRow.getByRole("link", {name: "Settings"}).click();
       await expect(fixture.page.getByRole("heading", {name: "Project identity"})).toBeVisible();
-      await expect(fixture.page.getByRole("heading", {name: "Git history"})).toHaveCount(0);
       // The settings header is the shell's compact breadcrumb bar.
       const settingsBreadcrumb = fixture.page.getByRole("navigation", {name: "breadcrumb"});
       await expect(settingsBreadcrumb).toContainText("Settings");

@@ -340,7 +340,7 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 16});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'artifacts_live_path'",
       ).get()).toEqual({name: "artifacts_live_path"});
@@ -440,10 +440,94 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 16});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
       const columns = upgraded.prepare("SELECT name FROM pragma_table_info('artifacts')").all()
         .map((row) => z.object({name: z.string()}).parse(row).name);
       expect(columns.filter((name) => name.startsWith("source_"))).toEqual([]);
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  test("foundation: a schema-16 database drops the Git history tables and keeps serving", async () => {
+    server = await startTestServer(installation);
+    const published = await publishNew(server, installation, {
+      accessSetting: "public_link",
+      content: "<!doctype html><title>Before Git history removal</title>",
+      idempotencyKey: "schema-sixteen-git-history",
+    });
+    expect(published.response.status).toBe(201);
+    await server.stop();
+    server = null;
+
+    // Rebuild the Git history tables an older build created, with one
+    // project enabled and one queued mirror job for the published version.
+    const databasePath = path.join(installation.dataDirectory, "artifact-server.db");
+    const previous = new DatabaseSync(databasePath);
+    try {
+      previous.exec(`
+        CREATE TABLE git_history_provider_identity (
+          installation_id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          namespace TEXT NOT NULL,
+          activated_at TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE git_history_project_settings (
+          project_id TEXT PRIMARY KEY REFERENCES projects(id),
+          installation_id TEXT NOT NULL,
+          enabled INTEGER NOT NULL,
+          updated_by_principal_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE git_history_repositories (
+          artifact_id TEXT PRIMARY KEY REFERENCES artifacts(id),
+          installation_id TEXT NOT NULL,
+          project_id TEXT NOT NULL REFERENCES projects(id),
+          repository_name TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE git_history_jobs (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES projects(id),
+          artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+          version_id TEXT REFERENCES versions(id)
+        ) STRICT;
+        CREATE TABLE git_history_mappings (
+          artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+          version_id TEXT NOT NULL REFERENCES versions(id),
+          commit_id TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE git_history_budget_reservations (
+          job_id TEXT PRIMARY KEY REFERENCES git_history_jobs(id),
+          logical_bytes INTEGER NOT NULL
+        ) STRICT;
+        PRAGMA user_version = 16;
+      `);
+      previous.prepare(`
+        INSERT INTO git_history_project_settings
+        VALUES (?, 'local', 1, 'principal', '2026-08-01T00:00:00.000Z')
+      `).run(defaultProjectId);
+      previous.prepare(`
+        INSERT INTO git_history_jobs VALUES ('job-1', ?, ?, ?)
+      `).run(defaultProjectId, published.body.artifact.id, published.body.version.id);
+      previous.exec("INSERT INTO git_history_budget_reservations VALUES ('job-1', 10)");
+    } finally {
+      previous.close();
+    }
+
+    server = await startTestServer(installation);
+    const rendered = await fetchVersion(server, published.body.links.version);
+    expect(rendered.status).toBe(200);
+    await expect(rendered.text()).resolves.toContain("Before Git history removal");
+    await server.stop();
+    server = null;
+
+    const upgraded = new DatabaseSync(databasePath, {readOnly: true});
+    try {
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
+      expect(upgraded.prepare(
+        "SELECT name FROM sqlite_schema WHERE name LIKE 'git_history%'",
+      ).all()).toEqual([]);
     } finally {
       upgraded.close();
     }

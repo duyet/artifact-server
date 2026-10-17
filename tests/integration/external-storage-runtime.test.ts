@@ -37,10 +37,6 @@ import {requiredPostgresSchemaVersion} from
 import {PostgresArtifactRepository} from "../../src/storage/postgres-artifact-repository.js";
 import {PostgresIdentityRepository} from "../../src/storage/postgres-identity-repository.js";
 import {defaultProjectId} from "../../src/core/model.js";
-import type {NodeGitHistoryConfiguration} from
-  "../../src/git-history/node-git-history-configuration.js";
-import type {GitHistoryProviderHealthProbe} from
-  "../../src/git-history/git-history-provider-health.js";
 import {managedApiKeyCredentialPattern} from
   "../../src/core/installation-identity.js";
 import {
@@ -57,9 +53,6 @@ const apiToken = managedTestKey("external-storage-integration");
 const administratorEmail = "administrator@example.test";
 const runningProcesses = new Set<ChildProcessWithoutNullStreams>();
 const runningInProcessServers = new Set<InProcessExternalStorageServer>();
-const availableGitHistoryProbe: GitHistoryProviderHealthProbe = {
-  check: () => Effect.succeed({state: "available"}),
-};
 
 const publishResponseSchema = z.object({
   artifact: z.object({
@@ -76,33 +69,6 @@ const publishResponseSchema = z.object({
     projectId: z.string(),
   }),
 });
-
-const projectGitHistoryEstimateResponseSchema = z.object({
-  estimate: z.object({
-    estimatedCopiedBytes: z.number().int().nonnegative(),
-    estimatedPointerBytes: z.number().int().nonnegative(),
-    notice: z.string(),
-    operations: z.number().int().nonnegative(),
-    projectId: z.string(),
-    repositories: z.number().int().nonnegative(),
-    versions: z.number().int().nonnegative(),
-  }).strict(),
-}).strict();
-
-const projectGitHistoryResponseSchema = z.object({
-  gitHistory: z.object({
-    enabled: z.boolean(),
-    projectId: z.string(),
-    state: z.enum([
-      "backfilling",
-      "budget-limited",
-      "degraded",
-      "disabled",
-      "ready",
-      "waiting",
-    ]),
-  }).strict(),
-}).strict();
 
 const taggedFailureSchema = z.object({_tag: z.string()}).loose();
 
@@ -342,137 +308,6 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     }
   });
 
-  test("GIT-010 GIT-013 foundation: Postgres enables Git history and preserves provider identity", async () => {
-    const identity = {
-      apiToken: managedTestKey("postgres-git-history"),
-      installationId: "postgres-git-history",
-    };
-    const originalGitHistory = configuredGitHistory("postgres-history-one");
-    let server = await startInProcessExternalStorageServer(
-      environment,
-      identity,
-      {
-        gitHistory: originalGitHistory,
-        gitHistoryHealthProbe: availableGitHistoryProbe,
-      },
-    );
-    await expect.poll(
-      () => readGitHistoryProviderState(server.baseUrl, identity.apiToken),
-      {timeout: 5_000},
-    ).toBe("available");
-    const content = "Postgres Git history estimate";
-    const published = await publishNew(server.baseUrl, identity.apiToken, {
-      content,
-      idempotencyKey: "postgres-git-history-publish",
-      name: "Postgres Git history",
-    });
-    expect(published.response.status).toBe(201);
-    const estimateResponse = await fetch(
-      `${server.baseUrl}/api/v1/projects/${defaultProjectId}/git-history/estimate`,
-      {
-        headers: mutationHeaders(identity.apiToken, "postgres-git-history-estimate"),
-        method: "POST",
-      },
-    );
-    expect(estimateResponse.status).toBe(200);
-    const estimate = projectGitHistoryEstimateResponseSchema.parse(
-      await estimateResponse.json(),
-    );
-    expect(estimate.estimate).toMatchObject({
-      estimatedCopiedBytes: Buffer.byteLength(content),
-      estimatedPointerBytes: 0,
-      operations: 2,
-      projectId: defaultProjectId,
-      repositories: 1,
-      versions: 1,
-    });
-    const enableResponse = await fetch(
-      `${server.baseUrl}/api/v1/projects/${defaultProjectId}/git-history`,
-      {
-        body: JSON.stringify({confirmEstimate: true, enabled: true}),
-        headers: mutationHeaders(identity.apiToken, "postgres-git-history-enable"),
-        method: "PUT",
-      },
-    );
-    expect(enableResponse.status).toBe(200);
-    expect(projectGitHistoryResponseSchema.parse(await enableResponse.json())).toEqual({
-      gitHistory: {
-        enabled: true,
-        projectId: defaultProjectId,
-        state: "waiting",
-      },
-    });
-    await server.stop();
-
-    server = await startInProcessExternalStorageServer(
-      environment,
-      identity,
-      {
-        gitHistory: configuredGitHistory("postgres-history-two"),
-        gitHistoryHealthProbe: availableGitHistoryProbe,
-      },
-    );
-    await expect.poll(
-      () => readGitHistoryProviderState(server.baseUrl, identity.apiToken),
-      {timeout: 5_000},
-    ).toBe("migration-required");
-    const settingResponse = await authenticatedFetch(
-      server.baseUrl,
-      identity.apiToken,
-      `/api/v1/projects/${defaultProjectId}/git-history`,
-    );
-    expect(settingResponse.status).toBe(200);
-    expect(projectGitHistoryResponseSchema.parse(await settingResponse.json())).toEqual({
-      gitHistory: {
-        enabled: true,
-        projectId: defaultProjectId,
-        state: "degraded",
-      },
-    });
-
-    const database = await PostgresDatabase.inspect({
-      applicationName: "artifact-server-git-history-identity-test",
-      maxConnections: 1,
-      url: Redacted.make(environment.databaseUrl),
-    });
-    try {
-      const rows = await database.run(Effect.gen(function*() {
-        const sql = yield* SqlClient;
-        return yield* sql<{
-          readonly account_id: string;
-          readonly namespace: string;
-          readonly provider: string;
-        }>`
-          SELECT provider, account_id, namespace
-          FROM git_history_provider_identity
-          WHERE installation_id = ${identity.installationId}
-        `.withoutTransform;
-      }));
-      expect(rows).toEqual([{
-        account_id: "postgres-account",
-        namespace: "postgres-history-one",
-        provider: "cloudflare-artifacts",
-      }]);
-      const settings = await database.run(Effect.gen(function*() {
-        const sql = yield* SqlClient;
-        return yield* sql<{
-          readonly enabled: boolean;
-          readonly project_id: string;
-        }>`
-          SELECT project_id, enabled
-          FROM git_history_project_settings
-          WHERE installation_id = ${identity.installationId}
-        `.withoutTransform;
-      }));
-      expect(settings).toEqual([{
-        enabled: true,
-        project_id: defaultProjectId,
-      }]);
-    } finally {
-      await database.close();
-    }
-  });
-
   test("a populated Postgres v1 installation migrates without changing identity or bytes", async () => {
     const databaseName = `artifactserver_project_migration_${randomUUID().replaceAll("-", "")}`;
     await createPostgresDatabase(environment, databaseName);
@@ -546,12 +381,6 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           "DROP TABLE comment_threads",
           "DROP TABLE agent_dispatches",
           "DROP TABLE registered_agents",
-          "DROP TABLE git_history_budget_reservations",
-          "DROP TABLE git_history_mappings",
-          "DROP TABLE git_history_jobs",
-          "DROP TABLE git_history_repositories",
-          "DROP TABLE git_history_provider_identity",
-          "DROP TABLE git_history_project_settings",
           "DROP TABLE projects",
           `ALTER TABLE artifacts ADD CONSTRAINT artifacts_current_version_fk
             FOREIGN KEY (installation_id, current_version_id)
@@ -590,6 +419,23 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       compatibility: "current",
       currentVersion: requiredPostgresSchemaVersion,
     });
+    const migratedDatabase = await PostgresDatabase.inspect({
+      applicationName: "artifact-server-project-migration-tables",
+      maxConnections: 1,
+      url: Redacted.make(migrationEnvironment.databaseUrl),
+    });
+    try {
+      // Migrations 0007 to 0009 create the Git history tables and 0018 drops them.
+      const gitHistoryTables = await migratedDatabase.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        return yield* sql<{readonly tablename: string}>`
+          SELECT tablename FROM pg_tables WHERE tablename LIKE 'git_history%'
+        `;
+      }));
+      expect(gitHistoryTables).toEqual([]);
+    } finally {
+      await migratedDatabase.close();
+    }
 
     const restored = await startExternalStorageProcess(migrationEnvironment, identity);
     const detailsResponse = await authenticatedFetch(
@@ -2871,8 +2717,6 @@ async function startInProcessExternalStorageServer(
   identity: {readonly apiToken: string; readonly installationId: string},
   options: {
     readonly clock?: Clock;
-    readonly gitHistory?: NodeGitHistoryConfiguration;
-    readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
   } = {},
 ): Promise<InProcessExternalStorageServer> {
   const server = await startExternalStorageServer({
@@ -2908,44 +2752,6 @@ async function startInProcessExternalStorageServer(
   };
   runningInProcessServers.add(running);
   return running;
-}
-
-function configuredGitHistory(namespace: string): NodeGitHistoryConfiguration {
-  return {
-    _tag: "CloudflareArtifactsRest",
-    apiToken: Redacted.make("postgres-cloudflare-artifacts-token"),
-    capability: {
-      limits: {
-        fileCopyBytes: 10 * 1024 * 1024,
-        logicalCopiedBytes: 0,
-        logicalReservedBytes: 0,
-        storageBudgetBytes: null,
-        versionCopyBytes: 50 * 1024 * 1024,
-      },
-      provider: "cloudflare-artifacts",
-      providerState: "checking",
-    },
-    identity: {
-      accountId: "postgres-account",
-      namespace,
-      provider: "cloudflare-artifacts",
-    },
-    issues: [],
-  };
-}
-
-async function readGitHistoryProviderState(
-  baseUrl: string,
-  token: string,
-): Promise<string> {
-  const response = await fetch(new URL("/api/v1/session", baseUrl), {
-    headers: {Authorization: `Bearer ${token}`},
-  });
-  return z.object({
-    capabilities: z.object({
-      gitHistory: z.object({providerState: z.string()}).loose(),
-    }).loose(),
-  }).loose().parse(await response.json()).capabilities.gitHistory.providerState;
 }
 
 function waitForExternalStorageProcess(

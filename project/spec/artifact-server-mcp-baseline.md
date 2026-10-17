@@ -212,10 +212,6 @@ Start with a small, explicit tool surface:
 | `artifact_diff` | Return a bounded comparison summary and a link to the full comparison. |
 | `artifact_restore_version` | Make an existing immutable version current again. |
 | `artifact_delete` | Delete one artifact after an optimistic current-version check. |
-| `project_git_history_status` | Read whether optional Git history is on for one project. |
-| `project_git_history_estimate` | For a project-management principal, estimate repositories, versions, provider operations, copied bytes, and pointer bytes before enabling that project's optional Git handoff. Makes no provider request. |
-| `project_set_git_history` | Enable or disable one project's optional Git handoff. Enabling requires explicit estimate confirmation; setting the current value is a no-op. |
-| `artifact_history_clone_token` | Issue an authorized, repository-scoped read credential for one provisioned artifact repository, with a 15-minute default and one-hour maximum lifetime. Public-link possession never qualifies. |
 | `comment_list` | List one artifact's comment threads, filtered by exact version or state and polled with `since` on last activity. A `dispatched` filter (`exclude`, `include`, or `only`; default `exclude`) matches the HTTP `GET …/comments` parameter exactly, so a thread an agent dispatch currently holds stays out of ordinary listings until it is addressed, fails, or is canceled, and is findable on demand with `dispatched: "only"`. |
 | `comment_get` | Read one comment thread with every reply it carries. |
 | `comment_create` | Open one comment thread on one exact saved version, optionally on one manifest path with a client-owned anchor. |
@@ -237,16 +233,6 @@ a dispatched thread directly by its id.
 `comment_delete` carries the same destructive tool annotation as
 `artifact_delete`, because deleting a thread also deletes every reply it
 carries; the other comment write tools carry the idempotent write annotation.
-
-Git provider configuration is never an MCP operation. `artifact_capabilities`
-reports provider availability and bounded copy limits/accounting without
-credentials or repository coordinates. Project and artifact reads report only
-their effective Git state and whether clone access is currently available. The
-project estimate tool is a privileged read-only tool; it computes a planning
-summary on demand, persists no receipt, and makes no provider call. The project
-switch has the same authorization and result contract over MCP and HTTP.
-Clone-token output is sensitive, non-cacheable, and excluded from logs;
-it is returned only to the authorized caller for immediate Git use.
 
 The first read-only resource template exposes one bounded version manifest:
 
@@ -280,7 +266,7 @@ Do not add prompts in the first release. Do not build new dependencies on deprec
 3. The client submits a manifest containing normalized portable relative paths, media type, byte length, SHA-256 fingerprint, entry file, and routing mode. The server rejects traversal, absolute paths, `.git` components, encoded separators, symlinks, special files, and case or Unicode collisions.
 4. `artifact_commit_upload` verifies every size and fingerprint, writes missing final blobs without overwriting an existing object, computes the canonical manifest digest, and seals the upload.
 5. In one database transaction it stores the version, manifest, idempotency result, and conditional current-version update.
-6. The result returns artifact ID, version ID, manifest digest, access setting, main link, saved-version link, and optional Git commit ID.
+6. The result returns artifact ID, version ID, manifest digest, access setting, main link, and saved-version link.
 
 The user and agent see one CLI action even when the upload plan uses several
 HTTP requests. Upload identifiers, temporary addresses, bearer credentials,
