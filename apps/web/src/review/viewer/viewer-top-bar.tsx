@@ -31,10 +31,9 @@ import {
 import {Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue} from "@/components/ui/select";
 import {Separator} from "@/components/ui/separator";
 import {SidebarTrigger} from "@/components/ui/sidebar";
-import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 import type {VersionListItem} from "../inspectors/versions-inspector.tsx";
 import {OwnerAvatar} from "../owner-avatar.tsx";
-import {principalLabel} from "../principal-name.ts";
+import {OwnerHoverCard} from "../owner-hover-card.tsx";
 import {ReviewDownloadControl, type ReviewDownload} from "../review-download.tsx";
 import {IconButton} from "../review-primitives.tsx";
 
@@ -169,12 +168,11 @@ export function ViewerTopBar({
       />
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {owner === null ? null : (
-          <Tooltip>
-            <TooltipTrigger render={<span className="mr-1 flex" />}>
+          <span className="mr-1 flex">
+            <OwnerHoverCard identity={owner} viewerPrincipalId={viewerPrincipalId}>
               <OwnerAvatar identity={owner} />
-            </TooltipTrigger>
-            <TooltipContent>Created by {principalLabel(owner, viewerPrincipalId)}</TooltipContent>
-          </Tooltip>
+            </OwnerHoverCard>
+          </span>
         )}
         {annotate === null ? null : (
           <IconButton

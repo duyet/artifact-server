@@ -2,6 +2,7 @@ import {describe, expect, test} from "vitest";
 
 import {
   principalInitials,
+  principalKindLabel,
   principalLabel,
   principalName,
 } from "../../apps/web/src/review/principal-name.js";
@@ -33,5 +34,12 @@ describe("principal names", () => {
     expect(principalInitials({displayName: "Ada Lovelace", principalId: "member_1"})).toBe("AL");
     expect(principalInitials(unnamed("local-api-token"))).toBe("LA");
     expect(principalInitials(unnamed("service:key_1"))).toBe("AK");
+  });
+
+  test("the credential kind is read from the ID, and left out when the ID names none", () => {
+    expect(principalKindLabel(unnamed("member_6b1d2e9a"))).toBe("Member");
+    expect(principalKindLabel(unnamed("service:key_0f3c"))).toBe("API key");
+    expect(principalKindLabel(unnamed("local-api-token"))).toBe("Local token");
+    expect(principalKindLabel(unnamed("external|auth0|42"))).toBeNull();
   });
 });

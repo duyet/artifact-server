@@ -17,6 +17,7 @@ import {Input} from "@/components/ui/input";
 import {Spinner} from "@/components/ui/spinner";
 import {formatTimestamp} from "@/lib/presentation";
 import {AccessBadge} from "../access-badge.tsx";
+import {OwnerHoverCard} from "../owner-hover-card.tsx";
 import {principalLabel} from "../principal-name.ts";
 import {InspectorRow, InspectorSection, InspectorStack} from "./inspector-layout.tsx";
 import {parseTagList} from "./inspector-model.ts";
@@ -43,7 +44,11 @@ export function DetailsInspector({
         <InspectorRow
           label="owner"
           title={details.artifact.owner.principalId}
-          value={principalLabel(details.artifact.owner, viewerPrincipalId)}
+          value={(
+            <OwnerHoverCard identity={details.artifact.owner} viewerPrincipalId={viewerPrincipalId}>
+              {principalLabel(details.artifact.owner, viewerPrincipalId)}
+            </OwnerHoverCard>
+          )}
         />
         <InspectorRow
           label="access"

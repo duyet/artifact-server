@@ -28,6 +28,7 @@ import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 import {cn} from "@/lib/utils";
 import {AccessBadge} from "../access-badge.tsx";
 import {OwnerAvatar} from "../owner-avatar.tsx";
+import {OwnerHoverCard} from "../owner-hover-card.tsx";
 import {principalLabel} from "../principal-name.ts";
 import {DeleteArtifactDialog} from "../inspectors/details-inspector.tsx";
 import {reviewDownload} from "../review-download.tsx";
@@ -365,10 +366,10 @@ function ArtifactEntry({
   const {artifact, commentCount, owner, updatedAt, versionCount, views} = item;
   const meta = (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">
+      <OwnerHoverCard identity={owner} viewerPrincipalId={viewerPrincipalId}>
         <OwnerAvatar className="size-5 text-[0.6rem]" identity={owner} />
         {principalLabel(owner, viewerPrincipalId)}
-      </span>
+      </OwnerHoverCard>
       <span aria-hidden="true">·</span>
       <time dateTime={updatedAt} title={new Date(updatedAt).toLocaleString()}>Edited {relativeTime(updatedAt, now)}</time>
       <span aria-hidden="true">·</span>

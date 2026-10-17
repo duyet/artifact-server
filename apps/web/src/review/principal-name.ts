@@ -18,6 +18,18 @@ export function principalLabel(identity: ArtifactOwner, viewerPrincipalId: strin
   return identity.principalId === viewerPrincipalId ? "You" : principalName(identity);
 }
 
+/**
+ * The kind of credential behind a principal, read from the ID's shape the way
+ * {@link principalName} does; null when the ID names no known kind.
+ */
+export function principalKindLabel(identity: ArtifactOwner): "API key" | "Local token" | "Member" | null {
+  const id = identity.principalId;
+  if (id === "local-api-token") return "Local token";
+  if (id.startsWith("service:")) return "API key";
+  if (id.startsWith("member_")) return "Member";
+  return null;
+}
+
 /** One or two capital letters for an avatar fallback. */
 export function principalInitials(identity: ArtifactOwner): string {
   const words = principalName(identity).split(/[\s_:-]+/u).filter((word) => word !== "");
