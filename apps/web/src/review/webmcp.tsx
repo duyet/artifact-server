@@ -8,6 +8,8 @@ import {
   type CommentReply,
   type CommentThread,
 } from "@/api/client";
+import {Checkbox} from "@/components/ui/checkbox";
+import {Field, FieldContent, FieldDescription, FieldLabel} from "@/components/ui/field";
 import {echoCounts, type EchoCounts} from "./webmcp-counts.ts";
 
 /**
@@ -612,22 +614,22 @@ export function useWebmcp(ref: BindingsRef): void {
 export function WebmcpSettingsCard() {
   const [enabled, setEnabled] = useState(webmcpEnabled);
   return (
-    <label className="as-settings__webmcp">
-      <input
+    <Field orientation="horizontal">
+      <Checkbox
         checked={enabled}
-        onChange={(event) => {
-          setEnabled(event.currentTarget.checked);
-          setWebmcpEnabled(event.currentTarget.checked);
+        id="webmcp-browser-agent-tools"
+        onCheckedChange={(checked) => {
+          setEnabled(checked);
+          setWebmcpEnabled(checked);
         }}
-        type="checkbox"
       />
-      <span>
-        <strong>Browser agent tools</strong>
-        <small>
+      <FieldContent>
+        <FieldLabel htmlFor="webmcp-browser-agent-tools">Browser agent tools</FieldLabel>
+        <FieldDescription>
           Let a browser-resident AI agent operate Review through WebMCP tools in this session.
           Dispatching to coding agents stays a human action.
-        </small>
-      </span>
-    </label>
+        </FieldDescription>
+      </FieldContent>
+    </Field>
   );
 }
