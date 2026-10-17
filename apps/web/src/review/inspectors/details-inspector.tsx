@@ -1,10 +1,25 @@
 import {useEffect, useState} from "react";
-import {Dialog} from "@base-ui/react/dialog";
 
 import type {ArtifactDetails, ArtifactVersion} from "@/api/client";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
+import {Field, FieldDescription, FieldError, FieldLabel} from "@/components/ui/field";
+import {Input} from "@/components/ui/input";
+import {Spinner} from "@/components/ui/spinner";
 import {formatTimestamp, sourceDriftDescription, sourceFreshnessLabel} from "@/lib/presentation";
-import {AccessPill} from "../review-primitives.tsx";
-import {InspectorRow, InspectorSection} from "./inspector-layout.tsx";
+import {AccessBadge} from "../access-badge.tsx";
+import {InspectorRow, InspectorSection, InspectorStack} from "./inspector-layout.tsx";
+import {parseTagList} from "./inspector-model.ts";
 
 export function DetailsInspector({
   canManage,
@@ -29,12 +44,12 @@ export function DetailsInspector({
     ? null
     : sourceDriftDescription(details.sourceBinding.status, "captured");
   return (
-    <div className="as-inspector-stack">
+    <InspectorStack>
       <InspectorSection count={5} title="Artifact">
         <InspectorRow label="name" title={details.artifact.name} value={details.artifact.name} />
         <InspectorRow
           label="access"
-          value={<AccessPill access={details.artifact.accessSetting} />}
+          value={<AccessBadge access={details.artifact.accessSetting} />}
         />
         <InspectorRow label="created" title={formatTimestamp(details.artifact.createdAt)} value={formatTimestamp(details.artifact.createdAt)} />
         <InspectorRow label="artifact id" mono title={details.artifact.id} value={details.artifact.id} />
@@ -57,18 +72,18 @@ export function DetailsInspector({
           <InspectorRow label="state" value={sourceFreshnessLabel(details.sourceBinding.status)} />
           <InspectorRow label="path" mono value={details.sourceBinding.path} />
           {linkedDriftDescription === null ? null : (
-            <p className="as-inspector-empty">{linkedDriftDescription}</p>
+            <p className="text-sm text-muted-foreground">{linkedDriftDescription}</p>
           )}
-          <div className="as-inspector-actions">
+          <div className="flex flex-wrap gap-2">
             {canManage && details.sourceBinding.status !== "in-sync" ? (
-              <button className="as-button as-button--primary" onClick={() => void onCapture()} type="button">
+              <Button onClick={() => void onCapture()} size="sm" type="button">
                 Capture current file
-              </button>
+              </Button>
             ) : null}
             {linkedArtifacts && details.links.live !== undefined ? (
-              <button className="as-button" onClick={() => void onOpenLive()} type="button">
+              <Button onClick={() => void onOpenLive()} size="sm" type="button" variant="outline">
                 Open live file
-              </button>
+              </Button>
             ) : null}
           </div>
         </InspectorSection>
@@ -78,7 +93,7 @@ export function DetailsInspector({
           <TombstoneArtifactControl artifact={details.artifact} onConfirm={onTombstone} />
         </InspectorSection>
       ) : null}
-    </div>
+    </InspectorStack>
   );
 }
 
@@ -93,6 +108,7 @@ export function TagsInspector({
   const [error, setError] = useState<Error | null>(null);
   const [pending, setPending] = useState(false);
   const [value, setValue] = useState(artifact.tags.join(", "));
+  const inputId = `review-tags-${artifact.id}`;
 
   useEffect(() => {
     if (!editing) setValue(artifact.tags.join(", "));
@@ -107,9 +123,7 @@ export function TagsInspector({
     setPending(true);
     setError(null);
     try {
-      await onChange(
-        value.split(",").map((tag) => tag.trim()).filter((tag) => tag !== ""),
-      );
+      await onChange(parseTagList(value));
       setEditing(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught : new Error("Tag update failed."));
@@ -121,54 +135,53 @@ export function TagsInspector({
   return (
     <InspectorSection
       action={editing ? null : (
-        <button
-          className="as-inspector-section__action"
-          onClick={() => setEditing(true)}
-          type="button"
-        >
+        <Button onClick={() => setEditing(true)} size="xs" type="button" variant="ghost">
           Edit tags
-        </button>
+        </Button>
       )}
       count={artifact.tags.length}
       title="Tags"
     >
       {editing ? (
         <form
-          className="as-tag-editor"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <label className="as-visually-hidden" htmlFor={`review-tags-${artifact.id}`}>
-            Tags
-          </label>
-          <input
-            autoFocus
-            disabled={pending}
-            id={`review-tags-${artifact.id}`}
-            onChange={(event) => setValue(event.currentTarget.value)}
-            placeholder="prototype, approved"
-            value={value}
-          />
-          <p>Separate tags with commas. Saving replaces the complete set.</p>
-          {error === null ? null : (
-            <p className="as-tag-editor__error" role="alert">{error.message}</p>
-          )}
-          <div className="as-tag-editor__actions">
-            <button className="as-button as-button--primary" disabled={pending} type="submit">
-              {pending ? "Saving…" : "Save tags"}
-            </button>
-            <button className="as-button" disabled={pending} onClick={cancel} type="button">
-              Cancel
-            </button>
-          </div>
+          <Field data-invalid={error === null ? undefined : true}>
+            <FieldLabel className="sr-only" htmlFor={inputId}>Tags</FieldLabel>
+            <Input
+              aria-invalid={error === null ? undefined : true}
+              autoFocus
+              disabled={pending}
+              id={inputId}
+              onChange={(event) => setValue(event.currentTarget.value)}
+              placeholder="prototype, approved"
+              value={value}
+            />
+            <FieldDescription>
+              Separate tags with commas. Saving replaces the complete set.
+            </FieldDescription>
+            {error === null ? null : <FieldError>{error.message}</FieldError>}
+            <div className="flex gap-2">
+              <Button disabled={pending} size="sm" type="submit">
+                {pending ? <Spinner data-icon="inline-start" /> : null}
+                {pending ? "Saving…" : "Save tags"}
+              </Button>
+              <Button disabled={pending} onClick={cancel} size="sm" type="button" variant="outline">
+                Cancel
+              </Button>
+            </div>
+          </Field>
         </form>
       ) : artifact.tags.length === 0 ? (
-        <p className="as-inspector-empty">No tags on this artifact.</p>
-      ) : artifact.tags.map((tag) => (
-        <span className="as-tag" key={tag}>{tag}</span>
-      ))}
+        <p className="text-sm text-muted-foreground">No tags on this artifact.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {artifact.tags.map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+        </div>
+      )}
     </InspectorSection>
   );
 }
@@ -191,31 +204,47 @@ export function TombstoneArtifactControl({
     if (removed) setOpen(false);
   };
   return (
-    <Dialog.Root onOpenChange={(nextOpen) => {
-      setOpen(nextOpen);
-      if (!nextOpen) setValue("");
-    }} open={open}>
-      <Dialog.Trigger className="as-button as-button--danger">Delete artifact</Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="as-confirm-dialog__backdrop" />
-        <Dialog.Popup className="as-confirm-dialog">
-          <Dialog.Title>Delete {artifact.name}?</Dialog.Title>
-          <Dialog.Description>
+    <AlertDialog
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) setValue("");
+      }}
+      open={open}
+    >
+      <AlertDialogTrigger render={<Button className="w-fit" size="sm" variant="destructive" />}>
+        Delete artifact
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {artifact.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
             This removes the artifact from normal use but retains its immutable version records. Type the artifact name to confirm.
-          </Dialog.Description>
-          <label>
-            <span className="as-visually-hidden">Artifact name</span>
-            <input autoFocus onChange={(event) => setValue(event.currentTarget.value)} value={value} />
-          </label>
-          <div className="as-confirm-dialog__actions">
-            <Dialog.Close className="as-button">Cancel</Dialog.Close>
-            <button className="as-button as-button--danger" disabled={pending || value !== artifact.name} onClick={() => void confirm()} type="button">
-              {pending ? "Deleting…" : "Delete artifact"}
-            </button>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <Field>
+          <FieldLabel className="sr-only" htmlFor={`review-delete-${artifact.id}`}>
+            Artifact name
+          </FieldLabel>
+          <Input
+            autoFocus
+            id={`review-delete-${artifact.id}`}
+            onChange={(event) => setValue(event.currentTarget.value)}
+            value={value}
+          />
+        </Field>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <Button
+            disabled={pending || value !== artifact.name}
+            onClick={() => void confirm()}
+            type="button"
+            variant="destructive"
+          >
+            {pending ? <Spinner data-icon="inline-start" /> : null}
+            {pending ? "Deleting…" : "Delete artifact"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
-
