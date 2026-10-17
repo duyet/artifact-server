@@ -57,7 +57,11 @@ export function ReviewShell({
   useSameAppLinks(navigate);
   const route = parseReviewRoute(url.pathname);
   const location = readReviewLocation(url.search);
+  // Settings URLs name no project, so the sidebar keeps the one last viewed.
+  const lastProjectIdRef = useRef<string | null>(null);
+  if (location.projectId !== null) lastProjectIdRef.current = location.projectId;
   const projectId = location.projectId
+    ?? lastProjectIdRef.current
     ?? projects.find((project) => project.archivedAt === null)?.id
     ?? projects[0]?.id
     ?? "";

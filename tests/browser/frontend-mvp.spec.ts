@@ -325,9 +325,7 @@ test.describe("Artifact Server frontend MVP", () => {
       await fixture.page.keyboard.press("[");
       await expect(sidebarState(fixture.page)).toHaveAttribute("data-state", "expanded");
 
-      const inspectorToggle = viewerHeader(fixture.page).getByRole("button", {
-        name: "Close inspector",
-      });
+      const inspectorToggle = inspector.getByRole("button", {name: "Close inspector"});
       await expect(inspectorToggle).toHaveAttribute("aria-keyshortcuts", "]");
       await fixture.page.keyboard.press("]");
       const openInspector = viewerHeader(fixture.page).getByRole("button", {

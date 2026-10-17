@@ -62,7 +62,7 @@ export function ViewerTopBar({
   onFullScreen,
   onOpenRaw,
   onSelectVersion,
-  onToggleInspector,
+  onOpenInspector,
   opening,
   owner,
   selectedVersion,
@@ -81,7 +81,7 @@ export function ViewerTopBar({
   readonly onFullScreen: () => void;
   readonly onOpenRaw: () => void;
   readonly onSelectVersion: (versionId: string) => void;
-  readonly onToggleInspector: () => void;
+  readonly onOpenInspector: () => void;
   readonly opening: boolean;
   readonly owner: ArtifactOwner | null;
   readonly selectedVersion: ArtifactVersion | null;
@@ -203,15 +203,11 @@ export function ViewerTopBar({
         >
           <IconMaximize />
         </IconButton>
-        <IconButton
-          active={inspectorOpen}
-          keyShortcuts="]"
-          label={inspectorOpen ? "Close inspector" : "Open inspector"}
-          onClick={onToggleInspector}
-          shortcut="]"
-        >
-          <IconLayoutSidebarRight />
-        </IconButton>
+        {inspectorOpen ? null : (
+          <IconButton keyShortcuts="]" label="Open inspector" onClick={onOpenInspector} shortcut="]">
+            <IconLayoutSidebarRight />
+          </IconButton>
+        )}
         {share}
       </div>
     </header>

@@ -1,5 +1,5 @@
 import {useState} from "react";
-import {IconCheck, IconCopy, IconPlugConnected, IconX} from "@tabler/icons-react";
+import {IconCheck, IconCopy, IconPlugConnected, IconSettings, IconX} from "@tabler/icons-react";
 import {toast} from "sonner";
 
 import {Button, ButtonLink} from "@/components/ui/button";
@@ -75,7 +75,7 @@ export function OnboardingCard({projectId}: {readonly projectId: string}) {
         <InputGroup>
           <InputGroupTextarea
             aria-label="Agent connection prompt"
-            className="max-h-28 font-mono text-xs"
+            className="max-h-24 font-mono text-xs md:text-xs"
             readOnly
             value={prompt}
           />
@@ -88,7 +88,8 @@ export function OnboardingCard({projectId}: {readonly projectId: string}) {
         </InputGroup>
       </CardContent>
       <CardFooter>
-        <ButtonLink href={mcpSettingsPath} size="sm" variant="link">
+        <ButtonLink href={mcpSettingsPath} size="sm" variant="outline">
+          <IconSettings data-icon="inline-start" />
           Settings › MCP and API keys
         </ButtonLink>
       </CardFooter>

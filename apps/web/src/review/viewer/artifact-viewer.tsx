@@ -351,7 +351,7 @@ export function ArtifactViewer({
           onFullScreen={enterFocusMode}
           onOpenRaw={() => void viewer.openRawArtifact()}
           onSelectVersion={selectVersion}
-          onToggleInspector={() => setInspectorOpen((open) => !open)}
+          onOpenInspector={() => setInspectorOpen(true)}
           opening={viewer.opening}
           owner={details?.artifact.owner ?? null}
           selectedVersion={selectedVersion}
