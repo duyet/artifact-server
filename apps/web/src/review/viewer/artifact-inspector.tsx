@@ -3,7 +3,9 @@ import {IconX} from "@tabler/icons-react";
 
 import type {Session} from "@/api/client";
 import {Badge} from "@/components/ui/badge";
+import {ScrollArea} from "@/components/ui/scroll-area";
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "@/components/ui/tabs";
+import {cn} from "@/lib/utils";
 import {ActivityInspector, ComparisonInspector} from "../inspectors/activity-inspector.tsx";
 import {DetailsInspector} from "../inspectors/details-inspector.tsx";
 import {FilesInspector} from "../inspectors/files-inspector.tsx";
@@ -68,6 +70,59 @@ export function ArtifactInspector({
   const {details, selectedVersion} = viewer;
   const visibleTabs = inspectorTabs.filter((value) => value !== "compare" || viewer.comparison !== null);
 
+  const body = (
+    details === null || selectedVersion === null ? (
+      <PreviewWelcome description="Select an artifact to inspect its immutable record." title="Nothing selected" />
+    ) : tab === "details" ? (
+      <DetailsInspector
+        canManage={permissions.canManageArtifacts}
+        details={details}
+        onTagsChange={viewer.changeTags}
+        onTombstone={onTombstone}
+        version={selectedVersion}
+        viewerPrincipalId={session.principal.id}
+      />
+    ) : tab === "comments" ? (
+      <ReviewCommentsInspector
+        canComment={permissions.canComment}
+        canDeleteAny={permissions.canDeleteAnyComment}
+        principalId={session.principal.id}
+        ref={commentsRef}
+        session={comments}
+        versionId={selectedVersionId}
+      />
+    ) : tab === "files" ? (
+      <FilesInspector
+        onSelect={onSelectFile}
+        selectedPath={selectedPath ?? selectedVersion.manifest.entryPath}
+        version={selectedVersion}
+      />
+    ) : tab === "versions" ? (
+      <VersionsInspector
+        canManage={permissions.canManageArtifacts}
+        comparisonLoading={viewer.comparisonLoading}
+        currentVersionId={details.artifact.currentVersionId}
+        onCompare={async (from, to) => {
+          if (await viewer.compareVersions(from, to)) onCompared();
+        }}
+        onMakeCurrent={viewer.makeVersionCurrent}
+        onSelect={onSelectVersion}
+        selectedVersionId={selectedVersionId}
+        versions={viewer.versions}
+      />
+    ) : tab === "activity" ? (
+      <ActivityInspector
+        actions={viewer.actions}
+        error={viewer.activityError}
+        loading={viewer.activityLoading}
+        nextCursor={viewer.actionNextCursor}
+        onLoadMore={() => void viewer.loadActions(viewer.actionNextCursor)}
+      />
+    ) : (
+      <ComparisonInspector comparison={viewer.comparison} error={viewer.comparisonError} />
+    )
+  );
+
   return (
     <Tabs
       className="flex h-full min-h-0 flex-col gap-0"
@@ -89,56 +144,12 @@ export function ArtifactInspector({
           <IconX />
         </IconButton>
       </header>
-      <TabsContent className="as-inspector__body min-h-0 flex-1 overflow-y-auto p-3" value={tab}>
-        {details === null || selectedVersion === null ? (
-          <PreviewWelcome description="Select an artifact to inspect its immutable record." title="Nothing selected" />
-        ) : tab === "details" ? (
-          <DetailsInspector
-            canManage={permissions.canManageArtifacts}
-            details={details}
-            onTagsChange={viewer.changeTags}
-            onTombstone={onTombstone}
-            version={selectedVersion}
-            viewerPrincipalId={session.principal.id}
-          />
-        ) : tab === "comments" ? (
-          <ReviewCommentsInspector
-            canComment={permissions.canComment}
-            canDeleteAny={permissions.canDeleteAnyComment}
-            principalId={session.principal.id}
-            ref={commentsRef}
-            session={comments}
-            versionId={selectedVersionId}
-          />
-        ) : tab === "files" ? (
-          <FilesInspector
-            onSelect={onSelectFile}
-            selectedPath={selectedPath ?? selectedVersion.manifest.entryPath}
-            version={selectedVersion}
-          />
-        ) : tab === "versions" ? (
-          <VersionsInspector
-            canManage={permissions.canManageArtifacts}
-            comparisonLoading={viewer.comparisonLoading}
-            currentVersionId={details.artifact.currentVersionId}
-            onCompare={async (from, to) => {
-              if (await viewer.compareVersions(from, to)) onCompared();
-            }}
-            onMakeCurrent={viewer.makeVersionCurrent}
-            onSelect={onSelectVersion}
-            selectedVersionId={selectedVersionId}
-            versions={viewer.versions}
-          />
-        ) : tab === "activity" ? (
-          <ActivityInspector
-            actions={viewer.actions}
-            error={viewer.activityError}
-            loading={viewer.activityLoading}
-            nextCursor={viewer.actionNextCursor}
-            onLoadMore={() => void viewer.loadActions(viewer.actionNextCursor)}
-          />
-        ) : (
-          <ComparisonInspector comparison={viewer.comparison} error={viewer.comparisonError} />
+      {/* Comments scroll in their own MessageScroller; every other tab scrolls here. */}
+      <TabsContent className={cn("as-inspector__body min-h-0 flex-1", tab === "comments" && "overflow-y-auto p-3")} value={tab}>
+        {tab === "comments" ? body : (
+          <ScrollArea className="h-full">
+            <div className="p-3">{body}</div>
+          </ScrollArea>
         )}
       </TabsContent>
     </Tabs>

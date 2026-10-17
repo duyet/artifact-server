@@ -39,6 +39,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import {Kbd} from "@/components/ui/kbd";
+import {ScrollArea} from "@/components/ui/scroll-area";
 import {ArtifactMark} from "../artifact-mark.tsx";
 import type {ArtifactCatalog} from "../catalog/use-artifact-catalog.ts";
 import {principalInitials} from "../principal-name.ts";
@@ -158,23 +159,25 @@ export function AppSidebar({
             >
               <IconRefresh />
             </SidebarGroupAction>
-            <SidebarGroupContent>
-              <ArtifactTree
-                filtered={catalog.query.trim() !== ""}
-                items={catalog.items}
-                loading={catalog.loading}
-                projectId={projectId}
-                selectedArtifactId={selectedArtifactId}
-              />
-              {catalog.nextCursor === null ? null : (
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton className="text-muted-foreground" disabled={catalog.loading} onClick={catalog.loadMore}>
-                      <span>{catalog.loading ? "Loading…" : "Load more"}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              )}
+            <SidebarGroupContent className="min-h-0 flex-1">
+              <ScrollArea className="h-full">
+                <ArtifactTree
+                  filtered={catalog.query.trim() !== ""}
+                  items={catalog.items}
+                  loading={catalog.loading}
+                  projectId={projectId}
+                  selectedArtifactId={selectedArtifactId}
+                />
+                {catalog.nextCursor === null ? null : (
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton className="text-muted-foreground" disabled={catalog.loading} onClick={catalog.loadMore}>
+                        <span>{catalog.loading ? "Loading…" : "Load more"}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                )}
+              </ScrollArea>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
