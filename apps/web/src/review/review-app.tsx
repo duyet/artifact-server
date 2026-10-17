@@ -5,7 +5,7 @@ import {api, ApiError, type AccessContext, type Project, type Session} from "@/a
 import {ApiKeySignIn} from "./api-key-sign-in.tsx";
 import {ArtifactReview, type ReviewTheme} from "./artifact-review.tsx";
 import {ReviewGate} from "./review-primitives.tsx";
-import {isSettingsPath} from "./review-routes.ts";
+import {isSettingsPath, parseSettingsRoute} from "./review-routes.ts";
 import {ReviewSettings} from "./review-settings.tsx";
 
 /** Start the artifact-first Artifact Server review application. */
@@ -150,10 +150,9 @@ export function ReviewApp() {
     return (
       <ReviewSettings
         onProjectsChanged={loadProjects}
-        onThemeChange={() => setTheme((current) => current === "moon" ? "dawn" : "moon")}
         projects={projects}
+        route={parseSettingsRoute(window.location.pathname)}
         session={session}
-        theme={theme}
       />
     );
   }
