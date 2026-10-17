@@ -1,8 +1,17 @@
+import {IconGitCompare, IconHistoryOff} from "@tabler/icons-react";
+
 import type {ArtifactAction, ArtifactComparison} from "@/api/client";
+import {Alert, AlertDescription} from "@/components/ui/alert";
+import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
+import {Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle} from "@/components/ui/empty";
+import {Item, ItemContent, ItemDescription, ItemGroup, ItemTitle} from "@/components/ui/item";
+import {Skeleton} from "@/components/ui/skeleton";
+import {Spinner} from "@/components/ui/spinner";
 import {actionLabel, formatTimestamp} from "@/lib/presentation";
 import {compactId} from "../review-location.ts";
-import {InlineState} from "../review-primitives.tsx";
-import {InspectorSection} from "./inspector-layout.tsx";
+import {InspectorSection, InspectorStack} from "./inspector-layout.tsx";
+import {changedFiles} from "./inspector-model.ts";
 
 export function ActivityInspector({
   actions,
@@ -18,26 +27,60 @@ export function ActivityInspector({
   readonly onLoadMore: () => void;
 }) {
   return (
-    <div className="as-inspector-stack">
+    <InspectorStack>
       <InspectorSection count={actions.length} title="Artifact activity">
-        {error === null ? null : <p className="as-inspector-error" role="alert">{error.message}</p>}
-        {actions.length === 0 && loading ? <p className="as-inspector-empty">Loading activity…</p> : null}
-        {actions.length === 0 && !loading ? <p className="as-inspector-empty">No activity recorded.</p> : null}
-        <ol className="as-activity-list">
-          {actions.map((action) => (
-            <li key={action.id}>
-              <strong>{actionLabel(action.action)}</strong>
-              <time dateTime={action.createdAt}>{formatTimestamp(action.createdAt)}</time>
-              <code title={action.principalId}>{compactId(action.principalId)}</code>
-            </li>
-          ))}
-        </ol>
+        {error === null ? null : (
+          <Alert variant="destructive">
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        )}
+        {actions.length === 0 && loading ? <ActivitySkeleton /> : null}
+        {actions.length === 0 && !loading ? (
+          <Empty className="p-4">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><IconHistoryOff /></EmptyMedia>
+              <EmptyTitle>No activity recorded.</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : null}
+        {actions.length === 0 ? null : (
+          <ItemGroup aria-label="Artifact activity" className="gap-1">
+            {actions.map((action) => (
+              <Item key={action.id} role="listitem" size="xs">
+                <ItemContent>
+                  <ItemTitle>{actionLabel(action.action)}</ItemTitle>
+                  <ItemDescription className="flex items-center justify-between gap-2">
+                    <time dateTime={action.createdAt}>{formatTimestamp(action.createdAt)}</time>
+                    <code className="truncate font-mono text-xs" title={action.principalId}>
+                      {compactId(action.principalId)}
+                    </code>
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
         {nextCursor === null ? null : (
-          <button className="as-button" disabled={loading} onClick={onLoadMore} type="button">
+          <Button className="w-fit" disabled={loading} onClick={onLoadMore} size="sm" type="button" variant="outline">
+            {loading ? <Spinner data-icon="inline-start" /> : null}
             {loading ? "Loading…" : "Load more"}
-          </button>
+          </Button>
         )}
       </InspectorSection>
+    </InspectorStack>
+  );
+}
+
+function ActivitySkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-2" role="status">
+      <span className="sr-only">Loading activity…</span>
+      {[0, 1, 2].map((row) => (
+        <div className="flex flex-col gap-1.5 px-2.5 py-2" key={row}>
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-3 w-3/4" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -49,35 +92,54 @@ export function ComparisonInspector({
   readonly comparison: ArtifactComparison | null;
   readonly error: Error | null;
 }) {
-  if (error !== null) return <InlineState description={error.message} title="Comparison unavailable" />;
-  if (comparison === null) return <InlineState description="Choose two versions from Versions." title="No comparison" />;
-  const changedEntries = [
-    ...comparison.added.map((entry) => ({kind: "Added", path: entry.path})),
-    ...comparison.changed.map((entry) => ({kind: "Changed", path: entry.after.path})),
-    ...comparison.removed.map((entry) => ({kind: "Removed", path: entry.path})),
-    ...comparison.renamed.map((entry) => ({kind: "Renamed", path: `${entry.from.path} → ${entry.to.path}`})),
-  ];
+  if (error !== null) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><IconGitCompare /></EmptyMedia>
+          <EmptyTitle>Comparison unavailable</EmptyTitle>
+          <EmptyDescription>{error.message}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  if (comparison === null) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><IconGitCompare /></EmptyMedia>
+          <EmptyTitle>No comparison</EmptyTitle>
+          <EmptyDescription>Choose two versions from Versions.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  const changed = changedFiles(comparison);
   return (
-    <div className="as-inspector-stack">
+    <InspectorStack>
       <InspectorSection count={2} title={`Version ${comparison.from.number} → ${comparison.to.number}`}>
-        <div className="as-comparison-summary">
-          <span>{comparison.added.length} added</span>
-          <span>{comparison.changed.length} changed</span>
-          <span>{comparison.removed.length} removed</span>
-          <span>{comparison.renamed.length} renamed</span>
-          <span>{comparison.unchangedCount} unchanged</span>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="secondary">{comparison.added.length} added</Badge>
+          <Badge variant="secondary">{comparison.changed.length} changed</Badge>
+          <Badge variant="secondary">{comparison.removed.length} removed</Badge>
+          <Badge variant="secondary">{comparison.renamed.length} renamed</Badge>
+          <Badge variant="outline">{comparison.unchangedCount} unchanged</Badge>
         </div>
       </InspectorSection>
-      <InspectorSection count={changedEntries.length} title="Changed files">
-        {changedEntries.length === 0 ? <p className="as-inspector-empty">These versions have the same files.</p> : (
-          <ol className="as-comparison-list">
-            {changedEntries.map((entry) => (
-              <li key={`${entry.kind}-${entry.path}`}><span>{entry.kind}</span><code>{entry.path}</code></li>
+      <InspectorSection count={changed.length} title="Changed files">
+        {changed.length === 0 ? (
+          <p className="text-sm text-muted-foreground">These versions have the same files.</p>
+        ) : (
+          <ol className="flex flex-col gap-1.5">
+            {changed.map((entry) => (
+              <li className="flex items-center gap-2" key={`${entry.kind}-${entry.path}`}>
+                <Badge className="shrink-0" variant="outline">{entry.kind}</Badge>
+                <code className="min-w-0 truncate font-mono text-xs" title={entry.path}>{entry.path}</code>
+              </li>
             ))}
           </ol>
         )}
       </InspectorSection>
-    </div>
+    </InspectorStack>
   );
 }
-
