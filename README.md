@@ -6,7 +6,7 @@
 
 Artifact Server gives people and agents one place to publish, review, comment on, version, and share the artifacts they create while building products. Its built-in MCP server gives agents direct access to the same work.
 
-Run it on a laptop for one developer. Deploy it for a private team on one server, Kubernetes, AWS, or Google Cloud.
+Run it on a laptop for one developer. Deploy it for a private team on one server or Kubernetes.
 
 <p align="center">
   <a href="https://github.com/backnotprop/plannotator"><img src="./docs/images/star-plannotator.svg" alt="Artifact Server is created with Plannotator" width="395"></a>
@@ -101,8 +101,6 @@ Every remote deployment uses one trusted application origin and one isolated wil
 | Compact Compose | SQLite and one file volume | [Compose guide](./packaging/compose/README.md) |
 | External-storage Compose | PostgreSQL and S3-compatible storage | [Compose guide](./packaging/compose/README.md) |
 | Kubernetes | PostgreSQL and object storage | [Helm guide](./packaging/helm/artifact-server/README.md) |
-| AWS | ECS, RDS, and S3 | [AWS Pulumi guide](./deploy/pulumi/aws/README.md) |
-| Google Cloud | Cloud Run, Cloud SQL, and Cloud Storage | [Google Cloud Pulumi guide](./deploy/pulumi/gcp/README.md) |
 
 Azure teams deploy through the Helm chart on AKS; there is no separate Azure installer. Azure Blob Storage is available as a preview adapter and has not passed live Azure qualification.
 

@@ -21,7 +21,6 @@
     "verbatimModuleSyntax": true
   },
   "include": [
-    "deploy/**/*.ts",
     "project/performance/**/*.ts",
     "scripts/**/*.ts",
     "src/**/*.ts",

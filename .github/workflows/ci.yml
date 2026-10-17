@@ -74,10 +74,6 @@ jobs:
         run: pnpm conformance:validate
       - name: Validate conformance test IDs
         run: pnpm conformance:tests
-      - name: Verify AWS Pulumi project
-        run: pnpm test:aws-pulumi
-      - name: Verify GCP Pulumi project
-        run: pnpm test:gcp-pulumi
       - name: Upload compiled application
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -272,12 +268,6 @@ jobs:
       # full-gate-command: pnpm test:web
       - name: Test browser behavior
         run: pnpm test:web
-      # full-gate-command: pnpm test:aws-pulumi
-      - name: Test AWS Pulumi project
-        run: pnpm test:aws-pulumi
-      # full-gate-command: pnpm test:gcp-pulumi
-      - name: Test GCP Pulumi project
-        run: pnpm test:gcp-pulumi
       # full-gate-command: pnpm verify:object-storage
       - name: Verify object storage
         run: pnpm verify:object-storage

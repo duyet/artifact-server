@@ -18,8 +18,6 @@ Use these guides to install, connect, operate, and extend Artifact Server.
 
 - [Compose](../packaging/compose/README.md)
 - [Kubernetes](../packaging/helm/artifact-server/README.md)
-- [AWS](../deploy/pulumi/aws/README.md)
-- [Google Cloud](../deploy/pulumi/gcp/README.md)
 
 ## Project records
 
