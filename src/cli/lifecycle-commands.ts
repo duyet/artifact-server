@@ -65,6 +65,14 @@ interface InitOptions {
   readonly data: string;
 }
 
+interface IssueAdministratorKeyOptions extends LifecycleOptions {
+  readonly email: string;
+  readonly expiresAt?: string;
+  readonly name: string;
+}
+
+const operatorKeyLifetimeMilliseconds = 90 * 24 * 60 * 60 * 1_000;
+
 interface CleanupStagingOptions extends LifecycleOptions {
   readonly limit: string;
   readonly once: boolean;
@@ -87,6 +95,7 @@ export function configureLifecycleCommands(
   configureSupportManifest(program, options.build);
   configureIntegrity(program);
   configureMaintenance(program);
+  configureAdministration(program);
   configureExternalStorageStart(program, options.build.productVersion);
 }
 
@@ -116,6 +125,58 @@ function configureMaintenance(program: Command): void {
         );
         console.log(JSON.stringify(report, null, 2));
         if (report.failed > 0) process.exitCode = 2;
+      } finally {
+        await runtime.close();
+      }
+    });
+}
+
+function configureAdministration(program: Command): void {
+  const admin = program
+    .command("admin")
+    .description("Recover administrator access with storage access.");
+  admin
+    .command("issue-key")
+    .description(
+      "Create or reuse an administrator and print a new sign-in key for them once.",
+    )
+    .requiredOption("--email <email>", "administrator email")
+    .requiredOption("--name <name>", "administrator display name")
+    .option(
+      "--expires-at <timestamp>",
+      "key expiry as an ISO timestamp (default: 90 days from now)",
+    )
+    .addOption(modeOption())
+    .addOption(dataOption())
+    .addOption(hostOption())
+    .addOption(portOption())
+    .action(async (options: IssueAdministratorKeyOptions) => {
+      const configuration = await lifecycleConfiguration(options);
+      const runtime = configuration.deploymentMode === "compact"
+        ? await createLocalRuntime(compactMaintenanceConfig(configuration))
+        : await createExternalStorageRuntime(
+          externalMaintenanceConfig(configuration),
+        );
+      try {
+        const {issued, member} = await runtime.issueOperatorAdministratorKey({
+          displayName: options.name,
+          email: options.email,
+          expiresAt: options.expiresAt ?? new Date(
+            Date.now() + operatorKeyLifetimeMilliseconds,
+          ).toISOString(),
+        });
+        console.log(JSON.stringify({
+          apiKey: {
+            expiresAt: issued.apiKey.expiresAt,
+            id: issued.apiKey.id,
+          },
+          member: {
+            displayName: member.displayName,
+            email: member.email,
+            id: member.id,
+          },
+          token: issued.token,
+        }, null, 2));
       } finally {
         await runtime.close();
       }

@@ -127,7 +127,28 @@ Store it as the `api-token` Secret value and in your secret manager. Never chang
 
 The first start registers the key with all capabilities. Every later start and every cleanup run requires the same key. A different key ID fails once the installation holds a key, and a different secret under the same ID fails a digest check. Editing the Secret therefore crashes every pod and every cleanup run.
 
-There is no browser login, so nobody can issue, rotate, or revoke keys. All publishers share this one key.
+The bootstrap key publishes but cannot administer: admitting members and issuing, rotating, or revoking keys need an administrator. Create one with `artifactserver admin issue-key` (next section).
+
+## Recover administrator access
+
+Run this on a machine that can reach the installation's storage, with the same configuration the server uses. It creates the administrator member if the email is new, reuses it otherwise, and prints a new key once.
+
+```sh
+# Compact (SQLite) installation
+artifactserver admin issue-key --mode compact --data /var/lib/artifact-server \
+  --email ops@example.com --name "Ops Lead" > admin-key.json
+
+# External storage (Postgres and S3): run it in the release image with the runtime env
+kubectl --namespace artifact-server exec deploy/artifact-server -- \
+  artifactserver admin issue-key --mode external-storage \
+  --email ops@example.com --name "Ops Lead" > admin-key.json
+```
+
+The `token` field in the output is the key. Store it in your secret manager and delete the file. The key expires after 90 days unless `--expires-at` sets another time.
+
+Open the application, choose API-key sign-in, and paste the key. That browser session is the administrator: it can admit members and issue, rotate, or revoke keys under Settings › API keys. Used as a bearer token, the same key is an ordinary delegated key and cannot administer. Deactivating the member revokes the key.
+
+The command refuses an email that belongs to a member who is not an administrator, and an email of a deactivated member.
 
 ## Publishing
 

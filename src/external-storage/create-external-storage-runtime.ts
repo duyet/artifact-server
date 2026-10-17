@@ -2,6 +2,11 @@ import {Effect, Layer, ManagedRuntime, type Redacted} from "effect";
 
 import type {ApplicationRuntime} from "../application/application-runtime.js";
 import type {BearerCredentialVerifier} from "../application/authentication.js";
+import {
+  InstallationAccessService,
+  type IssueOperatorAdministratorKeyCommand,
+  type IssuedOperatorAdministratorKey,
+} from "../application/installation-access.js";
 import type {Clock} from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
 import {SystemClock, SystemIdGenerator} from "../core/system.js";
@@ -98,6 +103,9 @@ export interface ExternalStorageRuntimeConfig {
 export interface ExternalStorageRuntime {
   readonly app: ReturnType<typeof createHttpApp>;
   cleanupStaging(limit: number): Promise<ExpiredStagingCleanupReport>;
+  issueOperatorAdministratorKey(
+    command: IssueOperatorAdministratorKeyCommand,
+  ): Promise<IssuedOperatorAdministratorKey>;
   /** Write buffered view counts now instead of waiting for the next drain. */
   flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   close(): Promise<void>;
@@ -258,6 +266,11 @@ export async function createExternalStorageRuntime(
         ? appDependencies
         : {...appDependencies, runtimeLifecycle: config.runtimeLifecycle}),
       cleanupStaging: (limit) => runStagingCleanupPass(readyRuntime, limit),
+      issueOperatorAdministratorKey: (command) => readyRuntime.runPromise(
+        InstallationAccessService.use((access) =>
+          access.issueOperatorAdministratorKey(command)
+        ),
+      ),
       flushArtifactViews: () => artifactViewRecorder.flush(),
       close: async () => {
         if (closeCleanupSchedule !== null) await closeCleanupSchedule();

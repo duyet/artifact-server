@@ -4616,6 +4616,20 @@ requirements:
     depends_on: [PUB-001, VER-001, FRK-010]
     evidence: []
 
+  - id: FRK-014
+    kind: security
+    behavior: An operator with storage access runs artifactserver admin issue-key to create or reuse an active administrator member by email and mint a member key printed once; signing a browser in with that key acts as the administrator directly, while bearer use of the key stays a delegated key.
+    owner: authorization
+    source: {file: ../../docs/fork/RUNBOOK.md, anchor: recover-administrator-access}
+    acceptance:
+      behavior: {id: FRK-014-B, description: "Issue a key twice for one email against a compact installation, reuse the same member, sign the browser in with the key, read a direct human administrator session, admit a member, and issue that member a key over HTTP."}
+      failure: {id: FRK-014-F, description: "A missing installation exits non-zero and creates nothing, an email that belongs to a non-administrator gets no key, and the secret appears once on standard output and never on standard error or in server logs."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a compact SQLite installation through the CLI and a real server. The external-storage path shares the application service but has no Postgres run.
+    depends_on: [AUTH-009, AUTH-029]
+    evidence: []
+
   - id: FRK-011
     kind: behavior
     behavior: A project's activity report counts its live artifacts, public artifacts, uploads, and page views, gives a sparse 365-day daily series of uploads and views and the ten most viewed artifacts of the last 30 days, and one artifact's report gives its 7-day, 30-day, and all-time views with a sparse 30-day series; both are read-only and built from versions and stored view rows.
