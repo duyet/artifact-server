@@ -277,9 +277,6 @@ jobs:
       # full-gate-command: pnpm test:coverage
       - name: Report coverage
         run: pnpm test:coverage
-      # full-gate-command: pnpm test:local-package
-      - name: Test local package
-        run: pnpm test:local-package
       # full-gate-command: pnpm perf:baseline
       - name: Record local performance baseline
         run: pnpm perf:baseline

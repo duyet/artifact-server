@@ -22,7 +22,6 @@ body:
       label: Deployment mode
       options:
         - Local source checkout
-        - Local release package
         - Kubernetes with Helm
         - Other
     validations:

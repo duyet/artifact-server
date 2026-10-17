@@ -115,7 +115,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the printed URL. You can also download the portable Node.js package from the [latest GitHub release](https://github.com/plannotator/artifact-server/releases/latest). See [Get started locally](https://artifactserver.com/docs/get-started/) for package verification and startup instructions.
+Open the printed URL.
 
 ## Usage
 
