@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconExternalLink } from "@tabler/icons-react";
+import { IconAlertTriangle, IconDownload, IconExternalLink, IconRefresh } from "@tabler/icons-react";
 
 import {
   api,
   type ArtifactVersion,
 } from "@/api/client";
+import {Button, ButtonLink} from "@/components/ui/button";
+import {Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle} from "@/components/ui/empty";
+import {Spinner} from "@/components/ui/spinner";
 import {formatBytes} from "@/lib/presentation";
+import {cn} from "@/lib/utils";
 import {
   frameMessageSchema,
   reviewProtocolVersion,
@@ -398,7 +402,7 @@ function HtmlPreview({
   }
   return (
     <iframe
-      className="as-artifact-frame"
+      className="block size-full border-0 bg-background"
       ref={frameRef}
       src="/review-frame"
       title={`${version.version.artifactId} version ${version.version.number}`}
@@ -479,10 +483,11 @@ function NativeMediaPreview({
   }
   const mediaSource = `${source}#preview-${retry}`;
   return (
-    <div className="as-media-preview" data-kind={kind} data-status={status}>
+    <div className="relative flex size-full min-h-0 min-w-0 items-center justify-center p-5" data-kind={kind} data-status={status}>
       {kind === "image" ? (
         <img
           alt={accessibleName}
+          className={cn("block max-h-full max-w-full object-contain", status === "loading" && "opacity-0")}
           key={retry}
           onError={handleMediaError}
           onLoad={() => setStatus("ready")}
@@ -491,6 +496,7 @@ function NativeMediaPreview({
       ) : (
         <video
           aria-label={accessibleName}
+          className={cn("block size-full", status === "loading" && "opacity-0")}
           controls
           key={retry}
           onError={handleMediaError}
@@ -502,11 +508,13 @@ function NativeMediaPreview({
         />
       )}
       {status === "loading" ? (
-        <div className="as-media-preview__loading" role="status">
-          <span aria-hidden="true" className="as-preview-state__mark" />
-          <strong>Loading preview</strong>
-          <small>{entry.path}</small>
-        </div>
+        <Empty className="absolute inset-0" role="status">
+          <EmptyHeader>
+            <EmptyMedia><Spinner /></EmptyMedia>
+            <EmptyTitle>Loading preview</EmptyTitle>
+            <EmptyDescription className="font-mono">{entry.path}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : null}
     </div>
   );
@@ -520,34 +528,34 @@ function reviewThemeTokens() {
   const style = getComputedStyle(document.documentElement);
   const value = (name: string): string => style.getPropertyValue(name).trim();
   return {
-    "--accent": value("--as-surface-raised"),
-    "--accent-foreground": value("--as-text"),
-    "--background": value("--as-surface"),
-    "--border": value("--as-border"),
-    "--card": value("--as-surface"),
-    "--card-foreground": value("--as-text"),
-    "--code-bg": value("--as-canvas"),
-    "--destructive": value("--as-love"),
-    "--destructive-foreground": value("--as-canvas"),
-    "--focus-highlight": value("--as-iris-soft"),
+    "--accent": value("--secondary"),
+    "--accent-foreground": value("--foreground"),
+    "--background": value("--background"),
+    "--border": value("--border"),
+    "--card": value("--background"),
+    "--card-foreground": value("--foreground"),
+    "--code-bg": value("--background"),
+    "--destructive": value("--destructive"),
+    "--destructive-foreground": value("--background"),
+    "--focus-highlight": `color-mix(in oklab, ${value("--sidebar-primary")} 14%, transparent)`,
     "--font-mono": '"Atkinson Hyperlegible Mono", ui-monospace, monospace',
     "--font-sans": '"Atkinson Hyperlegible Next", ui-sans-serif, sans-serif',
-    "--foreground": value("--as-text"),
-    "--input": value("--as-border"),
-    "--muted": value("--as-surface-raised"),
-    "--muted-foreground": value("--as-subtle"),
-    "--popover": value("--as-surface-raised"),
-    "--popover-foreground": value("--as-text"),
-    "--primary": value("--as-action"),
-    "--primary-foreground": value("--as-on-action"),
+    "--foreground": value("--foreground"),
+    "--input": value("--border"),
+    "--muted": value("--secondary"),
+    "--muted-foreground": value("--muted-foreground"),
+    "--popover": value("--secondary"),
+    "--popover-foreground": value("--foreground"),
+    "--primary": value("--primary"),
+    "--primary-foreground": value("--primary-foreground"),
     "--radius": "0.75rem",
-    "--ring": value("--as-iris"),
-    "--secondary": value("--as-foam"),
-    "--secondary-foreground": value("--as-canvas"),
-    "--success": value("--as-pine"),
-    "--success-foreground": value("--as-canvas"),
-    "--warning": value("--as-gold"),
-    "--warning-foreground": value("--as-canvas"),
+    "--ring": value("--sidebar-primary"),
+    "--secondary": value("--secondary"),
+    "--secondary-foreground": value("--secondary-foreground"),
+    "--success": value("--chart-2"),
+    "--success-foreground": value("--background"),
+    "--warning": value("--chart-4"),
+    "--warning-foreground": value("--background"),
   };
 }
 
@@ -569,35 +577,45 @@ function TerminalPreviewState({
   readonly title: string;
 }) {
   return (
-    <div className="as-preview-state as-preview-state--terminal" data-tone="error" role="alert">
-      <span aria-hidden="true" className="as-preview-state__mark" />
-      <h3>{title}</h3>
-      <p>{description}</p>
-      <dl className="as-preview-state__details">
-        <div><dt>Path</dt><dd><code>{path}</code></dd></div>
-        <div><dt>Type</dt><dd><code>{mediaType}</code></dd></div>
-        {size === null ? null : (
-          <div><dt>Size</dt><dd>{formatBytes(size)}</dd></div>
-        )}
-      </dl>
-      <div className="as-preview-state__actions">
-        {onRetry === undefined ? null : (
-          <button className="as-button" onClick={onRetry} type="button">Retry preview</button>
-        )}
-        <button
-          className="as-button as-button--primary"
-          disabled={actions.opening}
-          onClick={actions.onOpenRawArtifact}
-          type="button"
-        >
-          <IconExternalLink aria-hidden="true" stroke={1.8} />
-          {actions.opening ? "Opening…" : "Open raw artifact"}
-        </button>
-        {actions.downloadUrl === null ? null : (
-          <a className="as-button" download href={actions.downloadUrl}>Download file</a>
-        )}
-      </div>
-    </div>
+    <Empty className="h-full" data-tone="error" role="alert">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><IconAlertTriangle /></EmptyMedia>
+        <EmptyTitle aria-level={3} role="heading">{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <dl className="grid w-full grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-left text-xs">
+          <dt className="text-muted-foreground">Path</dt>
+          <dd className="truncate font-mono">{path}</dd>
+          <dt className="text-muted-foreground">Type</dt>
+          <dd className="truncate font-mono">{mediaType}</dd>
+          {size === null ? null : (
+            <>
+              <dt className="text-muted-foreground">Size</dt>
+              <dd>{formatBytes(size)}</dd>
+            </>
+          )}
+        </dl>
+        <div className="flex flex-wrap justify-center gap-2">
+          {onRetry === undefined ? null : (
+            <Button onClick={onRetry} size="sm" variant="outline">
+              <IconRefresh data-icon="inline-start" />
+              Retry preview
+            </Button>
+          )}
+          <Button disabled={actions.opening} onClick={actions.onOpenRawArtifact} size="sm">
+            <IconExternalLink data-icon="inline-start" />
+            {actions.opening ? "Opening…" : "Open raw artifact"}
+          </Button>
+          {actions.downloadUrl === null ? null : (
+            <ButtonLink download href={actions.downloadUrl} size="sm" variant="outline">
+              <IconDownload data-icon="inline-start" />
+              Download file
+            </ButtonLink>
+          )}
+        </div>
+      </EmptyContent>
+    </Empty>
   );
 }
 
@@ -609,10 +627,12 @@ function PreviewState({
   readonly title: string;
 }) {
   return (
-    <div className="as-preview-state" role="status">
-      <span aria-hidden="true" className="as-preview-state__mark" />
-      <h3>{title}</h3>
-      <p>{description}</p>
-    </div>
+    <Empty className="h-full" role="status">
+      <EmptyHeader>
+        <EmptyMedia><Spinner /></EmptyMedia>
+        <EmptyTitle aria-level={3} role="heading">{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
