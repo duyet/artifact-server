@@ -11,7 +11,7 @@ import {
   IconSettings,
   IconShare,
 } from "@tabler/icons-react";
-import {useState} from "react";
+import {useEffect, useState} from "react";
 
 import {
   Command,
@@ -91,6 +91,16 @@ export function CommandPalette({
   const commands = artifactCommandList.filter(({id, label}) =>
     artifactCommands?.available.includes(id) === true && matches(label, trimmed));
 
+  // Results arrive after typing, so cmdk's own pick would stay on a page
+  // below them. Keep the top result selected so Enter always opens it.
+  const topResult = search.items[0] !== undefined && !search.stale
+    ? `artifact:${search.items[0].artifact.id}`
+    : pages[0] !== undefined
+      ? `page:${pages[0].href}`
+      : commands[0] !== undefined ? `action:${commands[0].id}` : "";
+  const [selected, setSelected] = useState("");
+  useEffect(() => setSelected(topResult), [query, topResult]);
+
   const setOpen = (next: boolean): void => {
     if (!next) setQuery("");
     onOpenChange(next);
@@ -102,13 +112,14 @@ export function CommandPalette({
 
   return (
     <CommandDialog
+      className="sm:max-w-lg"
       description="Search artifacts, jump to a page, or act on the open artifact."
       onOpenChange={setOpen}
       open={open}
       title="Command palette"
     >
       {/* The server ranks artifacts, so cmdk must not filter or reorder them. */}
-      <Command shouldFilter={false}>
+      <Command onValueChange={setSelected} shouldFilter={false} value={selected}>
         <CommandInput onValueChange={setQuery} placeholder="Search artifacts, pages, and actions…" value={query} />
         <CommandList>
           <CommandEmpty>{search.stale ? "Searching…" : "No results found."}</CommandEmpty>
