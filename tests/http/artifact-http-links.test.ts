@@ -56,6 +56,7 @@ describe("link builders with a content domain", () => {
       artifactBrowserUrl(applicationUrl, "content.example.test", {
         id: artifactId,
         name: "Q3 cost report (SG)",
+        path: null,
       }),
     ).toBe(`https://artifacts.example.internal:8443/artifacts/${artifactId}`);
   });
@@ -79,6 +80,7 @@ describe("link builders in path mode", () => {
       artifactBrowserUrl(applicationUrl, null, {
         id: artifactId,
         name: "Q3 cost report (SG)",
+        path: null,
       }),
     ).toBe(
       `https://artifacts.example.internal:8443/q3-cost-report-sg-${uuid}/`,
@@ -87,7 +89,11 @@ describe("link builders in path mode", () => {
 
   test("fall back to the id route when the id is not art_<uuid>", () => {
     expect(
-      artifactBrowserUrl(applicationUrl, null, {id: "artifact-1", name: "Q3"}),
+      artifactBrowserUrl(applicationUrl, null, {
+        id: "artifact-1",
+        name: "Q3",
+        path: null,
+      }),
     ).toBe("https://artifacts.example.internal:8443/artifacts/artifact-1");
   });
 });

@@ -389,6 +389,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "disconnectRegisteredAgent",
       "findAgentDispatch",
       "findArtifact",
+      "findArtifactByPath",
       "findArtifactForAdministration",
       "findGitHistoryRepository",
       "findVersionRecord",

@@ -2332,6 +2332,7 @@ export function createD1ArtifactRepository(
     findArtifact: (projectId, artifactId) => readArtifactOrNull(projectId, artifactId),
     findArtifactForAdministration: (projectId, artifactId) =>
       readArtifactOrNull(projectId, artifactId, true),
+    findArtifactByPath: () => Promise.resolve(null),
     findCurrentVersion: async (projectId, artifactId) => {
       const row = await database.prepare(`
         SELECT project_id AS projectId, current_version_id AS currentVersionId

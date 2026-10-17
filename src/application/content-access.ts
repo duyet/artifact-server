@@ -17,6 +17,7 @@ import {
 import type { Principal } from "../core/identity.js";
 import {
   accessSettings,
+  type ArtifactPathMatch,
   type ContentBootstrapRecord,
   type ContentSessionRecord,
   type ArtifactVersion,
@@ -80,6 +81,9 @@ export interface ContentAccessRepository {
     tokenDigest: string,
     requestTime: string,
   ) => Effect.Effect<ContentSessionRecord | null, ArtifactRepositoryFailure>;
+  readonly findArtifactByPath: (
+    candidates: readonly string[],
+  ) => Effect.Effect<ArtifactPathMatch | null, ArtifactRepositoryFailure>;
   readonly findCurrentVersion: (
     projectId: string | null,
     artifactId: string,
@@ -195,6 +199,15 @@ interface ContentAccessOperations {
   readonly resolvePublicArtifact: (
     artifactId: string,
   ) => Effect.Effect<PublishedVersion, ContentAccessFailure>;
+  readonly resolvePublicArtifactPath: (
+    candidates: readonly string[],
+  ) => Effect.Effect<ResolvedArtifactPath | null, ContentAccessFailure>;
+}
+
+/** The current public version of the live artifact that holds one requested path. */
+export interface ResolvedArtifactPath {
+  readonly current: PublishedVersion;
+  readonly path: string;
 }
 
 /** Owns public-link and private version-scoped browser authorization. */
@@ -424,6 +437,15 @@ function makeContentAccessService(
     return current;
   });
 
+  const resolvePublicArtifactPath = Effect.fn(
+    "ContentAccessService.resolvePublicArtifactPath",
+  )(function*(candidates: readonly string[]) {
+    const match = yield* dependencies.repository.findArtifactByPath(candidates);
+    if (match === null) return null;
+    const current = yield* resolvePublicArtifact(match.id);
+    return {current, path: match.path};
+  });
+
   return ContentAccessService.of({
     authorizePreviewContent,
     authorizeVersionContent,
@@ -431,6 +453,7 @@ function makeContentAccessService(
     issueContentBootstrap,
     issuePreviewLease,
     resolvePublicArtifact,
+    resolvePublicArtifactPath,
   });
 }
 

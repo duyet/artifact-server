@@ -228,6 +228,7 @@ const commitTargetSchema = z.discriminatedUnion("kind", [
     accessSetting: z.enum(["account_required", "public_link"]).optional(),
     kind: z.literal("new_artifact"),
     name: z.string(),
+    path: z.string().optional(),
     tags: z.array(z.string()).optional(),
   }),
   z.object({

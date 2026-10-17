@@ -7,6 +7,7 @@ import type {
   ArtifactActionPage,
   ArtifactDeletion,
   ArtifactPage,
+  ArtifactPathMatch,
   ArtifactState,
   ArtifactVersion,
   ArtifactRecord,
@@ -636,6 +637,10 @@ export interface ArtifactRepository {
     projectId: string,
     artifactId: string,
   ): Promise<ArtifactRecord | null>;
+  /** Find the live artifact, in any project, whose path is one of the candidates. */
+  findArtifactByPath(
+    candidates: readonly string[],
+  ): Promise<ArtifactPathMatch | null>;
   /**
    * Read one saved version and its manifest without re-reading the artifact.
    * Callers must have already established the artifact exists and is live.

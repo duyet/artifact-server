@@ -701,6 +701,11 @@ export function createApplicationLayer(
           try: () => adapters.repository.findPreviewLease(tokenDigest, requestTime),
           catch: (cause) => repositoryFailure("findPreviewLease", cause),
         }),
+      findArtifactByPath: (candidates) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.findArtifactByPath(candidates),
+          catch: (cause) => repositoryFailure("findArtifactByPath", cause),
+        }),
       findCurrentVersion: (projectId, artifactId) =>
         Effect.tryPromise({
           try: () => adapters.repository.findCurrentVersion(projectId, artifactId),

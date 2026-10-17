@@ -147,7 +147,8 @@ import {
   versionFileBrowserUrl,
 } from "./artifact-http-links.js";
 import {
-  artifactFolder,
+  artifactContentRoot,
+  artifactPathTarget,
   assertCookieSessionsAvailable,
   canonicalFolderLocation,
   isolateSameHostResponse,
@@ -155,6 +156,7 @@ import {
   requestedArtifactPath,
   sameHostContentSource,
   type SameHostFolderRequest,
+  type SameHostPathRequest,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {attachmentContentDisposition} from "./content-disposition.js";
@@ -729,6 +731,15 @@ export function createHttpApp(
           context.req.header("cookie"),
           dependencies,
         );
+      }
+      if (sameHost.kind === "path") {
+        const served = await serveArtifactPath(
+          context,
+          sameHost,
+          context.req.header("cookie"),
+          dependencies,
+        );
+        return served ?? next();
       }
       const validToken = contentTokenSchema.safeParse(sameHost.contentToken);
       if (!validToken.success) return versionNotFoundResponse();
@@ -2519,11 +2530,11 @@ export function createHttpApp(
       ),
     );
     const requestUrl = responseApplicationUrl(context, dependencies);
-    // An id that has no folder keeps this route as its link, so it must not
-    // redirect to itself.
+    // An id that has no content root keeps this route as its link, so it must
+    // not redirect to itself.
     return context.redirect(
       dependencies.contentDomain === null &&
-        artifactFolder(current.artifact) !== null
+        artifactContentRoot(current.artifact) !== null
         ? artifactBrowserUrl(requestUrl, null, current.artifact)
         : versionBrowserUrl(
           requestUrl,
@@ -3581,6 +3592,34 @@ async function serveArtifactFolder(
     context,
     request.versionUrl,
     current.version.contentToken,
+    cookieHeader,
+    dependencies,
+  );
+}
+
+/** Serve a path request, or null when no live artifact holds any of its candidates. */
+async function serveArtifactPath(
+  context: Context<HttpEnvironment>,
+  request: SameHostPathRequest,
+  cookieHeader: string | undefined,
+  dependencies: HttpAppDependencies,
+): Promise<Response | null> {
+  const resolved = await runHttpApplicationEffect(
+    context,
+    dependencies,
+    ContentAccessService.use((contentAccess) =>
+      contentAccess.resolvePublicArtifactPath(request.candidates)
+    ),
+  );
+  if (resolved === null) return null;
+  const target = artifactPathTarget(request, resolved.path);
+  if (target.slashMissing) {
+    return context.redirect(`/${resolved.path}/${request.requestUrl.search}`, 308);
+  }
+  return serveVersionContent(
+    context,
+    target.versionUrl,
+    resolved.current.version.contentToken,
     cookieHeader,
     dependencies,
   );

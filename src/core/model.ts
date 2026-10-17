@@ -82,6 +82,12 @@ export interface ArtifactRecord {
   readonly tags: readonly string[];
 }
 
+/** The live artifact that holds one of a request's candidate paths. */
+export interface ArtifactPathMatch {
+  readonly id: string;
+  readonly path: string;
+}
+
 /** An artifact record whose deletion state is known to be committed. */
 export interface ArtifactTombstone extends ArtifactRecord {
   readonly deletedAt: string;

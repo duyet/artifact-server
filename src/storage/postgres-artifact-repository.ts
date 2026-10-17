@@ -41,6 +41,7 @@ import {
   type ArtifactActionRecord,
   type ArtifactDeletion,
   type ArtifactPage,
+  type ArtifactPathMatch,
   type ArtifactRecord,
   type ArtifactState,
   type ArtifactTombstone,
@@ -233,6 +234,7 @@ const artifactRowSchema = z.object({
   path: z.string().nullable(),
   projectId: z.string(),
 });
+const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactListRowSchema = artifactRowSchema.extend({
   commentCount: z.coerce.number().int().nonnegative(),
   versionCount: z.coerce.number().int().positive(),
@@ -1568,6 +1570,22 @@ export class PostgresArtifactRepository implements
       artifactId,
       true,
     ));
+  }
+
+  async findArtifactByPath(
+    candidates: readonly string[],
+  ): Promise<ArtifactPathMatch | null> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT id, path FROM artifacts
+         WHERE installation_id = $1 AND path = ANY($2::text[])
+           AND deleted_at IS NULL`,
+        [installationId, candidates],
+      );
+      return artifactPathMatchSchema.nullable().parse(rows[0] ?? null);
+    }));
   }
 
   async findVersionRecord(

@@ -51,6 +51,7 @@ import {
   type ArtifactActionRecord,
   type ArtifactDeletion,
   type ArtifactPage,
+  type ArtifactPathMatch,
   type ArtifactRecord,
   type ArtifactState,
   type ArtifactTombstone,
@@ -260,6 +261,7 @@ const artifactRowSchema = z.object({
   path: z.string().nullable(),
   projectId: z.string(),
 });
+const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactListRowSchema = artifactRowSchema.extend({
   commentCount: z.number().int().nonnegative(),
   versionCount: z.number().int().positive(),
@@ -1776,6 +1778,21 @@ export class SqliteArtifactRepository implements
     return Promise.resolve().then(() =>
       this.#readArtifactIncludingDeletedOrNull(projectId, artifactId)
     );
+  }
+
+  findArtifactByPath(
+    candidates: readonly string[],
+  ): Promise<ArtifactPathMatch | null> {
+    return Promise.resolve().then(() => {
+      const placeholders = candidates.map(() => "?").join(", ");
+      const row = this.#database
+        .prepare(
+          `SELECT id, path FROM artifacts
+           WHERE path IN (${placeholders}) AND deleted_at IS NULL`,
+        )
+        .get(...candidates);
+      return artifactPathMatchSchema.nullable().parse(row ?? null);
+    });
   }
 
   findVersionRecord(

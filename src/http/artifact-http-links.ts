@@ -1,16 +1,13 @@
-import {artifactFolder, sameHostVersionPath} from "./same-host-content.js";
+import {artifactContentRoot, sameHostVersionPath} from "./same-host-content.js";
 
 /** Build the stable browser URL for an artifact's current version. */
 export function artifactBrowserUrl(
   applicationUrl: URL,
   contentDomain: string | null,
-  artifact: {readonly id: string; readonly name: string},
+  artifact: {readonly id: string; readonly name: string; readonly path: string | null},
 ): string {
-  const folder = contentDomain === null ? artifactFolder(artifact) : null;
-  return new URL(
-    folder === null ? `/artifacts/${artifact.id}` : `/${folder}/`,
-    applicationUrl,
-  ).toString();
+  const root = contentDomain === null ? artifactContentRoot(artifact) : null;
+  return new URL(root ?? `/artifacts/${artifact.id}`, applicationUrl).toString();
 }
 
 /** Build the authenticated, exact-version review URL used for review and comments. */

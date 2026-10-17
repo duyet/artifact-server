@@ -67,18 +67,31 @@ export interface SameHostVersionRequest {
   readonly versionUrl: URL;
 }
 
+/** A request split at the root of one artifact's current version. */
+export interface ArtifactRootTarget {
+  readonly slashMissing: boolean;
+  /** The request URL with its pathname relative to the artifact root. */
+  readonly versionUrl: URL;
+}
+
 /** One `/<folder>/<path>` request for the current version of a public artifact. */
-export interface SameHostFolderRequest {
+export interface SameHostFolderRequest extends ArtifactRootTarget {
   readonly artifactId: string;
   readonly folder: string;
   readonly kind: "folder";
-  readonly slashMissing: boolean;
-  /** The request URL with its pathname relative to the folder. */
-  readonly versionUrl: URL;
+}
+
+/** A request whose leading segments may name an artifact path. */
+export interface SameHostPathRequest {
+  /** Prefixes of the request path that are valid artifact paths, shortest first, at most 6. */
+  readonly candidates: readonly [string, ...string[]];
+  readonly kind: "path";
+  readonly requestUrl: URL;
 }
 
 export type SameHostContentRequest =
   | SameHostFolderRequest
+  | SameHostPathRequest
   | SameHostVersionRequest;
 
 /**
@@ -105,15 +118,33 @@ export function parseSameHostContentRequest(
     };
   }
   const folder = parseArtifactFolder(first);
-  if (folder === null) return null;
+  if (folder !== null) {
+    return {...folder, ...artifactRootTarget(requestUrl, 1), kind: "folder"};
+  }
+  if (reservedPathRoots.has(first) || !isArtifactPathSegment(first)) return null;
+  const candidates: [string, ...string[]] = [first];
+  let prefix = first;
+  for (const segment of segments.slice(2, maxArtifactPathSegments + 1)) {
+    if (!isArtifactPathSegment(segment)) break;
+    prefix = `${prefix}/${segment}`;
+    candidates.push(prefix);
+  }
+  return {candidates, kind: "path", requestUrl};
+}
+
+/** Split a path request at the artifact path that one of its candidates matched. */
+export function artifactPathTarget(
+  request: SameHostPathRequest,
+  path: string,
+): ArtifactRootTarget {
+  return artifactRootTarget(request.requestUrl, path.split("/").length);
+}
+
+function artifactRootTarget(requestUrl: URL, rootSegments: number): ArtifactRootTarget {
+  const segments = requestUrl.pathname.split("/");
   const versionUrl = new URL(requestUrl);
-  versionUrl.pathname = `/${segments.slice(2).join("/")}`;
-  return {
-    ...folder,
-    kind: "folder",
-    slashMissing: segments.length === 2,
-    versionUrl,
-  };
+  versionUrl.pathname = `/${segments.slice(rootSegments + 1).join("/")}`;
+  return {slashMissing: segments.length === rootSegments + 1, versionUrl};
 }
 
 /**
@@ -260,6 +291,18 @@ export function artifactFolder(
   if (uuid === undefined) return null;
   const slug = folderSlug(artifact.name);
   return slug === "" ? uuid : `${slug}-${uuid}`;
+}
+
+/**
+ * Where an artifact's current version is served in path mode: its readable
+ * path when it has one, else its folder. Null when it has neither.
+ */
+export function artifactContentRoot(
+  artifact: {readonly id: string; readonly name: string; readonly path: string | null},
+): string | null {
+  if (artifact.path !== null) return `/${artifact.path}/`;
+  const folder = artifactFolder(artifact);
+  return folder === null ? null : `/${folder}/`;
 }
 
 /** Read an artifact ID out of a path segment shaped like an artifact folder. */

@@ -876,7 +876,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     expect(await folder.text()).toBe(content);
   });
 
-  test("external-storage foundation: two processes racing for one artifact path admit exactly one create", async () => {
+  test("external-storage foundation: two processes racing for one artifact path admit exactly one create and both serve it", async () => {
     expect.hasAssertions();
     const pathApiToken = managedTestKey("artifact-path-installation");
     const identity = {
@@ -922,12 +922,24 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       const body: unknown = await response.json();
       return {body, status: response.status};
     }));
-    const winner = outcomes.find(({status}) => status === 201);
+    const winner = z.object({
+      artifact: z.object({path: z.string()}),
+      links: z.object({artifact: z.url()}),
+    }).parse(outcomes.find(({status}) => status === 201)?.body);
     const loser = outcomes.find(({status}) => status === 409);
-    expect(z.object({artifact: z.object({path: z.string()})}).parse(winner?.body))
-      .toEqual({artifact: {path: "2026/10/raced"}});
+    expect(winner.artifact.path).toBe("2026/10/raced");
+    expect(new URL(winner.links.artifact).pathname).toBe("/2026/10/raced/");
     expect(z.object({error: z.object({code: z.string()})}).parse(loser?.body))
       .toEqual({error: {code: "ARTIFACT_PATH_TAKEN"}});
+    const served = await Promise.all([first, second].map((server) =>
+      fetchContentThroughServer(server.baseUrl, winner.links.artifact)));
+    expect(await Promise.all(served.map(async (response) => ({
+      body: await response.text(),
+      status: response.status,
+    })))).toEqual(Array.from({length: 2}, () => ({
+      body: expect.stringMatching(/^<h1>path-race-[ab]-/u),
+      status: 200,
+    })));
 
     const ancestor = await commitWithPath(second, "2026/10", `path-ancestor-${raceKey}`);
     expect(ancestor.status).toBe(409);

@@ -4970,3 +4970,17 @@ requirements:
     proof_gap: Proved locally against SQLite only. The Postgres race between two server processes runs in CI with Docker, and no deployed run exists.
     depends_on: [FRK-003]
     evidence: []
+
+  - id: FRK-007
+    kind: behavior
+    behavior: In path mode the current version of a public artifact that has a path is served at /<path>/, links.artifact names that URL, and the folder URL keeps serving.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: readable-artifact-paths}
+    acceptance:
+      behavior: {id: FRK-007-B, description: "Open an artifact at its path, read its nested files and SPA fallback, publish a new version at the same URL, and follow links.artifact and /artifacts/<id> to the path."}
+      failure: {id: FRK-007-F, description: "A private artifact is 401, a missing slash is 308 with its query, an unknown or deleted path is 404 NOT_FOUND, POST is 405, and API routes carry no sandbox header."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite only. The Postgres path lookup is exercised by one external-storage case in CI with Docker, and no deployed run exists.
+    depends_on: [FRK-006, FRK-002]
+    evidence: []

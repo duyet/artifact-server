@@ -41,6 +41,7 @@ export async function publishSite(
     readonly accessSetting: "account_required" | "public_link";
     readonly entry?: string;
     readonly name: string;
+    readonly path?: string;
     readonly routingMode?: "spa" | "static";
   },
 ): Promise<PublishResponse> {
@@ -62,7 +63,12 @@ export async function publishSite(
     installation,
     planned.body,
     `same-host-${input.name}`,
-    {accessSetting: input.accessSetting, kind: "new_artifact", name: input.name},
+    {
+      accessSetting: input.accessSetting,
+      kind: "new_artifact",
+      name: input.name,
+      path: input.path,
+    },
   );
   if (published.response.status !== 201) {
     throw new Error(`The same-host site commit returned HTTP ${published.response.status}.`);
