@@ -185,6 +185,20 @@ export interface ChangeArtifactTags {
   readonly tags: readonly string[];
 }
 
+/** Values used to atomically change one artifact's display name. */
+export interface RenameArtifact {
+  readonly artifactId: string;
+  readonly authorizedByPrincipalId: string | null;
+  readonly createdAt: string;
+  readonly expectedCurrentVersionId: string;
+  readonly idempotencyKey: string;
+  readonly inputDigest: string;
+  /** A name already trimmed and length-checked at the boundary. */
+  readonly name: string;
+  readonly principalId: string;
+  readonly projectId: string;
+}
+
 /** Values used to atomically tombstone one artifact. */
 export interface DeleteArtifact {
   readonly artifactId: string;
@@ -648,6 +662,7 @@ export interface ArtifactRepository {
   commitVersion(command: CommitArtifactVersion): Promise<PublishedVersion>;
   changeAccessSetting(command: ChangeArtifactAccessSetting): Promise<ArtifactState>;
   changeTags(command: ChangeArtifactTags): Promise<ArtifactState>;
+  renameArtifact(command: RenameArtifact): Promise<ArtifactState>;
   deleteArtifact(command: DeleteArtifact): Promise<ArtifactDeletion>;
   findArtifact(projectId: string, artifactId: string): Promise<ArtifactRecord | null>;
   findArtifactForAdministration(

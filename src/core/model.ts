@@ -21,9 +21,11 @@ export const artifactActionKinds = {
   commentResolve: "comment_resolve",
   commentUpdate: "comment_update",
   delete: "delete",
+  edited: "edited",
   link: "link",
   publish: "publish",
   relink: "relink",
+  renamed: "renamed",
   restore: "restore",
 } as const;
 

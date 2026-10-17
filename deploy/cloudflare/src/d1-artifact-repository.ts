@@ -116,6 +116,7 @@ import type {
   ReadProjectActivityDays,
   RecordAgentActivity,
   RegisterAgent,
+  RenameArtifact,
   RenameProject,
   RestoreArtifactVersion,
   SetProjectArchive,
@@ -174,9 +175,22 @@ const actionSchema = z.enum([
   artifactActionKinds.commentResolve,
   artifactActionKinds.commentUpdate,
   artifactActionKinds.delete,
+  artifactActionKinds.edited,
   artifactActionKinds.publish,
+  artifactActionKinds.renamed,
   artifactActionKinds.restore,
 ]);
+// Idempotency records name the mutation, which is not always its action kind:
+// a rename is recorded as "rename" and its action as "renamed".
+const idempotencyOperationSchema = z.enum([
+  artifactActionKinds.changeAccess,
+  artifactActionKinds.changeTags,
+  artifactActionKinds.delete,
+  artifactActionKinds.publish,
+  "rename",
+  artifactActionKinds.restore,
+]);
+type IdempotencyOperation = z.infer<typeof idempotencyOperationSchema>;
 const projectRowSchema = z.object({
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
@@ -361,8 +375,9 @@ const entryRowSchema = z.object({
 const idempotencyRowSchema = z.object({
   accessSetting: accessSettingSchema.nullable(),
   artifactId: z.string(),
+  artifactName: z.string().nullable(),
   inputDigest: z.string(),
-  operation: actionSchema,
+  operation: idempotencyOperationSchema,
   tagsJson: z.string().nullable(),
   versionId: z.string(),
 });
@@ -642,7 +657,7 @@ const commentReplyScope = `FROM comment_threads t
 const idempotencySelect = `
   SELECT access_setting AS accessSetting, artifact_id AS artifactId,
     input_digest AS inputDigest, operation, tags_json AS tagsJson,
-    version_id AS versionId
+    artifact_name AS artifactName, version_id AS versionId
   FROM idempotency_records
 `;
 
@@ -915,6 +930,7 @@ export function createD1ArtifactRepository(
     replayed: boolean,
     accessSetting?: ArtifactRecord["accessSetting"],
     tags?: readonly string[],
+    name?: string,
   ): Promise<ArtifactState> => {
     const artifact = await readArtifact(projectId, artifactId);
     const version = await readVersionOrNull(projectId, versionId, artifactId);
@@ -924,6 +940,7 @@ export function createD1ArtifactRepository(
         ...artifact,
         accessSetting: accessSetting ?? artifact.accessSetting,
         currentVersionId: versionId,
+        name: name ?? artifact.name,
         tags: tags ?? artifact.tags,
       },
       replayed,
@@ -989,14 +1006,15 @@ export function createD1ArtifactRepository(
       readonly projectId: string;
     },
     versionId: string,
-    operation: ArtifactActionRecord["action"],
+    operation: IdempotencyOperation,
     accessSetting: ArtifactRecord["accessSetting"] | null = null,
     tagsJson: string | null = null,
+    artifactName: string | null = null,
   ) => database.prepare(`
     INSERT INTO idempotency_records (
       project_id, idempotency_key, input_digest, artifact_id, version_id,
-      operation, access_setting, tags_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      operation, access_setting, tags_json, artifact_name, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     command.projectId,
     command.idempotencyKey,
@@ -1006,6 +1024,7 @@ export function createD1ArtifactRepository(
     operation,
     accessSetting,
     tagsJson,
+    artifactName,
     command.createdAt,
   );
   const mutationGuardStatements = (
@@ -1052,7 +1071,7 @@ export function createD1ArtifactRepository(
       readonly inputDigest: string;
       readonly projectId: string;
     },
-    operation: ArtifactActionRecord["action"],
+    operation: IdempotencyOperation,
     currentVersionId: string,
     artifactPredicate: string,
     artifactBindings: readonly (number | string | null)[] = [],
@@ -1147,12 +1166,15 @@ export function createD1ArtifactRepository(
   );
   const managementReplay = async (
     command: {readonly idempotencyKey: string; readonly inputDigest: string; readonly projectId: string},
-    operation: typeof artifactActionKinds.changeAccess | typeof artifactActionKinds.changeTags |
-      typeof artifactActionKinds.restore,
+    operation: Exclude<IdempotencyOperation, "delete" | "publish">,
   ): Promise<ArtifactState | null> => {
     const record = await readIdempotency(command.projectId, command.idempotencyKey);
     if (record === null) return null;
-    if (record.inputDigest !== command.inputDigest || record.operation !== operation) {
+    if (
+      record.inputDigest !== command.inputDigest ||
+      record.operation !== operation ||
+      (operation === "rename" && record.artifactName === null)
+    ) {
       throw new IdempotencyConflict({message: "The idempotency key was already used with different input."});
     }
     const tags = record.tagsJson === null
@@ -1165,6 +1187,7 @@ export function createD1ArtifactRepository(
       true,
       record.accessSetting ?? undefined,
       tags,
+      record.artifactName ?? undefined,
     );
   };
   const applyManagementMutation = async (
@@ -1173,9 +1196,7 @@ export function createD1ArtifactRepository(
       readonly inputDigest: string;
       readonly projectId: string;
     },
-    operation: typeof artifactActionKinds.changeAccess |
-      typeof artifactActionKinds.changeTags |
-      typeof artifactActionKinds.restore,
+    operation: Exclude<IdempotencyOperation, "delete" | "publish">,
     statements: D1PreparedStatement[],
     readState: () => Promise<ArtifactState>,
   ): Promise<ArtifactState> => {
@@ -2920,6 +2941,48 @@ export function createD1ArtifactRepository(
           false,
           artifact.accessSetting,
           command.tags,
+        ));
+    },
+    renameArtifact: async (command: RenameArtifact) => {
+      const replay = await managementReplay(command, "rename");
+      if (replay !== null) return replay;
+      const artifact = await readArtifact(command.projectId, command.artifactId);
+      assertCurrent(artifact, command.expectedCurrentVersionId);
+      return applyManagementMutation(command, "rename", [
+        database.prepare(`
+          UPDATE artifacts SET name = ?, search_name = ?
+          WHERE project_id = ? AND id = ? AND current_version_id = ? AND deleted_at IS NULL
+        `).bind(
+          command.name,
+          normalizeArtifactSearchText(command.name),
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+        ),
+        actionStatement(command, command.expectedCurrentVersionId, artifactActionKinds.renamed),
+        idempotencyStatement(
+          command,
+          command.expectedCurrentVersionId,
+          "rename",
+          artifact.accessSetting,
+          null,
+          command.name,
+        ),
+        ...managementGuardStatements(
+          command,
+          "rename",
+          command.expectedCurrentVersionId,
+          "a.deleted_at IS NULL AND a.name = ?",
+          [command.name],
+        ),
+      ], () => artifactState(
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          false,
+          artifact.accessSetting,
+          undefined,
+          command.name,
         ));
     },
     restoreVersion: async (command: RestoreArtifactVersion) => {

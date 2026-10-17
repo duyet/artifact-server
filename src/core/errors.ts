@@ -436,6 +436,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "readMostViewedArtifacts",
       "readProjectActivityDays",
       "readProjectActivityTotals",
+      "renameArtifact",
       "readArtifactViewTotals",
       "recordArtifactViews",
       "renameProject",

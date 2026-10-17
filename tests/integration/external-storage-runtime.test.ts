@@ -545,6 +545,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           "ALTER TABLE actions DROP COLUMN project_id CASCADE",
           "ALTER TABLE idempotency_records DROP COLUMN project_id CASCADE",
           "ALTER TABLE versions DROP COLUMN project_id CASCADE",
+          "ALTER TABLE idempotency_records DROP COLUMN artifact_name",
           "ALTER TABLE versions DROP COLUMN publisher_display_name",
           "ALTER TABLE artifacts DROP COLUMN owner_display_name",
           "ALTER TABLE artifacts DROP COLUMN owner_principal_id",

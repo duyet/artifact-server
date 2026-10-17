@@ -97,8 +97,12 @@ export function actionLabel(value: ArtifactAction["action"]): string {
       return "Edited comment";
     case "delete":
       return "Tombstoned artifact";
+    case "edited":
+      return "Edited file";
     case "publish":
       return "Published version";
+    case "renamed":
+      return "Renamed artifact";
     case "restore":
       return "Restored version";
   }

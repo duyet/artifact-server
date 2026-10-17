@@ -483,6 +483,11 @@ export function createApplicationLayer(
           try: () => adapters.repository.changeTags(command),
           catch: classifyChangeTagsFailure,
         }),
+      renameArtifact: (command) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.renameArtifact(command),
+          catch: classifyRenameFailure,
+        }),
       deleteArtifact: (command) =>
         Effect.tryPromise({
           try: () => adapters.repository.deleteArtifact(command),
@@ -1400,6 +1405,21 @@ function classifyChangeTagsFailure(cause: unknown):
     return cause;
   }
   return repositoryFailure("changeTags", cause);
+}
+
+function classifyRenameFailure(cause: unknown):
+  | ArtifactNotFound
+  | ArtifactMutationConflict
+  | IdempotencyConflict
+  | ArtifactRepositoryFailure {
+  if (
+    cause instanceof ArtifactNotFound ||
+    cause instanceof ArtifactMutationConflict ||
+    cause instanceof IdempotencyConflict
+  ) {
+    return cause;
+  }
+  return repositoryFailure("renameArtifact", cause);
 }
 
 function classifyRestoreFailure(cause: unknown):

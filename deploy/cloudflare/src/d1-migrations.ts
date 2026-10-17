@@ -8,7 +8,7 @@ import {defaultGitHistoryMaximumCopiedFiles} from
   "../../../src/git-history/git-history-capability.js";
 
 /** D1 schema revision required by the Cloudflare runtime. */
-export const requiredD1SchemaVersion = 11;
+export const requiredD1SchemaVersion = 12;
 
 /** SQL literal list of every action kind the ledger accepts. */
 const actionKindList = [
@@ -23,6 +23,18 @@ const actionKindList = [
   "'comment_resolve'",
   "'comment_reopen'",
   "'comment_delete'",
+  "'renamed'",
+  "'edited'",
+].join(", ");
+
+/** SQL literal list of every operation an idempotency record can name. */
+const idempotencyOperationList = [
+  "'publish'",
+  "'restore'",
+  "'change_access'",
+  "'change_tags'",
+  "'rename'",
+  "'delete'",
 ].join(", ");
 
 const schemaSql = `
@@ -94,9 +106,10 @@ const schemaSql = `
     input_digest TEXT NOT NULL,
     artifact_id TEXT NOT NULL REFERENCES artifacts(id),
     version_id TEXT NOT NULL REFERENCES versions(id),
-    operation TEXT NOT NULL CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'delete')),
+    operation TEXT NOT NULL CHECK (operation IN (${idempotencyOperationList})),
     access_setting TEXT CHECK (access_setting IS NULL OR access_setting IN ('account_required', 'public_link')),
     tags_json TEXT,
+    artifact_name TEXT,
     created_at TEXT NOT NULL,
     PRIMARY KEY (project_id, idempotency_key)
   );
@@ -626,6 +639,8 @@ export async function migrateD1(
     await widenRegisteredAgentsIfNeeded(database);
     await addArtifactSearchNameIfMissing(database);
     await addArtifactOwnerIfMissing(database);
+    await widenActionsIfNeeded(database);
+    await widenIdempotencyRecordsIfNeeded(database);
   }
   await database.batch([
     database.prepare(`
@@ -832,4 +847,105 @@ async function widenRegisteredAgentsIfNeeded(
     widenRegisteredAgentsStatements.map((statement) =>
       database.prepare(statement)),
   );
+}
+
+const widenActionsStatements = [
+  "PRAGMA defer_foreign_keys = ON",
+  `CREATE TABLE actions_upgrade_snapshot AS SELECT
+    id, project_id, artifact_id, version_id, action, principal_id,
+    authorized_by_principal_id, idempotency_key, created_at
+    FROM actions`,
+  `CREATE TABLE actions_next (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    version_id TEXT NOT NULL REFERENCES versions(id),
+    action TEXT NOT NULL CHECK (action IN (${actionKindList})),
+    principal_id TEXT NOT NULL,
+    authorized_by_principal_id TEXT,
+    idempotency_key TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  "DROP TABLE actions",
+  "ALTER TABLE actions_next RENAME TO actions",
+  `INSERT INTO actions (
+    id, project_id, artifact_id, version_id, action, principal_id,
+    authorized_by_principal_id, idempotency_key, created_at
+  ) SELECT id, project_id, artifact_id, version_id, action, principal_id,
+    authorized_by_principal_id, idempotency_key, created_at
+    FROM actions_upgrade_snapshot`,
+  "DROP TABLE actions_upgrade_snapshot",
+  `CREATE INDEX actions_artifact_created
+    ON actions(project_id, artifact_id, created_at DESC, id DESC)`,
+] as const;
+
+/**
+ * Rebuild `actions` so its action CHECK accepts `renamed` and `edited`. SQLite
+ * cannot widen a CHECK in place, and a database created before this revision
+ * already holds the narrow table, so the shared `CREATE TABLE IF NOT EXISTS`
+ * leaves it untouched. The table's own SQL says whether it is already wide.
+ */
+async function widenActionsIfNeeded(database: D1Database): Promise<void> {
+  if (await tableSqlIncludes(database, "actions", "'renamed'")) return;
+  await database.batch(
+    widenActionsStatements.map((statement) => database.prepare(statement)),
+  );
+}
+
+const widenIdempotencyRecordsStatements = [
+  "PRAGMA defer_foreign_keys = ON",
+  `CREATE TABLE idempotency_records_upgrade_snapshot AS SELECT
+    project_id, idempotency_key, input_digest, artifact_id, version_id,
+    operation, access_setting, tags_json, created_at
+    FROM idempotency_records`,
+  `CREATE TABLE idempotency_records_next (
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    idempotency_key TEXT NOT NULL,
+    input_digest TEXT NOT NULL,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    version_id TEXT NOT NULL REFERENCES versions(id),
+    operation TEXT NOT NULL CHECK (operation IN (${idempotencyOperationList})),
+    access_setting TEXT CHECK (access_setting IS NULL OR access_setting IN ('account_required', 'public_link')),
+    tags_json TEXT,
+    artifact_name TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, idempotency_key)
+  )`,
+  "DROP TABLE idempotency_records",
+  "ALTER TABLE idempotency_records_next RENAME TO idempotency_records",
+  `INSERT INTO idempotency_records (
+    project_id, idempotency_key, input_digest, artifact_id, version_id,
+    operation, access_setting, tags_json, created_at
+  ) SELECT project_id, idempotency_key, input_digest, artifact_id, version_id,
+    operation, access_setting, tags_json, created_at
+    FROM idempotency_records_upgrade_snapshot`,
+  "DROP TABLE idempotency_records_upgrade_snapshot",
+] as const;
+
+/**
+ * Rebuild `idempotency_records` so its operation CHECK accepts `rename` and it
+ * carries the `artifact_name` a rename replays. A rebuild is the only path for
+ * the same reason as `widenActionsIfNeeded`.
+ */
+async function widenIdempotencyRecordsIfNeeded(
+  database: D1Database,
+): Promise<void> {
+  if (await tableSqlIncludes(database, "idempotency_records", "'rename'")) {
+    return;
+  }
+  await database.batch(
+    widenIdempotencyRecordsStatements.map((statement) =>
+      database.prepare(statement)),
+  );
+}
+
+async function tableSqlIncludes(
+  database: D1Database,
+  table: string,
+  fragment: string,
+): Promise<boolean> {
+  const sql = await database.prepare(
+    "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+  ).bind(table).first<string>("sql");
+  return sql !== null && sql.includes(fragment);
 }

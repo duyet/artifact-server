@@ -114,6 +114,7 @@ import type {
   RecordAgentActivity,
   ArtifactViewDelta,
   RegisterAgent,
+  RenameArtifact,
   RenameProject,
   RestoreArtifactVersion,
   SetProjectArchive,
@@ -185,7 +186,9 @@ const artifactActionKindSchema = z.enum([
   artifactActionKinds.commentResolve,
   artifactActionKinds.commentUpdate,
   artifactActionKinds.delete,
+  artifactActionKinds.edited,
   artifactActionKinds.publish,
+  artifactActionKinds.renamed,
   artifactActionKinds.restore,
 ]);
 const nonnegativeIntegerSchema = z.coerce.number().int().nonnegative();
@@ -354,12 +357,14 @@ const versionContentRowSchema = z.object({
 const idempotencyRowSchema = z.object({
   accessSetting: accessSettingSchema.nullable(),
   artifactId: z.string(),
+  artifactName: z.string().nullable(),
   inputDigest: z.string(),
   operation: z.enum([
     "change_access",
     "change_tags",
     "delete",
     "publish",
+    "rename",
     "restore",
   ]),
   tagsJson: z.string().nullable(),
@@ -1550,6 +1555,67 @@ export class PostgresArtifactRepository implements
           artifact.accessSetting,
           false,
           command.tags,
+        );
+      }));
+    }));
+  }
+
+  async renameArtifact(command: RenameArtifact): Promise<ArtifactState> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
+        yield* lockIdempotency(
+          sql,
+          installationId,
+          command.projectId,
+          command.idempotencyKey,
+        );
+        const replayed = yield* this.#findIdempotentRenameResult(
+          command.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+        );
+        if (replayed !== null) return replayed;
+        const artifact = yield* this.#readArtifact(
+          command.projectId,
+          command.artifactId,
+          true,
+        );
+        yield* assertExpectedVersion(artifact, command.expectedCurrentVersionId);
+        const updated = yield* sql`UPDATE artifacts
+          SET name = ${command.name},
+            search_name = ${normalizeArtifactSearchText(command.name)}
+          WHERE installation_id = ${installationId}
+            AND project_id = ${command.projectId}
+            AND id = ${command.artifactId}
+            AND current_version_id = ${command.expectedCurrentVersionId}
+            AND deleted_at IS NULL
+          RETURNING id`;
+        if (updated.length !== 1) return yield* changedDuringManagement();
+        yield* this.#insertAction(
+          command,
+          artifactActionKinds.renamed,
+          command.expectedCurrentVersionId,
+        );
+        yield* this.#insertIdempotency({
+          accessSetting: artifact.accessSetting,
+          artifactId: command.artifactId,
+          artifactName: command.name,
+          createdAt: command.createdAt,
+          idempotencyKey: command.idempotencyKey,
+          inputDigest: command.inputDigest,
+          operation: "rename",
+          projectId: command.projectId,
+          tagsJson: null,
+          versionId: command.expectedCurrentVersionId,
+        });
+        return yield* this.#readArtifactState(
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          artifact.accessSetting,
+          false,
         );
       }));
     }));
@@ -3999,7 +4065,7 @@ export class PostgresArtifactRepository implements
       const rows = yield* sql.unsafe<object>(
         `SELECT access_setting AS "accessSetting", artifact_id AS "artifactId",
           input_digest AS "inputDigest", operation, tags_json AS "tagsJson",
-          version_id AS "versionId"
+          artifact_name AS "artifactName", version_id AS "versionId"
          FROM idempotency_records
          WHERE installation_id = $1 AND project_id = $2
            AND idempotency_key = $3`,
@@ -4085,6 +4151,36 @@ export class PostgresArtifactRepository implements
     });
   }
 
+  #findIdempotentRenameResult(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): Effect.Effect<ArtifactState | null, unknown, SqlClient> {
+    return Effect.gen({self: this}, function*() {
+      const parsed = yield* this.#findIdempotency(projectId, idempotencyKey);
+      if (parsed === null) return null;
+      if (
+        parsed.inputDigest !== inputDigest ||
+        parsed.operation !== "rename" ||
+        parsed.accessSetting === null ||
+        parsed.artifactName === null
+      ) {
+        return yield* new IdempotencyConflict({
+          message: "The idempotency key was already used with different input.",
+        });
+      }
+      return yield* this.#readArtifactState(
+        projectId,
+        parsed.artifactId,
+        parsed.versionId,
+        parsed.accessSetting,
+        true,
+        null,
+        parsed.artifactName,
+      );
+    });
+  }
+
   #findIdempotentDeletion(
     projectId: string,
     idempotencyKey: string,
@@ -4109,6 +4205,7 @@ export class PostgresArtifactRepository implements
     accessSetting: ArtifactRecord["accessSetting"],
     replayed: boolean,
     tags: readonly string[] | null = null,
+    name: string | null = null,
   ): Effect.Effect<ArtifactState, unknown, SqlClient> {
     return Effect.gen({self: this}, function*() {
       const artifact = yield* this.#readArtifact(projectId, artifactId, false);
@@ -4125,6 +4222,7 @@ export class PostgresArtifactRepository implements
           ...artifact,
           accessSetting,
           currentVersionId: versionId,
+          name: name ?? artifact.name,
           tags: tags ?? artifact.tags,
         },
         replayed,
@@ -4233,6 +4331,7 @@ export class PostgresArtifactRepository implements
   #insertIdempotency(record: {
     readonly accessSetting: ArtifactRecord["accessSetting"] | null;
     readonly artifactId: string;
+    readonly artifactName?: string | null | undefined;
     readonly createdAt: string;
     readonly idempotencyKey: string;
     readonly inputDigest: string;
@@ -4242,16 +4341,18 @@ export class PostgresArtifactRepository implements
     readonly versionId: string;
   }): Effect.Effect<void, unknown, SqlClient> {
     const installationId = this.#installationId;
+    const artifactName = record.artifactName ?? null;
     return Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
       yield* sql`INSERT INTO idempotency_records (
         installation_id, project_id, idempotency_key, input_digest, artifact_id, version_id,
-        operation, access_setting, tags_json, created_at
+        operation, access_setting, tags_json, artifact_name, created_at
       ) VALUES (
         ${installationId}, ${record.projectId}, ${record.idempotencyKey},
         ${record.inputDigest},
         ${record.artifactId}, ${record.versionId}, ${record.operation},
-        ${record.accessSetting}, ${record.tagsJson}, ${record.createdAt}
+        ${record.accessSetting}, ${record.tagsJson}, ${artifactName},
+        ${record.createdAt}
       )`;
     });
   }

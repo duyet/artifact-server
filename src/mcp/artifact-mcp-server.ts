@@ -1411,6 +1411,37 @@ export function createArtifactMcpServer(
   );
 
   registerNudgedTool(
+    "artifact_rename",
+    {
+      title: "Rename an artifact",
+      description:
+        "Change an artifact's display name. The ID, links, saved versions, and files stay the same.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        expectedCurrentVersionId: expectedVersionSchema,
+        idempotencyKey: idempotencyKeySchema,
+        name: z.string().min(1).max(200),
+        projectId: optionalProjectIdSchema,
+      }).strict(),
+      outputSchema: artifactStateSchema,
+      annotations: idempotentWriteAnnotations,
+    },
+    async (input) => toolResult(async () => {
+      const state = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactManagementService.use((management) =>
+          management.renameArtifact({...input, principal: identity.principal})
+        ),
+      );
+      return {
+        artifact: state.artifact,
+        replayed: state.replayed,
+        version: state.version,
+      };
+    }),
+  );
+
+  registerNudgedTool(
     "artifact_restore_version",
     {
       title: "Restore a saved version",

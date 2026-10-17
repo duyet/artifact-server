@@ -185,6 +185,19 @@ export class PublishArtifactService extends Context.Service<
 const artifactNameSchema = Schema.Trim.check(Schema.isLengthBetween(1, 200));
 const decodeArtifactName = Schema.decodeUnknownEffect(artifactNameSchema);
 
+/** Trim one artifact name and require 1 to 200 characters. */
+export function parseArtifactName(
+  candidate: string,
+): Effect.Effect<string, InvalidArtifactName> {
+  return decodeArtifactName(candidate).pipe(
+    Effect.mapError(() =>
+      new InvalidArtifactName({
+        message: "Artifact names must contain between 1 and 200 characters.",
+      })
+    ),
+  );
+}
+
 function makePublishArtifactService(
   dependencies: PublishArtifactDependencies,
   authorization: AuthorizationOperations,
@@ -228,13 +241,7 @@ function makePublishArtifactService(
     command: PublishPreparedNewArtifactCommand,
   ): Effect.fn.Return<PublishedVersion, PublishArtifactFailure> {
     yield* authorization.requireArtifactCreation(command.principal);
-    const name = yield* decodeArtifactName(command.name).pipe(
-      Effect.mapError(() =>
-        new InvalidArtifactName({
-          message: "Artifact names must contain between 1 and 200 characters.",
-        })
-      ),
-    );
+    const name = yield* parseArtifactName(command.name);
     const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
     const tags = yield* parseArtifactTags(command.tags ?? []);
     const inputDigest = newArtifactInputDigest({

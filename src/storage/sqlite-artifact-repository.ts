@@ -119,6 +119,7 @@ import type {
   ReadArtifactViewDays,
   ReadMostViewedArtifacts,
   ReadProjectActivityDays,
+  RenameArtifact,
   RecordAgentActivity,
   RecordSourceFreshness,
   RegisterAgent,
@@ -194,9 +195,11 @@ const artifactActionKindSchema = z.enum([
   artifactActionKinds.commentResolve,
   artifactActionKinds.commentUpdate,
   artifactActionKinds.delete,
+  artifactActionKinds.edited,
   artifactActionKinds.link,
   artifactActionKinds.publish,
   artifactActionKinds.relink,
+  artifactActionKinds.renamed,
   artifactActionKinds.restore,
 ]);
 const sourceFreshnessSchema = z.enum([
@@ -248,12 +251,14 @@ const contentSessionRowSchema = contentBootstrapRowSchema;
 const idempotencyRowSchema = z.object({
   accessSetting: accessSettingSchema.nullable(),
   artifactId: z.string(),
+  artifactName: z.string().nullable(),
   inputDigest: z.string(),
   operation: z.enum([
     "change_access",
     "change_tags",
     "delete",
     "publish",
+    "rename",
     "restore",
   ]),
   tagsJson: z.string().nullable(),
@@ -1773,6 +1778,67 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  renameArtifact(command: RenameArtifact): Promise<ArtifactState> {
+    return Promise.resolve().then(() =>
+      this.#transaction(() => {
+        const replayed = this.#findIdempotentRenameResult(
+          command.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+        );
+        if (replayed !== null) return replayed;
+        const artifact = this.#readArtifact(command.projectId, command.artifactId);
+        this.#assertExpectedCurrentVersion(
+          artifact,
+          command.expectedCurrentVersionId,
+        );
+        const update = this.#database
+          .prepare(
+            `UPDATE artifacts
+             SET name = ?, search_name = ?
+             WHERE project_id = ? AND id = ? AND current_version_id = ? AND deleted_at IS NULL`,
+          )
+          .run(
+            command.name,
+            normalizeArtifactSearchText(command.name),
+            command.projectId,
+            command.artifactId,
+            command.expectedCurrentVersionId,
+          );
+        if (update.changes !== 1) throw changedDuringManagement();
+        this.#insertAction(
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          command.idempotencyKey,
+          command.createdAt,
+          artifactActionKinds.renamed,
+          command.principalId,
+          command.authorizedByPrincipalId,
+        );
+        this.#insertIdempotency(
+          command.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          command.createdAt,
+          "rename",
+          artifact.accessSetting,
+          null,
+          command.name,
+        );
+        return this.#readArtifactState(
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          artifact.accessSetting,
+          false,
+        );
+      }),
+    );
+  }
+
   deleteArtifact(command: DeleteArtifact): Promise<ArtifactDeletion> {
     return Promise.resolve().then(() =>
       this.#transaction(() => {
@@ -2852,6 +2918,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -2890,6 +2957,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -2919,6 +2987,48 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  #findIdempotentRenameResult(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): ArtifactState | null {
+    const row = this.#database
+      .prepare(
+        `SELECT
+          access_setting AS accessSetting,
+          artifact_id AS artifactId,
+          input_digest AS inputDigest,
+          operation,
+          tags_json AS tagsJson,
+          artifact_name AS artifactName,
+          version_id AS versionId
+         FROM idempotency_records
+         WHERE project_id = ? AND idempotency_key = ?`,
+      )
+      .get(projectId, idempotencyKey);
+    const parsed = idempotencyRowSchema.nullable().parse(row ?? null);
+    if (parsed === null) return null;
+    if (
+      parsed.inputDigest !== inputDigest ||
+      parsed.operation !== "rename" ||
+      parsed.accessSetting === null ||
+      parsed.artifactName === null
+    ) {
+      throw new IdempotencyConflict({
+        message: "The idempotency key was already used with different input.",
+      });
+    }
+    return this.#readArtifactState(
+      projectId,
+      parsed.artifactId,
+      parsed.versionId,
+      parsed.accessSetting,
+      true,
+      null,
+      parsed.artifactName,
+    );
+  }
+
   #findIdempotentDeletion(
     projectId: string,
     idempotencyKey: string,
@@ -2932,6 +3042,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -3084,6 +3195,7 @@ export class SqliteArtifactRepository implements
     accessSetting: ArtifactRecord["accessSetting"],
     replayed: boolean,
     tags: readonly string[] | null = null,
+    name: string | null = null,
   ): ArtifactState {
     const artifact = this.#readArtifact(projectId, artifactId);
     const version = this.#readVersionOrNull(projectId, versionId, artifactId);
@@ -3095,6 +3207,7 @@ export class SqliteArtifactRepository implements
         ...artifact,
         accessSetting,
         currentVersionId: versionId,
+        name: name ?? artifact.name,
         tags: tags ?? artifact.tags,
       },
       replayed,
@@ -3181,6 +3294,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -3298,16 +3412,18 @@ export class SqliteArtifactRepository implements
       | "change_tags"
       | "delete"
       | "publish"
+      | "rename"
       | "restore" = "publish",
     accessSetting: ArtifactRecord["accessSetting"] | null = null,
     tagsJson: string | null = null,
+    artifactName: string | null = null,
   ): void {
     this.#database
       .prepare(
         `INSERT INTO idempotency_records (
           project_id, idempotency_key, input_digest, artifact_id, version_id,
-          operation, access_setting, tags_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          operation, access_setting, tags_json, artifact_name, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         projectId,
@@ -3318,6 +3434,7 @@ export class SqliteArtifactRepository implements
         operation,
         accessSetting,
         tagsJson,
+        artifactName,
         createdAt,
       );
   }
@@ -5100,9 +5217,10 @@ export class SqliteArtifactRepository implements
         input_digest TEXT NOT NULL,
         artifact_id TEXT NOT NULL REFERENCES artifacts(id),
         version_id TEXT NOT NULL REFERENCES versions(id),
-        operation TEXT NOT NULL DEFAULT 'publish' CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'delete')),
+        operation TEXT NOT NULL DEFAULT 'publish' CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'rename', 'delete')),
         access_setting TEXT CHECK (access_setting IS NULL OR access_setting IN ('account_required', 'public_link')),
         tags_json TEXT,
+        artifact_name TEXT,
         created_at TEXT NOT NULL,
         PRIMARY KEY (project_id, idempotency_key)
       ) STRICT;
@@ -5225,6 +5343,7 @@ export class SqliteArtifactRepository implements
     this.#addGitHistoryMirrorTablesIfMissing();
     this.#addArtifactPathIfMissing();
     this.#addArtifactOwnerIfMissing();
+    this.#addRenameIdempotencyIfMissing();
     this.#database.exec(`
       CREATE INDEX IF NOT EXISTS projects_active_created
         ON projects (archived_at, created_at, id);
@@ -5362,6 +5481,68 @@ export class SqliteArtifactRepository implements
       CREATE UNIQUE INDEX IF NOT EXISTS artifacts_live_path
         ON artifacts (path) WHERE path IS NOT NULL AND deleted_at IS NULL
     `);
+  }
+
+  // A rename replays the name it set, so its idempotency record keeps that
+  // name. SQLite cannot widen a CHECK in place, so an older table is rebuilt;
+  // dropping it drops its triggers, which the same transaction recreates.
+  #addRenameIdempotencyIfMissing(): void {
+    const row = this.#database
+      .prepare(
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'idempotency_records'",
+      )
+      .get();
+    const {sql} = z.object({sql: z.string()}).parse(row);
+    if (sql.includes("'rename'")) return;
+    this.#transaction(() => {
+      this.#database.exec(`
+        CREATE TABLE idempotency_records_next (
+          project_id TEXT NOT NULL REFERENCES projects(id),
+          idempotency_key TEXT NOT NULL,
+          input_digest TEXT NOT NULL,
+          artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+          version_id TEXT NOT NULL REFERENCES versions(id),
+          operation TEXT NOT NULL DEFAULT 'publish' CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'rename', 'delete')),
+          access_setting TEXT CHECK (access_setting IS NULL OR access_setting IN ('account_required', 'public_link')),
+          tags_json TEXT,
+          artifact_name TEXT,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (project_id, idempotency_key)
+        ) STRICT;
+
+        INSERT INTO idempotency_records_next (
+          project_id, idempotency_key, input_digest, artifact_id, version_id,
+          operation, access_setting, tags_json, created_at
+        )
+        SELECT
+          project_id, idempotency_key, input_digest, artifact_id, version_id,
+          operation, access_setting, tags_json, created_at
+        FROM idempotency_records;
+
+        DROP TABLE idempotency_records;
+        ALTER TABLE idempotency_records_next RENAME TO idempotency_records;
+
+        CREATE TRIGGER idempotency_project_insert
+        BEFORE INSERT ON idempotency_records
+        WHEN NOT EXISTS (
+          SELECT 1 FROM artifacts
+          WHERE id = NEW.artifact_id AND project_id = NEW.project_id
+        ) OR NOT EXISTS (
+          SELECT 1 FROM versions
+          WHERE id = NEW.version_id AND project_id = NEW.project_id
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'idempotency project mismatch');
+        END;
+
+        CREATE TRIGGER idempotency_project_update
+        BEFORE UPDATE OF project_id ON idempotency_records
+        WHEN NEW.project_id <> OLD.project_id
+        BEGIN
+          SELECT RAISE(ABORT, 'idempotency project cannot change');
+        END;
+      `);
+    });
   }
 
   // An artifact's owner is the principal who created it. Artifacts created

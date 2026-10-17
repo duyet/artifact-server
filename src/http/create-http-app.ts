@@ -264,6 +264,10 @@ const changeAccessSchema = z.object({
   accessSetting: accessSettingSchema,
   expectedCurrentVersionId: z.string().min(1).max(200),
 });
+const renameArtifactSchema = z.object({
+  expectedCurrentVersionId: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+}).strict();
 const changeTagsSchema = z.object({
   expectedCurrentVersionId: z.string().min(1).max(200),
   tags: artifactTagsSchema,
@@ -2328,6 +2332,35 @@ export function createHttpApp(
             principal: context.get("principal"),
             projectId: requestedProjectId(context),
             tags: body.tags,
+          })
+        ),
+      );
+      return context.json(artifactStateResponse(
+        responseApplicationUrl(context, dependencies),
+        dependencies.contentDomain,
+        state,
+      ));
+    },
+  );
+
+  app.patch(
+    "/api/v1/artifacts/:artifactId/name",
+    boundedJsonBody,
+    async (context) => {
+      const body = renameArtifactSchema.parse(await context.req.json());
+      const state = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ArtifactManagementService.use((management) =>
+          management.renameArtifact({
+            artifactId: context.req.param("artifactId"),
+            expectedCurrentVersionId: body.expectedCurrentVersionId,
+            idempotencyKey: requiredIdempotencyKey(
+              context.req.header("idempotency-key"),
+            ),
+            name: body.name,
+            principal: context.get("principal"),
+            projectId: requestedProjectId(context),
           })
         ),
       );

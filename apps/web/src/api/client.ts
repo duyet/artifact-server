@@ -303,9 +303,11 @@ export interface ArtifactAction {
     | "comment_resolve"
     | "comment_update"
     | "delete"
+    | "edited"
     | "link"
     | "publish"
     | "relink"
+    | "renamed"
     | "restore";
   readonly artifactId: string;
   readonly authorizedByPrincipalId: string | null;
@@ -402,9 +404,11 @@ const actionSchema: z.ZodType<ArtifactAction> = z.object({
     "comment_resolve",
     "comment_update",
     "delete",
+    "edited",
     "link",
     "publish",
     "relink",
+    "renamed",
     "restore",
   ]),
   artifactId: z.string(),

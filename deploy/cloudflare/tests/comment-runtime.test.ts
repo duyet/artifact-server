@@ -497,7 +497,7 @@ describe("Cloudflare D1 comments", () => {
       try {
         expect(schemaVersionRowSchema.parse(upgraded.prepare(
           "SELECT version FROM artifact_server_schema WHERE component = 'runtime'",
-        ).get()).version).toBe(11);
+        ).get()).version).toBe(12);
         const columns = z.array(tableColumnRowSchema)
           .parse(upgraded.prepare("PRAGMA table_info(login_attempts)").all())
           .map(({name}) => name);

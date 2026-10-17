@@ -17,12 +17,14 @@ import {
   ProjectManagementService,
 } from "./project-management.js";
 import {dayOf, publicCatalogWindowDays} from "./public-artifact-catalog.js";
+import {parseArtifactName} from "./publish-artifact.js";
 import {
   ArtifactNotFound,
   type ArtifactMutationConflict,
   type ArtifactRepositoryFailure,
   type AuthorizationDenied,
   type IdempotencyConflict,
+  type InvalidArtifactName,
   type InvalidArtifactTags,
   type InvalidIdempotencyKey,
   InvalidPagination,
@@ -51,6 +53,7 @@ import type {
   ListArtifactActions,
   ListArtifacts,
   ReadArtifactViewDays,
+  RenameArtifact,
   RestoreArtifactVersion,
 } from "../core/ports.js";
 
@@ -106,6 +109,13 @@ export interface ChangeArtifactTagsCommand extends ReadArtifactCommand {
  */
 export type ArtifactOwnerScope = "all" | "me" | "others";
 
+/** Input for changing one artifact's display name. */
+export interface RenameArtifactCommand extends ReadArtifactCommand {
+  readonly expectedCurrentVersionId: string;
+  readonly idempotencyKey: string;
+  readonly name: string;
+}
+
 /** Input for listing active artifacts visible to one principal. */
 export interface ListArtifactsCommand {
   readonly comments?: "all" | "with" | "without";
@@ -144,6 +154,15 @@ export interface ArtifactManagementRepository {
   >;
   readonly changeTags: (
     command: ChangeArtifactTags,
+  ) => Effect.Effect<
+    ArtifactState,
+    | ArtifactMutationConflict
+    | ArtifactNotFound
+    | IdempotencyConflict
+    | ArtifactRepositoryFailure
+  >;
+  readonly renameArtifact: (
+    command: RenameArtifact,
   ) => Effect.Effect<
     ArtifactState,
     | ArtifactMutationConflict
@@ -214,6 +233,7 @@ export type ArtifactManagementFailure =
   | ArtifactMutationConflict
   | IdempotencyConflict
   | InvalidIdempotencyKey
+  | InvalidArtifactName
   | InvalidArtifactTags
   | InvalidPagination
   | AuthorizationDenied
@@ -230,6 +250,9 @@ interface ArtifactManagementOperations {
   readonly deleteArtifact: (
     command: DeleteArtifactCommand,
   ) => Effect.Effect<ArtifactDeletion, ArtifactManagementFailure>;
+  readonly renameArtifact: (
+    command: RenameArtifactCommand,
+  ) => Effect.Effect<ArtifactState, ArtifactManagementFailure>;
   readonly getArtifact: (
     command: ReadArtifactCommand,
   ) => Effect.Effect<ArtifactDetails, ArtifactManagementFailure>;
@@ -611,6 +634,38 @@ function makeArtifactManagementService(
     },
   );
 
+  const renameArtifact = Effect.fn("ArtifactManagementService.renameArtifact")(
+    function*(command: RenameArtifactCommand) {
+      const project = yield* resolveProjectForRead(
+        command.principal,
+        command.projectId,
+      );
+      const artifact = yield* requireArtifact(project.id, command.artifactId);
+      yield* authorization.requireArtifactManagement(command.principal);
+      const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
+      const name = yield* parseArtifactName(command.name);
+      const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
+      return yield* dependencies.repository.renameArtifact({
+        artifactId: artifact.id,
+        authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
+        createdAt,
+        expectedCurrentVersionId: command.expectedCurrentVersionId,
+        idempotencyKey,
+        inputDigest: managementInputDigest({
+          artifactId: artifact.id,
+          expectedCurrentVersionId: command.expectedCurrentVersionId,
+          operation: "rename",
+          principalId: command.principal.id,
+          projectId: project.id,
+          value: name,
+        }),
+        name,
+        principalId: command.principal.id,
+        projectId: project.id,
+      });
+    },
+  );
+
   const deleteArtifact = Effect.fn("ArtifactManagementService.deleteArtifact")(
     function*(command: DeleteArtifactCommand) {
       const project = yield* resolveProjectForRead(
@@ -654,6 +709,7 @@ function makeArtifactManagementService(
     listArtifactActions,
     listArtifacts,
     listVersions,
+    renameArtifact,
     restoreVersion,
   });
 }
@@ -676,6 +732,7 @@ interface ManagementInputDigest {
     | "change_access"
     | "change_tags"
     | "delete"
+    | "rename"
     | "restore";
   readonly principalId: string;
   readonly projectId: string;

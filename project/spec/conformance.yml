@@ -5110,3 +5110,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server. The Postgres and D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
     depends_on: [FRK-008, FRK-010]
     evidence: []
+
+  - id: FRK-012
+    kind: behavior
+    behavior: A rename changes an artifact's display name and search name without saving a version, with an idempotency key, current-version compare-and-swap, and an action record of kind renamed, over HTTP and an equivalent MCP tool.
+    owner: artifact-core
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-012-B, description: "Rename over HTTP with surrounding spaces and over MCP, find the artifact by its new name and not its old one, observe the unchanged current version and two renamed actions, and replay the first key to receive the name it set with replayed true."}
+      failure: {id: FRK-012-F, description: "A stale expected version is 409 ARTIFACT_MUTATION_CONFLICT, a reused key with another name is 409 IDEMPOTENCY_CONFLICT, a blank name and a missing key are 422, a deleted artifact is 404, and none of them changes the name or records an action."}
+    deployments: [local, single_server, kubernetes, cloudflare]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The Postgres migration 0016 and rename, and the D1 table rebuilds and rename, compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
+    depends_on: [FRK-010, ARC-006]
+    evidence: []

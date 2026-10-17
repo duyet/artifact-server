@@ -735,6 +735,31 @@ const addArtifactOwner = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+// A rename replays the name it set, so its idempotency record keeps that
+// name. The action history gains the rename and edit kinds.
+const addRenameAndEditActions = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `ALTER TABLE actions
+      DROP CONSTRAINT actions_action_check,
+      ADD CONSTRAINT actions_action_check
+        CHECK (action IN (
+          'publish', 'restore', 'change_access', 'change_tags', 'delete',
+          'comment_create', 'comment_reply', 'comment_update',
+          'comment_resolve', 'comment_reopen', 'comment_delete',
+          'renamed', 'edited'
+        ))`,
+    `ALTER TABLE idempotency_records
+      DROP CONSTRAINT idempotency_records_operation_check,
+      ADD CONSTRAINT idempotency_records_operation_check
+        CHECK (operation IN (
+          'publish', 'restore', 'change_access', 'change_tags', 'rename', 'delete'
+        ))`,
+    "ALTER TABLE idempotency_records ADD COLUMN artifact_name TEXT",
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -751,10 +776,11 @@ const migrationLoader = Migrator.fromRecord({
   "0013_artifact_views": addArtifactViews,
   "0014_api_key_sessions": addApiKeySessions,
   "0015_artifact_owner": addArtifactOwner,
+  "0016_rename_and_edit_actions": addRenameAndEditActions,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 15;
+export const requiredPostgresSchemaVersion = 16;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -854,6 +880,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 15,
     name: "artifact_owner",
+  }, {
+    migration_id: 16,
+    name: "rename_and_edit_actions",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,
