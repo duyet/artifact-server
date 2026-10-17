@@ -725,6 +725,12 @@ export class ApiError extends Error {
   }
 }
 
+/** Outcome of presenting an API key at the browser sign-in form. */
+export type ApiKeySignIn =
+  | {readonly kind: "signed_in"}
+  | {readonly kind: "rejected"; readonly message: string}
+  | {readonly kind: "rate_limited"; readonly retryAfterSeconds: number};
+
 function readCsrfToken(): string {
   for (const candidate of document.cookie.split(";")) {
     const [rawName, ...rawValue] = candidate.trim().split("=");
@@ -867,6 +873,27 @@ export const api = {
     method: "POST",
   }),
   session: () => request(sessionSchema, "/api/v1/session"),
+  signInWithApiKey: async (apiKey: string): Promise<ApiKeySignIn> => {
+    const response = await fetch("/auth/api-key", {
+      body: JSON.stringify({apiKey}),
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      method: "POST",
+    });
+    if (response.status === 204) return {kind: "signed_in"};
+    const failure = await parseFailure(response);
+    if (response.status === 401) return {kind: "rejected", message: failure.message};
+    if (response.status === 429) {
+      const retryAfterSeconds = Number(response.headers.get("retry-after"));
+      return {
+        kind: "rate_limited",
+        retryAfterSeconds: Number.isInteger(retryAfterSeconds) && retryAfterSeconds > 0
+          ? retryAfterSeconds
+          : 60,
+      };
+    }
+    throw failure;
+  },
   logout: async () => {
     await requestNoContent("/api/v1/session/logout", {
       headers: mutationHeaders(),
