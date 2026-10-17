@@ -23,6 +23,8 @@ import {
   uploadEveryStagedFile,
 } from "../support/publishing.js";
 
+const requestEdt002BomCrlf = "edt-002-bom-crlf";
+
 const protocolVersion = "2026-07-28";
 const maximumEditableTextBytes = 1_048_576;
 const encoder = new TextEncoder();
@@ -326,7 +328,7 @@ describe("editing one text file", () => {
     ]);
     const response = await commitEdit(published, {
       files: [{bytes, mediaType: "text/plain; charset=utf-8", path: "readme.txt"}],
-      idempotencyKey: "edt-002-bom-crlf",
+      idempotencyKey: requestEdt002BomCrlf,
       path: "readme.txt",
     });
     expect(response.status).toBe(201);

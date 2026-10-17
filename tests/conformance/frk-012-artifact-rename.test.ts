@@ -22,6 +22,8 @@ import {
   type PublishResponse,
 } from "../support/publishing.js";
 
+const requestFrk012TagsBefore = "frk-012-tags-before";
+
 const protocolVersion = "2026-07-28";
 const stateSchema = z.object({
   artifact: z.object({id: z.string(), name: z.string()}),
@@ -220,7 +222,7 @@ describe("artifact rename", () => {
         headers: {
           Authorization: `Bearer ${installation.apiToken}`,
           "Content-Type": "application/json",
-          "Idempotency-Key": "frk-012-tags-before",
+          "Idempotency-Key": requestFrk012TagsBefore,
         },
         method: "PATCH",
       },
@@ -268,7 +270,7 @@ describe("artifact rename", () => {
         headers: {
           Authorization: `Bearer ${installation.apiToken}`,
           "Content-Type": "application/json",
-          "Idempotency-Key": "frk-012-tags-before",
+          "Idempotency-Key": requestFrk012TagsBefore,
         },
         method: "PATCH",
       },

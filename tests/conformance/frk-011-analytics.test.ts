@@ -19,6 +19,8 @@ import {
   signInAdministrator,
 } from "../support/agent-dispatch.js";
 
+const requestFrk011AtlasSecond = "frk-011-atlas-second";
+
 const dayPattern = /^\d{4}-\d{2}-\d{2}$/u;
 const projectReportSchema = z.object({
   daily: z.array(z.object({
@@ -106,7 +108,7 @@ describe("project and artifact analytics", () => {
       artifactId: atlas.body.artifact.id,
       content: "<!doctype html><title>Atlas two</title>",
       expectedCurrentVersionId: atlas.body.version.id,
-      idempotencyKey: "frk-011-atlas-second",
+      idempotencyKey: requestFrk011AtlasSecond,
     });
     const ledger = await publishNew(server, installation, {
       accessSetting: "account_required",

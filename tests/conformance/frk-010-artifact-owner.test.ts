@@ -14,6 +14,11 @@ import {
 import {publishNew, publishVersion} from "../support/publishing.js";
 import {issueApiKey, signInAdministrator} from "../support/agent-dispatch.js";
 
+const requestFrk010OwnerMine = "frk-010-owner-mine";
+const requestFrk010OwnerTheirs = "frk-010-owner-theirs";
+const requestFrk010OwnerMineV2 = "frk-010-owner-mine-v2";
+const requestFrk010OwnerOwnerSecond = "frk-010-owner-owner-second";
+
 const ownerSchema = z.object({
   displayName: z.string().nullable(),
   principalId: z.string(),
@@ -77,13 +82,13 @@ describe("artifact owner and publisher name", () => {
     const mine = await publishNew(running, installation, {
       accessSetting: "public_link",
       content: "<!doctype html><title>Mine</title>",
-      idempotencyKey: "frk-010-owner-mine-key",
+      idempotencyKey: requestFrk010OwnerMine,
       name: "Mine",
     });
     const theirs = await publishNew(running, asPrincipal(installation, releaseBot), {
       accessSetting: "public_link",
       content: "<!doctype html><title>Theirs</title>",
-      idempotencyKey: "frk-010-owner-theirs-key",
+      idempotencyKey: requestFrk010OwnerTheirs,
       name: "Theirs",
     });
     const bot = await readPrincipal(running, releaseBot);
@@ -104,7 +109,7 @@ describe("artifact owner and publisher name", () => {
       artifactId: mine.body.artifact.id,
       content: "<!doctype html><title>Mine, edited by the bot</title>",
       expectedCurrentVersionId: mine.body.version.id,
-      idempotencyKey: "frk-010-owner-mine-v2-key",
+      idempotencyKey: requestFrk010OwnerMineV2,
     });
     expect(second.response.status).toBe(201);
     const details = await getJson(
@@ -168,7 +173,7 @@ describe("artifact owner and publisher name", () => {
     const botArtifact = await publishNew(running, asPrincipal(installation, releaseBot), {
       accessSetting: "account_required",
       content: "<!doctype html><title>Bot first</title>",
-      idempotencyKey: "frk-010-owner-bot-first-key",
+      idempotencyKey: "frk-010-owner-bot-first",
       name: "Bot first",
     });
     const owner = await readPrincipal(running, installation.apiToken);
@@ -176,7 +181,7 @@ describe("artifact owner and publisher name", () => {
       artifactId: botArtifact.body.artifact.id,
       content: "<!doctype html><title>Owner second</title>",
       expectedCurrentVersionId: botArtifact.body.version.id,
-      idempotencyKey: "frk-010-owner-owner-second-key",
+      idempotencyKey: requestFrk010OwnerOwnerSecond,
     });
     // The administrator published version 2 but created nothing, so it owns
     // nothing.
