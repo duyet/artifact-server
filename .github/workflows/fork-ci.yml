@@ -109,26 +109,16 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Enable the containerd image store
-        run: |
-          artifactserver_daemon_config=$(mktemp)
-          if [[ -s /etc/docker/daemon.json ]]; then
-            jq \
-              '.features = ((.features // {}) + {"containerd-snapshotter": true})' \
-              /etc/docker/daemon.json > "$artifactserver_daemon_config"
-          else
-            printf '%s\n' \
-              '{"features":{"containerd-snapshotter":true}}' \
-              > "$artifactserver_daemon_config"
-          fi
-          sudo install -d -m 0755 /etc/docker
-          sudo install -m 0644 \
-            "$artifactserver_daemon_config" \
-            /etc/docker/daemon.json
-          rm -f -- "$artifactserver_daemon_config"
-          sudo systemctl restart docker
-          docker info --format '{{json .DriverStatus}}' \
-            | grep -F 'io.containerd.snapshotter.v1'
+      - name: Set up QEMU for the ARM64 image
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - name: Set up Docker with the containerd image store
+        uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5.5.0
+        with:
+          version: v29.8.2
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
       - name: Prepare attestation-capable BuildKit
         run: |
           docker buildx create \
