@@ -198,7 +198,13 @@ test.describe("Linked artifacts", () => {
       await expect(
         fixture.page.getByText("In sync", {exact: true}),
       ).toBeVisible({timeout: 30_000});
-      await expect(fixture.page.getByRole("tab", {name: "Versions 2"})).toBeVisible();
+      // The Versions tab no longer carries a count; its history lists the
+      // captured version instead.
+      await fixture.page.getByRole("tab", {name: "Versions"}).click();
+      await expect(
+        fixture.page.getByRole("complementary", {name: "Artifact inspector"})
+          .getByRole("listitem").filter({hasText: "Version 2"}),
+      ).toBeVisible();
 
       await expect(async () => {
         expect(await versionCount(fixture, linked.artifact.id)).toBe(2);

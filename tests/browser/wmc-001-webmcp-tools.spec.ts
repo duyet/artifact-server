@@ -242,11 +242,14 @@ test.describe("WMC-001 WebMCP review tools", () => {
         await expect(page.getByText(`${fixture.server.baseUrl}/mcp`, {exact: true})).toBeVisible();
         await expect(page.getByText("artifactserver connect", {exact: true})).toBeVisible();
         await expect(page.getByRole("checkbox", {name: /Browser agent tools/})).toHaveCount(0);
-        await page.getByRole("link", {name: "WebMCP", exact: true}).click();
+        // The breadcrumb's current page is also a link named WebMCP, so the
+        // section link is found inside the Settings navigation.
+        const webmcpLink = page.getByRole("navigation", {name: "Settings"})
+          .getByRole("link", {exact: true, name: "WebMCP"});
+        await webmcpLink.click();
         await expect(page).toHaveURL(`${fixture.server.baseUrl}/review/settings/webmcp`);
         await expect(page.getByRole("heading", {name: "WebMCP", exact: true})).toBeVisible();
-        await expect(page.getByRole("link", {name: "WebMCP", exact: true}))
-          .toHaveAttribute("aria-current", "page");
+        await expect(webmcpLink).toHaveAttribute("aria-current", "page");
         const accessibility = await new AxeBuilder({page})
           .withTags(["wcag2a", "wcag2aa"])
           .analyze();

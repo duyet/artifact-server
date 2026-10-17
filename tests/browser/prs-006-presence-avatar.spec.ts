@@ -271,7 +271,7 @@ test.describe("PRS-006 presence avatar", () => {
           expect.stringMatching(/^dispatch-default:/u),
           "artifact-review-theme",
         ],
-        sessionStorageKeys: ["artifact-review-return-url"],
+        sessionStorageKeys: [],
       });
     } finally {
       await stopPresenceFixture(fixture);
