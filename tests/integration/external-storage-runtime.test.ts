@@ -521,6 +521,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           // Every table a later migration created is dropped, so the rewind
           // really is the v1 schema and each migration finds its own work
           // undone rather than a relation it already made.
+          "DROP TABLE api_key_sessions",
           "DROP TABLE artifact_views",
           `ALTER TABLE actions
             DROP CONSTRAINT actions_action_check,
