@@ -55,6 +55,7 @@ import {
   type PublishArtifactDependencies,
   PublishArtifactService,
 } from "../application/publish-artifact.js";
+import {ProjectAnalyticsService} from "../application/project-analytics.js";
 import {
   PublicArtifactCatalogService,
   publicCatalogRecentDays,
@@ -122,6 +123,7 @@ import type {
   AgentDispatchRepository,
   ArtifactRepository,
   ArtifactViewRepository,
+  ProjectActivityRepository,
   BlobStore,
   Clock,
   CommentRepository,
@@ -181,6 +183,7 @@ export interface ApplicationAdapters {
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: ArtifactRepository &
     ArtifactViewRepository &
+    ProjectActivityRepository &
     CommentRepository &
     ContentSessionRepository &
     ProjectRepository &
@@ -225,6 +228,7 @@ export function createApplicationLayer(
   | InteractiveLoginService
   | LinkedArtifactService
   | PublishArtifactService
+  | ProjectAnalyticsService
   | ProjectGitHistoryService
   | ProjectManagementService
   | PublicArtifactCatalogService
@@ -1051,6 +1055,25 @@ export function createApplicationLayer(
     repository: adapters.repository,
     windowDays: publicCatalogWindowDays,
   });
+  const projectAnalyticsLayer = ProjectAnalyticsService.layer({
+    clock,
+    repository: {
+      findArtifact: (projectId, artifactId) =>
+        adapters.repository.findArtifact(projectId, artifactId),
+      readArtifactViewDays: (command) =>
+        adapters.repository.readArtifactViewDays(command),
+      readArtifactViewTotals: (artifactIds) =>
+        adapters.repository.readArtifactViewTotals(artifactIds),
+      readMostViewedArtifacts: (command) =>
+        adapters.repository.readMostViewedArtifacts(command),
+      readProjectActivityDays: (command) =>
+        adapters.repository.readProjectActivityDays(command),
+      readProjectActivityTotals: (projectId, day) =>
+        adapters.repository.readProjectActivityTotals(projectId, day),
+    },
+  }).pipe(
+    Layer.provideMerge(Layer.mergeAll(authorizationLayer, projectLayer)),
+  );
   const managementLayer = ArtifactManagementService.layer(
     managementDependencies,
   ).pipe(
@@ -1167,6 +1190,7 @@ export function createApplicationLayer(
     gitHistoryAccessLayer,
     projectGitHistoryLayer,
     projectLayer,
+    projectAnalyticsLayer,
     publicCatalogLayer,
   );
 }

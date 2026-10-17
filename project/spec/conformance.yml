@@ -5096,3 +5096,17 @@ requirements:
     proof_gap: Proved against SQLite over a real server through the browser helper with real fetch, including idempotent replay and a missing source file. No browser test drives the dialog, and no Postgres or deployed run exists.
     depends_on: [PUB-001, VER-001, FRK-010]
     evidence: []
+
+  - id: FRK-011
+    kind: behavior
+    behavior: A project's activity report counts its live artifacts, public artifacts, uploads, and page views, gives a sparse 365-day daily series of uploads and views and the ten most viewed artifacts of the last 30 days, and one artifact's report gives its 7-day, 30-day, and all-time views with a sparse 30-day series; both are read-only and built from versions and stored view rows.
+    owner: http-api
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-011-B, description: "Publish and view artifacts across three days 400 days apart with a pinned clock, and read the exact totals, the sparse series without the out-of-window day, the uploaded-today and viewed-today counts, the one-decimal average, the most viewed order, and one artifact's three windows and series."}
+      failure: {id: FRK-011-F, description: "A deleted artifact leaves every total, the series, and the ranking, its own report is 404, an artifact read through another project is 404, an empty project reports zeros, and a key without artifact read access is 403 on both reports."}
+    deployments: [local, single_server, kubernetes, cloudflare]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server. The Postgres and D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
+    depends_on: [FRK-008, FRK-010]
+    evidence: []

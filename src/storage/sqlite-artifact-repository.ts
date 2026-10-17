@@ -71,7 +71,10 @@ import {
   type ManifestEntry,
   type PageCursor,
   type PublishedVersion,
+  type ProjectActivityDays,
+  type ProjectActivityTotals,
   type PublicArtifactSummary,
+  type ViewedArtifact,
   type ProjectRecord,
   type RegisteredAgentPresence,
   type RegisteredAgentRecord,
@@ -114,6 +117,8 @@ import type {
   MarkDispatchDelivered,
   MarkDispatchFailed,
   ReadArtifactViewDays,
+  ReadMostViewedArtifacts,
+  ReadProjectActivityDays,
   RecordAgentActivity,
   RecordSourceFreshness,
   RegisterAgent,
@@ -294,6 +299,23 @@ const publicArtifactSummaryRowSchema = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string().nullable(),
+});
+const projectActivityTotalsRowSchema = z.object({
+  artifacts: z.number().int().nonnegative(),
+  artifactsViewedOnDay: z.number().int().nonnegative(),
+  pageViews: z.number().int().nonnegative(),
+  publicArtifacts: z.number().int().nonnegative(),
+  uploads: z.number().int().nonnegative(),
+});
+const dayCountRowSchema = z.object({
+  count: z.number().int().nonnegative(),
+  day: z.string(),
+});
+const viewedArtifactRowSchema = z.object({
+  artifactId: z.string(),
+  name: z.string(),
+  totalViews: z.number().int().nonnegative(),
+  windowViews: z.number().int().positive(),
 });
 const artifactListRowSchema = z.object({
   ...artifactRowColumns,
@@ -1893,6 +1915,99 @@ export class SqliteArtifactRepository implements
         .all(...artifactIds);
       return z.array(artifactViewTotalRowSchema).parse(rows);
     });
+  }
+
+  readProjectActivityTotals(
+    projectId: string,
+    day: string,
+  ): Promise<ProjectActivityTotals> {
+    return Promise.resolve().then(() =>
+      projectActivityTotalsRowSchema.parse(this.#database
+        .prepare(
+          `SELECT
+             COUNT(*) AS artifacts,
+             COALESCE(SUM(access_setting = 'public_link'), 0) AS publicArtifacts,
+             (
+               SELECT COUNT(*) FROM versions
+               JOIN artifacts live ON live.id = versions.artifact_id
+               WHERE live.project_id = ? AND live.deleted_at IS NULL
+             ) AS uploads,
+             (
+               SELECT COALESCE(SUM(artifact_views.count), 0) FROM artifact_views
+               JOIN artifacts live ON live.id = artifact_views.artifact_id
+               WHERE live.project_id = ? AND live.deleted_at IS NULL
+             ) AS pageViews,
+             (
+               SELECT COUNT(*) FROM artifact_views
+               JOIN artifacts live ON live.id = artifact_views.artifact_id
+               WHERE live.project_id = ? AND live.deleted_at IS NULL
+                 AND artifact_views.day = ? AND artifact_views.count > 0
+             ) AS artifactsViewedOnDay
+           FROM artifacts
+           WHERE project_id = ? AND deleted_at IS NULL`,
+        )
+        .get(projectId, projectId, projectId, day, projectId)));
+  }
+
+  readProjectActivityDays(
+    command: ReadProjectActivityDays,
+  ): Promise<ProjectActivityDays> {
+    return Promise.resolve().then(() => {
+      const uploads = this.#database
+        .prepare(
+          `SELECT substr(versions.created_at, 1, 10) AS day, COUNT(*) AS count
+           FROM versions
+           JOIN artifacts live ON live.id = versions.artifact_id
+           WHERE live.project_id = ? AND live.deleted_at IS NULL
+             AND substr(versions.created_at, 1, 10) BETWEEN ? AND ?
+           GROUP BY day
+           ORDER BY day`,
+        )
+        .all(command.projectId, command.sinceDay, command.untilDay);
+      const views = this.#database
+        .prepare(
+          `SELECT artifact_views.day AS day, SUM(artifact_views.count) AS count
+           FROM artifact_views
+           JOIN artifacts live ON live.id = artifact_views.artifact_id
+           WHERE live.project_id = ? AND live.deleted_at IS NULL
+             AND artifact_views.day BETWEEN ? AND ?
+           GROUP BY artifact_views.day
+           ORDER BY artifact_views.day`,
+        )
+        .all(command.projectId, command.sinceDay, command.untilDay);
+      return {
+        uploads: z.array(dayCountRowSchema).parse(uploads),
+        views: z.array(dayCountRowSchema).parse(views),
+      };
+    });
+  }
+
+  readMostViewedArtifacts(
+    command: ReadMostViewedArtifacts,
+  ): Promise<readonly ViewedArtifact[]> {
+    return Promise.resolve().then(() =>
+      z.array(viewedArtifactRowSchema).parse(this.#database
+        .prepare(
+          `SELECT
+             live.id AS artifactId,
+             live.name AS name,
+             SUM(CASE WHEN artifact_views.day BETWEEN ? AND ?
+               THEN artifact_views.count ELSE 0 END) AS windowViews,
+             SUM(artifact_views.count) AS totalViews
+           FROM artifacts live
+           JOIN artifact_views ON artifact_views.artifact_id = live.id
+           WHERE live.project_id = ? AND live.deleted_at IS NULL
+           GROUP BY live.id, live.name
+           HAVING windowViews > 0
+           ORDER BY windowViews DESC, totalViews DESC, live.id
+           LIMIT ?`,
+        )
+        .all(
+          command.sinceDay,
+          command.untilDay,
+          command.projectId,
+          command.limit,
+        )));
   }
 
   recordArtifactViews(

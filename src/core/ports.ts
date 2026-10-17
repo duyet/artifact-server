@@ -32,6 +32,8 @@ import type {
   PageCursor,
   PublishedVersion,
   ProjectRecord,
+  ProjectActivityDays,
+  ProjectActivityTotals,
   PublicArtifactSummary,
   RegisteredAgentKind,
   RegisteredAgentPresence,
@@ -41,6 +43,7 @@ import type {
   StagedUpload,
   VersionRecord,
   VersionContent,
+  ViewedArtifact,
 } from "./model.js";
 
 export interface StoredBlob {
@@ -731,6 +734,38 @@ export interface ArtifactViewRepository {
   recordArtifactViews(
     deltas: readonly ArtifactViewDelta[],
   ): Promise<void>;
+}
+
+/** Values used to read one project's activity inside one inclusive day window. */
+export interface ReadProjectActivityDays {
+  readonly projectId: string;
+  /** Inclusive first day of the window, as `YYYY-MM-DD`. */
+  readonly sinceDay: string;
+  /** Inclusive last day of the window, as `YYYY-MM-DD`. */
+  readonly untilDay: string;
+}
+
+/** Values used to rank one project's most viewed live artifacts. */
+export interface ReadMostViewedArtifacts extends ReadProjectActivityDays {
+  readonly limit: number;
+}
+
+/**
+ * Read-only aggregates over one project's live artifacts, their versions, and
+ * their stored view rows. Deleted artifacts never count.
+ */
+export interface ProjectActivityRepository {
+  readProjectActivityTotals(
+    projectId: string,
+    day: string,
+  ): Promise<ProjectActivityTotals>;
+  readProjectActivityDays(
+    command: ReadProjectActivityDays,
+  ): Promise<ProjectActivityDays>;
+  /** Artifacts with at least one view in the window, most viewed first. */
+  readMostViewedArtifacts(
+    command: ReadMostViewedArtifacts,
+  ): Promise<readonly ViewedArtifact[]>;
 }
 
 /** Persistent capabilities required by private browser content sessions. */

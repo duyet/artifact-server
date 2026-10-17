@@ -208,6 +208,37 @@ export interface ArtifactViewCounts {
   readonly total: number;
 }
 
+/** A count on one UTC day, as `YYYY-MM-DD`. */
+export interface DayCount {
+  readonly count: number;
+  readonly day: string;
+}
+
+/** Counts over one project's live artifacts. */
+export interface ProjectActivityTotals {
+  readonly artifacts: number;
+  /** Live artifacts with at least one view on the given day. */
+  readonly artifactsViewedOnDay: number;
+  readonly pageViews: number;
+  readonly publicArtifacts: number;
+  /** Every version of every live artifact. */
+  readonly uploads: number;
+}
+
+/** One project's sparse daily uploads and views inside a day window. */
+export interface ProjectActivityDays {
+  readonly uploads: readonly DayCount[];
+  readonly views: readonly DayCount[];
+}
+
+/** One live artifact ranked by the views it received inside a window. */
+export interface ViewedArtifact {
+  readonly artifactId: string;
+  readonly name: string;
+  readonly totalViews: number;
+  readonly windowViews: number;
+}
+
 /** A live public artifact with the facts the home page tree shows. */
 export interface PublicArtifactSummary {
   readonly accessSetting: AccessSetting;

@@ -166,6 +166,7 @@ import {
   PublicArtifactCatalogService,
   publicCatalogLimit,
 } from "../application/public-artifact-catalog.js";
+import {ProjectAnalyticsService} from "../application/project-analytics.js";
 import type {ArtifactViewRecorder} from
   "../application/artifact-view-recorder.js";
 import {observeHttpRequest} from "../observability/application-observability.js";
@@ -1852,6 +1853,35 @@ export function createHttpApp(
         version,
       )),
     });
+  });
+
+  app.get("/api/v1/analytics", async (context) => {
+    const report = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ProjectAnalyticsService.use((analytics) =>
+        analytics.readProjectActivity({
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json(report);
+  });
+
+  app.get("/api/v1/artifacts/:artifactId/analytics", async (context) => {
+    const report = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ProjectAnalyticsService.use((analytics) =>
+        analytics.readArtifactActivity({
+          artifactId: context.req.param("artifactId"),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json(report);
   });
 
   app.get("/api/v1/artifacts/:artifactId/actions", async (context) => {

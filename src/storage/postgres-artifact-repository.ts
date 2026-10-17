@@ -63,6 +63,8 @@ import {
   defaultProjectId,
   defaultProjectName,
   type PublishedVersion,
+  type ProjectActivityDays,
+  type ProjectActivityTotals,
   type ProjectRecord,
   type PublicArtifactSummary,
   type RegisteredAgentPresence,
@@ -71,6 +73,7 @@ import {
   type StagedUploadFile,
   type VersionContent,
   type VersionRecord,
+  type ViewedArtifact,
 } from "../core/model.js";
 import type {
   AgentDispatchRepository,
@@ -102,9 +105,12 @@ import type {
   ListCommentThreads,
   MarkDispatchDelivered,
   MarkDispatchFailed,
+  ProjectActivityRepository,
   PublicationSource,
   ProjectRepository,
   ReadArtifactViewDays,
+  ReadMostViewedArtifacts,
+  ReadProjectActivityDays,
   RecordAgentActivity,
   ArtifactViewDelta,
   RegisterAgent,
@@ -257,6 +263,23 @@ const artifactViewDayRowSchema = z.object({
 const artifactViewTotalRowSchema = z.object({
   artifactId: z.string(),
   count: nonnegativeIntegerSchema,
+});
+const projectActivityTotalsRowSchema = z.object({
+  artifacts: nonnegativeIntegerSchema,
+  artifactsViewedOnDay: nonnegativeIntegerSchema,
+  pageViews: nonnegativeIntegerSchema,
+  publicArtifacts: nonnegativeIntegerSchema,
+  uploads: nonnegativeIntegerSchema,
+});
+const dayCountRowSchema = z.object({
+  count: nonnegativeIntegerSchema,
+  day: z.string(),
+});
+const viewedArtifactRowSchema = z.object({
+  artifactId: z.string(),
+  name: z.string(),
+  totalViews: nonnegativeIntegerSchema,
+  windowViews: positiveIntegerSchema,
 });
 const publicArtifactSummaryRowSchema = z.object({
   accessSetting: accessSettingSchema,
@@ -566,6 +589,7 @@ export class PostgresArtifactRepository implements
   CommentRepository,
   ContentSessionRepository,
   GitHistoryMirrorStore,
+  ProjectActivityRepository,
   ProjectRepository,
   StagedUploadRepository
 {
@@ -1675,6 +1699,127 @@ export class PostgresArtifactRepository implements
         ],
       );
       return z.array(artifactViewDayRowSchema).parse(rows);
+    }));
+  }
+
+  async readProjectActivityTotals(
+    projectId: string,
+    day: string,
+  ): Promise<ProjectActivityTotals> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT
+           COUNT(*) AS "artifacts",
+           COUNT(*) FILTER (WHERE artifact.access_setting = 'public_link')
+             AS "publicArtifacts",
+           (
+             SELECT COUNT(*) FROM versions version
+             JOIN artifacts live
+               ON live.installation_id = version.installation_id
+              AND live.id = version.artifact_id
+             WHERE live.installation_id = $1 AND live.project_id = $2::text
+               AND live.deleted_at IS NULL
+           ) AS "uploads",
+           (
+             SELECT COALESCE(SUM(view.count), 0) FROM artifact_views view
+             JOIN artifacts live
+               ON live.installation_id = view.installation_id
+              AND live.id = view.artifact_id
+             WHERE live.installation_id = $1 AND live.project_id = $2::text
+               AND live.deleted_at IS NULL
+           ) AS "pageViews",
+           (
+             SELECT COUNT(*) FROM artifact_views view
+             JOIN artifacts live
+               ON live.installation_id = view.installation_id
+              AND live.id = view.artifact_id
+             WHERE live.installation_id = $1 AND live.project_id = $2::text
+               AND live.deleted_at IS NULL
+               AND view.day = $3::text AND view.count > 0
+           ) AS "artifactsViewedOnDay"
+         FROM artifacts artifact
+         WHERE artifact.installation_id = $1 AND artifact.project_id = $2::text
+           AND artifact.deleted_at IS NULL`,
+        [installationId, projectId, day],
+      );
+      return projectActivityTotalsRowSchema.parse(rows[0]);
+    }));
+  }
+
+  async readProjectActivityDays(
+    command: ReadProjectActivityDays,
+  ): Promise<ProjectActivityDays> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const uploads = yield* sql.unsafe<object>(
+        `SELECT LEFT(version.created_at, 10) AS "day", COUNT(*) AS "count"
+         FROM versions version
+         JOIN artifacts live
+           ON live.installation_id = version.installation_id
+          AND live.id = version.artifact_id
+         WHERE live.installation_id = $1 AND live.project_id = $2::text
+           AND live.deleted_at IS NULL
+           AND LEFT(version.created_at, 10) BETWEEN $3::text AND $4::text
+         GROUP BY LEFT(version.created_at, 10)
+         ORDER BY LEFT(version.created_at, 10)`,
+        [installationId, command.projectId, command.sinceDay, command.untilDay],
+      );
+      const views = yield* sql.unsafe<object>(
+        `SELECT view.day AS "day", SUM(view.count) AS "count"
+         FROM artifact_views view
+         JOIN artifacts live
+           ON live.installation_id = view.installation_id
+          AND live.id = view.artifact_id
+         WHERE live.installation_id = $1 AND live.project_id = $2::text
+           AND live.deleted_at IS NULL
+           AND view.day BETWEEN $3::text AND $4::text
+         GROUP BY view.day
+         ORDER BY view.day`,
+        [installationId, command.projectId, command.sinceDay, command.untilDay],
+      );
+      return {
+        uploads: z.array(dayCountRowSchema).parse(uploads),
+        views: z.array(dayCountRowSchema).parse(views),
+      };
+    }));
+  }
+
+  async readMostViewedArtifacts(
+    command: ReadMostViewedArtifacts,
+  ): Promise<readonly ViewedArtifact[]> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT
+           live.id AS "artifactId",
+           live.name AS "name",
+           SUM(CASE WHEN view.day BETWEEN $3::text AND $4::text
+             THEN view.count ELSE 0 END) AS "windowViews",
+           SUM(view.count) AS "totalViews"
+         FROM artifacts live
+         JOIN artifact_views view
+           ON view.installation_id = live.installation_id
+          AND view.artifact_id = live.id
+         WHERE live.installation_id = $1 AND live.project_id = $2::text
+           AND live.deleted_at IS NULL
+         GROUP BY live.id, live.name
+         HAVING SUM(CASE WHEN view.day BETWEEN $3::text AND $4::text
+           THEN view.count ELSE 0 END) > 0
+         ORDER BY "windowViews" DESC, "totalViews" DESC, live.id ASC
+         LIMIT $5::int`,
+        [
+          installationId,
+          command.projectId,
+          command.sinceDay,
+          command.untilDay,
+          command.limit,
+        ],
+      );
+      return z.array(viewedArtifactRowSchema).parse(rows);
     }));
   }
 

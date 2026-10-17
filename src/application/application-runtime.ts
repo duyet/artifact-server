@@ -20,6 +20,7 @@ import type {PublicLinkAdministrationService} from
   "./public-link-administration.js";
 import type {PublicArtifactCatalogService} from
   "./public-artifact-catalog.js";
+import type {ProjectAnalyticsService} from "./project-analytics.js";
 
 /** Application services shared by every Artifact Server entry point. */
 export type ApplicationServices =
@@ -37,6 +38,7 @@ export type ApplicationServices =
   | LinkedArtifactService
   | PublishArtifactService
   | ProjectManagementService
+  | ProjectAnalyticsService
   | ProjectGitHistoryService
   | PublicArtifactCatalogService
   | PublicLinkAdministrationService

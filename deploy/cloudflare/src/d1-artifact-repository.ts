@@ -68,6 +68,8 @@ import {
   type ManifestEntry,
   type PageCursor,
   type PublishedVersion,
+  type ProjectActivityDays,
+  type ProjectActivityTotals,
   type ProjectRecord,
   type RegisteredAgentPresence,
   type RegisteredAgentRecord,
@@ -75,6 +77,7 @@ import {
   type StagedUploadFile,
   type VersionContent,
   type VersionRecord,
+  type ViewedArtifact,
 } from "../../../src/core/model.js";
 import type {
   AgentDispatchRepository,
@@ -106,8 +109,11 @@ import type {
   ListCommentThreads,
   MarkDispatchDelivered,
   MarkDispatchFailed,
+  ProjectActivityRepository,
   PublicationSource,
   ProjectRepository,
+  ReadMostViewedArtifacts,
+  ReadProjectActivityDays,
   RecordAgentActivity,
   RegisterAgent,
   RenameProject,
@@ -307,6 +313,23 @@ const artifactViewDayRowSchema = z.object({
 const artifactViewTotalRowSchema = z.object({
   artifactId: z.string(),
   count: z.coerce.number().int().nonnegative(),
+});
+const projectActivityTotalsRowSchema = z.object({
+  artifacts: z.coerce.number().int().nonnegative(),
+  artifactsViewedOnDay: z.coerce.number().int().nonnegative(),
+  pageViews: z.coerce.number().int().nonnegative(),
+  publicArtifacts: z.coerce.number().int().nonnegative(),
+  uploads: z.coerce.number().int().nonnegative(),
+});
+const dayCountRowSchema = z.object({
+  count: z.coerce.number().int().nonnegative(),
+  day: z.string(),
+});
+const viewedArtifactRowSchema = z.object({
+  artifactId: z.string(),
+  name: z.string(),
+  totalViews: z.coerce.number().int().nonnegative(),
+  windowViews: z.coerce.number().int().positive(),
 });
 const publicArtifactSummaryRowSchema = z.object({
   accessSetting: accessSettingSchema,
@@ -630,7 +653,8 @@ interface PageResult<Item> {
 
 export type D1ArtifactRepository = AgentDispatchRepository & ArtifactRepository &
   ArtifactViewRepository & CommentRepository & ContentSessionRepository &
-  ProjectRepository & ProjectGitHistoryStore & GitHistoryMirrorStore &
+  ProjectActivityRepository & ProjectRepository & ProjectGitHistoryStore &
+  GitHistoryMirrorStore &
   GitHistoryPurgeStore & StagedUploadRepository & {
     readonly listPublicLinks: (
       command: ListPublicLinks,
@@ -2394,6 +2418,83 @@ export function createD1ArtifactRepository(
       `).bind(JSON.stringify(artifactIds), sinceDay, untilDay)
         .all<z.input<typeof artifactViewDayRowSchema>>();
       return z.array(artifactViewDayRowSchema).parse(result.results);
+    },
+    readProjectActivityTotals: async (
+      projectId,
+      day,
+    ): Promise<ProjectActivityTotals> => {
+      const row = await database.prepare(`
+        SELECT
+          COUNT(*) AS artifacts,
+          COALESCE(SUM(access_setting = 'public_link'), 0) AS publicArtifacts,
+          (
+            SELECT COUNT(*) FROM versions
+            JOIN artifacts live ON live.id = versions.artifact_id
+            WHERE live.project_id = ? AND live.deleted_at IS NULL
+          ) AS uploads,
+          (
+            SELECT COALESCE(SUM(artifact_views.count), 0) FROM artifact_views
+            JOIN artifacts live ON live.id = artifact_views.artifact_id
+            WHERE live.project_id = ? AND live.deleted_at IS NULL
+          ) AS pageViews,
+          (
+            SELECT COUNT(*) FROM artifact_views
+            JOIN artifacts live ON live.id = artifact_views.artifact_id
+            WHERE live.project_id = ? AND live.deleted_at IS NULL
+              AND artifact_views.day = ? AND artifact_views.count > 0
+          ) AS artifactsViewedOnDay
+        FROM artifacts
+        WHERE project_id = ? AND deleted_at IS NULL
+      `).bind(projectId, projectId, projectId, day, projectId)
+        .first<z.input<typeof projectActivityTotalsRowSchema>>();
+      return projectActivityTotalsRowSchema.parse(row);
+    },
+    readProjectActivityDays: async (command: ReadProjectActivityDays) => {
+      const [uploadsResult, viewsResult] = await database.batch([
+        database.prepare(`
+          SELECT substr(versions.created_at, 1, 10) AS day, COUNT(*) AS count
+          FROM versions
+          JOIN artifacts live ON live.id = versions.artifact_id
+          WHERE live.project_id = ? AND live.deleted_at IS NULL
+            AND substr(versions.created_at, 1, 10) BETWEEN ? AND ?
+          GROUP BY day
+          ORDER BY day
+        `).bind(command.projectId, command.sinceDay, command.untilDay),
+        database.prepare(`
+          SELECT artifact_views.day AS day, SUM(artifact_views.count) AS count
+          FROM artifact_views
+          JOIN artifacts live ON live.id = artifact_views.artifact_id
+          WHERE live.project_id = ? AND live.deleted_at IS NULL
+            AND artifact_views.day BETWEEN ? AND ?
+          GROUP BY artifact_views.day
+          ORDER BY artifact_views.day
+        `).bind(command.projectId, command.sinceDay, command.untilDay),
+      ]);
+      return {
+        uploads: z.array(dayCountRowSchema).parse(uploadsResult?.results ?? []),
+        views: z.array(dayCountRowSchema).parse(viewsResult?.results ?? []),
+      } satisfies ProjectActivityDays;
+    },
+    readMostViewedArtifacts: async (
+      command: ReadMostViewedArtifacts,
+    ): Promise<readonly ViewedArtifact[]> => {
+      const result = await database.prepare(`
+        SELECT
+          live.id AS artifactId,
+          live.name AS name,
+          SUM(CASE WHEN artifact_views.day BETWEEN ? AND ?
+            THEN artifact_views.count ELSE 0 END) AS windowViews,
+          SUM(artifact_views.count) AS totalViews
+        FROM artifacts live
+        JOIN artifact_views ON artifact_views.artifact_id = live.id
+        WHERE live.project_id = ? AND live.deleted_at IS NULL
+        GROUP BY live.id, live.name
+        HAVING windowViews > 0
+        ORDER BY windowViews DESC, totalViews DESC, live.id
+        LIMIT ?
+      `).bind(command.sinceDay, command.untilDay, command.projectId, command.limit)
+        .all<z.input<typeof viewedArtifactRowSchema>>();
+      return z.array(viewedArtifactRowSchema).parse(result.results);
     },
     readArtifactViewTotals: async (artifactIds) => {
       if (artifactIds.length === 0) return [];
