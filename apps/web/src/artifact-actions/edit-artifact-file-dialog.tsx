@@ -100,6 +100,22 @@ function EditorBody({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [conflict, setConflict] = useState<ArtifactVersion | null>(null);
+  // The server's advertised bound replaces the mirrored default once known.
+  const [maximumBytes, setMaximumBytes] = useState(maximumEditableBytes);
+
+  useEffect(() => {
+    let current = true;
+    api.session().then(
+      (session) => {
+        if (current) setMaximumBytes(session.capabilities.editing.maximumTextFileBytes);
+        return undefined;
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, []);
 
   const entries = useMemo(() => editableEntries(source.manifest.entries), [source]);
   const entry = entries.find((candidate) => candidate.path === path);
@@ -113,7 +129,7 @@ function EditorBody({
       setFile({status: "empty"});
       return undefined;
     }
-    if (entry.size > maximumEditableBytes) {
+    if (entry.size > maximumBytes) {
       setFile({size: entry.size, status: "too_large"});
       return undefined;
     }
@@ -141,7 +157,7 @@ function EditorBody({
     };
     void load();
     return () => controller.abort();
-  }, [artifact.id, entry, projectId, source.versionId, transport]);
+  }, [artifact.id, entry, maximumBytes, projectId, source.versionId, transport]);
 
   const decoded = file.status === "ready" ? file.decoded : null;
   const dirty = decoded !== null && text !== decoded.text;
@@ -149,7 +165,7 @@ function EditorBody({
     () => decoded === null ? 0 : encodeEditableText({...decoded, text}).byteLength,
     [decoded, text],
   );
-  const tooLarge = encodedSize > maximumEditableBytes;
+  const tooLarge = encodedSize > maximumBytes;
   const viewingOlderVersion = source.versionId !== source.currentVersionId;
   const canSave = decoded !== null && dirty && !tooLarge && !pending && conflict === null;
 
@@ -165,6 +181,7 @@ function EditorBody({
         bytes: encodeEditableText({...decoded, text}),
         expectedCurrentVersionId: source.currentVersionId,
         idempotencyKey: idempotencyKey.current,
+        maximumBytes,
         mediaType: entry.mediaType,
         path: entry.path,
         projectId,
@@ -276,6 +293,7 @@ function EditorBody({
             idempotencyKey.current = newActionKey("edit");
           }}
           text={text}
+          maximumBytes={maximumBytes}
           tooLarge={tooLarge}
         />
         {error === null ? null : (
@@ -312,11 +330,13 @@ function EditorBody({
 
 function FileBody({
   file,
+  maximumBytes,
   onTextChange,
   text,
   tooLarge,
 }: {
   readonly file: FileState;
+  readonly maximumBytes: number;
   readonly onTextChange: (text: string) => void;
   readonly text: string;
   readonly tooLarge: boolean;
@@ -335,7 +355,7 @@ function FileBody({
       <Alert variant="destructive">
         <AlertTitle>File is too large to edit</AlertTitle>
         <AlertDescription>
-          This file is {formatBytes(file.size)}. Files above {formatBytes(maximumEditableBytes)} must be republished from your coding agent.
+          This file is {formatBytes(file.size)}. Files above {formatBytes(maximumBytes)} must be republished from your coding agent.
         </AlertDescription>
       </Alert>
     );
@@ -361,7 +381,7 @@ function FileBody({
         wrap="off"
       />
       {tooLarge ? (
-        <FieldError>Edited files are limited to {formatBytes(maximumEditableBytes)}.</FieldError>
+        <FieldError>Edited files are limited to {formatBytes(maximumBytes)}.</FieldError>
       ) : null}
     </Field>
   );

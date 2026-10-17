@@ -20,6 +20,8 @@ export interface PublishEditInput {
   readonly expectedCurrentVersionId: string;
   readonly idempotencyKey: string;
   /** The base entry's media type, kept so the edit does not retype the file. */
+  /** The server's advertised bound; defaults to the mirrored constant. */
+  readonly maximumBytes?: number | undefined;
   readonly mediaType: string;
   readonly path: string;
   readonly projectId: string;
@@ -36,10 +38,11 @@ export async function publishEdit(
   transport: ActionTransport,
   input: PublishEditInput,
 ): Promise<ArtifactActionResult> {
-  if (input.bytes.byteLength > maximumEditableBytes) {
+  const maximumBytes = input.maximumBytes ?? maximumEditableBytes;
+  if (input.bytes.byteLength > maximumBytes) {
     throw new ApiError(
       "EDIT_TOO_LARGE",
-      `Edited files are limited to ${maximumEditableBytes} bytes.`,
+      `Edited files are limited to ${maximumBytes} bytes.`,
       413,
     );
   }
