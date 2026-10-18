@@ -1,7 +1,7 @@
 import {mkdir} from "node:fs/promises";
 import path from "node:path";
 
-import {chromium, type Page} from "@playwright/test";
+import {chromium, type Locator, type Page} from "@playwright/test";
 
 import {
   createTestInstallation,
@@ -22,7 +22,7 @@ const page = await context.newPage();
 
 try {
   await mkdir(outputDirectory, {recursive: true});
-  await page.goto(server.baseUrl);
+  await page.goto(`${server.baseUrl}/review`);
   await page.getByRole("link", {name: "Artifact Server"}).waitFor();
 
   await page.goto(`${server.baseUrl}/review/settings/projects`);
@@ -47,14 +47,18 @@ try {
     idempotencyKey: "frontend-screenshot-second",
   });
   await page.goto(`${server.baseUrl}/review?project=prj_default`);
-  await page.getByRole("heading", {name: "Release dashboard"}).waitFor();
+  await artifactLink(page).waitFor();
   await capture(page, "populated-artifacts.png");
 
+  // The gallery no longer opens an artifact by itself, so open it to capture
+  // the detail view.
+  await artifactLink(page).click();
+  await page.getByRole("heading", {level: 1, name: "Release dashboard"}).waitFor();
   await capture(page, "dark-artifact-detail.png");
 
   await page.setViewportSize({height: 844, width: 390});
   await page.goto(`${server.baseUrl}/review?project=prj_default`);
-  await page.getByRole("heading", {name: "Release dashboard"}).waitFor();
+  await artifactLink(page).waitFor();
   await capture(page, "narrow-artifacts.png");
 
   await page.setViewportSize({height: 900, width: 1440});
@@ -68,6 +72,14 @@ try {
   await browser.close();
   await server.stop();
   await removeTestInstallation(installation);
+}
+
+/** The gallery's link to the one published artifact. */
+function artifactLink(targetPage: Page): Locator {
+  return targetPage.locator("#main-content").getByRole("link", {
+    exact: true,
+    name: "Release dashboard",
+  });
 }
 
 async function capture(targetPage: Page, name: string): Promise<void> {

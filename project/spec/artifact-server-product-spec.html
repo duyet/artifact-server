@@ -1589,7 +1589,7 @@
           </article>
           <article class="answer">
             <span class="answer-label">Agents</span>
-            <p class="answer-value">MCP, the command-line program, and normal web requests use the same artifact operations and permissions. The command-line program handles files on the user's computer. MCP or the command-line program handles work that only needs server data. Local MCP setup uses <code>artifactserver connect</code> without a visible key. Remote command-line setup uses <code>artifactserver auth login</code> and browser sign-in when the server supports it.</p>
+            <p class="answer-value">MCP, the command-line program, and normal web requests use the same artifact operations and permissions. The command-line program handles files on the user's computer. MCP or the command-line program handles work that only needs server data. MCP setup uses an API key created in the web app. Remote command-line setup uses <code>artifactserver auth login &lt;server&gt; --api-key-stdin</code> with an administrator-issued key.</p>
           </article>
           <article class="answer">
             <span class="answer-label">Sending annotations to an agent</span>
@@ -1804,7 +1804,7 @@
                 </p>
                 <p>
                   The manifest is serialized in one fixed order and hashed. That manifest digest,
-                  not an operating-system directory walk or Git commit, is the portable identity of
+                  not an operating-system directory walk, is the portable identity of
                   the saved file set and the basis for comparison and idempotency checks.
                 </p>
               </div>
@@ -1902,26 +1902,8 @@
                   release reports that the file changed and shows its old and new size and
                   fingerprint. It does not build image-comparison, PDF-comparison, archive-preview,
                   or media-conversion interfaces. Unchanged files reuse the stored copy with the
-                  same fingerprint. Without Git, the extra cost is small version metadata plus work
+                  same fingerprint. The extra cost is small version metadata plus work
                   performed only when someone requests a comparison.
-                </p>
-              </div>
-            </article>
-            <article class="feature-row">
-              <h3>Optional Git handoff</h3>
-              <div class="feature-copy">
-                <p>
-                  Private Git handoff is off by default. An operator can explicitly make Cloudflare
-                  Artifacts available, but configuration alone copies nothing. Every project starts
-                  with Git history off. An administrator reviews a current-inventory estimate before
-                  explicitly enabling one project; existing and future projects remain off until
-                  each is enabled.
-                </p>
-                <p class="feature-note">
-                  Every enabled artifact, including one document, gets its own repository and each
-                  saved version maps to one commit. Git is never required for saving, opening, or
-                  comparing artifacts. Cloudflare Artifacts is the first managed provider; local,
-                  code.storage, and private-remote adapters remain future options.
                 </p>
               </div>
             </article>
@@ -1977,9 +1959,8 @@
               One Artifact Server installation contains one closed group of people. This is a
               single-organization model without an organization list or organization switcher: the
               installation itself is the group. On a laptop, that can be one implicit local user.
-              On a team server, an administrator controls who can sign in through invitations or
-              the configured company login, which can be WorkOS AuthKit or any OpenID Connect
-              provider the team already runs. The product has no public self-sign-up and does not host
+              On a team server, an administrator controls who can sign in by creating members
+              and issuing their API keys. The product has no public self-sign-up and does not host
               several organizations inside one installation.
             </p>
           </div>
@@ -2333,7 +2314,7 @@
             <p>
               The browser, MCP, command-line program, and normal web requests from software call the same application services and follow the same rules for sign-in, sharing, versions,
               comparisons, and publishing. These ways of calling the server intentionally overlap. Where a file exists decides which one works: the command-line program can read files on the user's computer; a remote MCP server cannot. Small pieces of code connect those rules to the database,
-              file storage, and an optional Git provider selected by explicit installation configuration.
+              and file storage.
             </p>
           </div>
 
@@ -2341,8 +2322,7 @@
             <div class="architecture-top">
               <strong class="architecture-title" id="system-diagram-title">System boundaries and data flow</strong>
               <p class="architecture-caption">
-                Saved versions and comparisons work in every deployment. Git is an optional private
-                copy of the same history.
+                Saved versions and comparisons work in every deployment.
               </p>
             </div>
             <div class="diagram-stack">
@@ -2354,7 +2334,7 @@
                 <div class="diagram-scroll">
                   <svg class="architecture-diagram" viewBox="0 0 1040 570" role="img" aria-labelledby="runtime-title runtime-desc">
                     <title id="runtime-title">Artifact Server runtime architecture</title>
-                    <desc id="runtime-desc">People and agents call the Artifact Server application. One installation contains projects, projects contain artifacts, and artifacts contain immutable versions. The application stores records and files, computes comparisons, and serves artifacts from an isolated content address. Optional Git stores a private history copy. Plannotator remains a separate product that owns its organization membership, project and workspace records, comments, and review state; each Plannotator project pairs with one Artifact Server project.</desc>
+                    <desc id="runtime-desc">People and agents call the Artifact Server application. One installation contains projects, projects contain artifacts, and artifacts contain immutable versions. The application stores records and files, computes comparisons, and serves artifacts from an isolated content address. Plannotator remains a separate product that owns its organization membership, project and workspace records, comments, and review state; each Plannotator project pairs with one Artifact Server project.</desc>
                     <defs>
                       <marker id="arrow-required" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
                         <path d="M0,0 L8,4 L0,8 Z" fill="currentColor"></path>
@@ -2405,8 +2385,7 @@
 
                     <rect class="svg-node" x="498" y="392" width="202" height="94" rx="8"></rect>
                     <text class="svg-title" x="518" y="424">Background work</text>
-                    <text class="svg-copy" x="518" y="448">Staging cleanup and optional</text>
-                    <text class="svg-copy" x="518" y="467">Git copy retries</text>
+                    <text class="svg-copy" x="518" y="448">Staging cleanup</text>
 
                     <rect class="svg-boundary" x="770" y="32" width="242" height="174" rx="14"></rect>
                     <text class="svg-label" x="794" y="62">ISOLATED VERSION ORIGIN</text>
@@ -2415,11 +2394,6 @@
                     <text class="svg-copy" x="814" y="144">HTML, files and downloads</text>
                     <text class="svg-small" x="814" y="164">Unique host · read-only</text>
 
-                    <rect class="svg-boundary-optional" x="770" y="234" width="242" height="126" rx="14"></rect>
-                    <text class="svg-label" x="794" y="264">OPTIONAL PRIVATE GIT</text>
-                    <rect class="svg-node-store" x="794" y="282" width="194" height="54" rx="8"></rect>
-                    <text class="svg-title" x="814" y="314">Git handoff provider</text>
-                    <text class="svg-small" x="814" y="330">Cloudflare Artifacts · off by default</text>
 
                     <rect class="svg-boundary-optional" x="770" y="388" width="242" height="144" rx="14"></rect>
                     <text class="svg-label" x="794" y="418">SEPARATE PRODUCT</text>
@@ -2441,8 +2415,6 @@
                     <path class="svg-line" d="M498 286 H474 V439 H450" marker-end="url(#arrow-required)"></path>
                     <path class="svg-line" d="M700 286 H742 V133 H794" marker-end="url(#arrow-required)"></path>
                     <text class="svg-small" x="710" y="273">READ FILES</text>
-                    <path class="svg-line-optional" d="M700 439 H742 V309 H794" marker-end="url(#arrow-optional)"></path>
-                    <text class="svg-small" x="748" y="368">COPY AFTER SAVE</text>
                     <path class="svg-line-optional" d="M770 472 H742 V160 H700" marker-start="url(#arrow-optional)" marker-end="url(#arrow-optional)"></path>
                     <text class="svg-small" transform="translate(756 455) rotate(-90)">SERVICE REQUESTS + IDS</text>
                   </svg>
@@ -2457,12 +2429,12 @@
               <div class="diagram-shell">
                 <div class="diagram-heading">
                   <strong>What happens when version 12 is published</strong>
-                  <span>The browser link becomes available before an optional Git copy finishes.</span>
+                  <span>Version 12 can open as soon as its record and files are saved.</span>
                 </div>
                 <div class="diagram-scroll">
-                  <svg class="architecture-diagram" viewBox="0 0 1040 420" role="img" aria-labelledby="publish-title publish-desc">
+                  <svg class="architecture-diagram" viewBox="0 0 780 420" role="img" aria-labelledby="publish-title publish-desc">
                     <title id="publish-title">Publishing and version comparison sequence</title>
-                    <desc id="publish-desc">A client publishes version 12. Artifact Server saves its records and files, returns stable links, and can compare version 11 with version 12. When enabled, Git receives an asynchronous private copy that may retry without blocking publication.</desc>
+                    <desc id="publish-desc">A client publishes version 12. Artifact Server saves its records and files, returns stable links, and can compare version 11 with version 12.</desc>
                     <defs>
                       <marker id="sequence-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
                         <path d="M0,0 L8,4 L0,8 Z" fill="currentColor"></path>
@@ -2475,14 +2447,10 @@
                     <text class="svg-title" x="298" y="67">Artifact application</text>
                     <rect class="svg-node-store" x="546" y="34" width="184" height="56" rx="8"></rect>
                     <text class="svg-title" x="566" y="67">Primary storage</text>
-                    <rect class="svg-boundary-optional" x="808" y="24" width="202" height="76" rx="10"></rect>
-                    <text class="svg-title" x="832" y="59">Optional Git provider</text>
-                    <text class="svg-small" x="832" y="80">PRIVATE COPY</text>
 
                     <line class="svg-divider" x1="115" y1="90" x2="115" y2="386"></line>
                     <line class="svg-divider" x1="373" y1="90" x2="373" y2="386"></line>
                     <line class="svg-divider" x1="638" y1="90" x2="638" y2="386"></line>
-                    <line class="svg-divider" x1="909" y1="100" x2="909" y2="386"></line>
 
                     <circle class="svg-node-primary" cx="54" cy="136" r="14"></circle>
                     <text class="svg-small" x="50" y="140">1</text>
@@ -2505,11 +2473,6 @@
                     <text class="svg-copy" x="152" y="296">Return main link and version link</text>
                     <text class="svg-small" x="152" y="317">VERSION 12 CAN NOW OPEN</text>
 
-                    <circle class="svg-node-store" cx="844" cy="196" r="14"></circle>
-                    <text class="svg-small" x="840" y="200">5</text>
-                    <path class="svg-line-optional" d="M638 196 H909" marker-end="url(#sequence-arrow)"></path>
-                    <text class="svg-copy" x="686" y="186">Copy commit after save</text>
-                    <text class="svg-small" x="725" y="211">RETRY ON FAILURE</text>
 
                     <rect class="svg-node" x="278" y="346" width="452" height="48" rx="8"></rect>
                     <text class="svg-title" x="298" y="376">Compare version 11 with version 12 from primary storage</text>
@@ -2520,7 +2483,6 @@
             </div>
             <div class="architecture-rules">
               <span class="architecture-rule"><b>Rule 01</b> Browser, MCP, and software requests follow the same rules.</span>
-              <span class="architecture-rule"><b>Rule 02</b> Saved versions and comparisons do not depend on Git.</span>
               <span class="architecture-rule"><b>Rule 03</b> Large files upload directly to file storage.</span>
               <span class="architecture-rule"><b>Rule 04</b> Artifact JavaScript cannot use the application login.</span>
             </div>
@@ -2544,104 +2506,6 @@
                   intentionally keeps committed or orphaned blobs. Reference garbage collection is
                   added only after a lease-based or mark-and-sweep design survives crash, retry, and
                   concurrent-publish tests.
-                </p>
-              </div>
-            </details>
-            <details>
-              <summary>How optional Git handoff works</summary>
-              <div class="detail-body">
-                <p>
-                  Artifact Server always saves the version record, file list, fingerprints, and
-                  published files first. A configured provider is only available infrastructure; it
-                  creates no repository and copies no version. When an enabled project's version is
-                  durable, the server copies it in the background into one private repository for
-                  that artifact. Each saved version maps to one commit, and the database records the
-                  Git commit identifier.
-                </p>
-                <p>
-                  Git never supplies the files used to open the artifact. If the Git provider is
-                  unavailable, the saved version remains available and the server retries the Git copy.
-                </p>
-                <pre><code>ARTIFACT_SERVER_GIT_HISTORY_PROVIDER=off
-# Explicit opt-in when the installation has access:
-ARTIFACT_SERVER_GIT_HISTORY_PROVIDER=cloudflare-artifacts</code></pre>
-                <p>
-                  The variable is absent or <code>off</code> by default, and there is no
-                  <code>auto</code> value. Off means no Git implementation, binding, credential, or
-                  provider request. The Cloudflare runtime uses a configured Workers binding; other
-                  runtimes use Cloudflare's REST control plane with operator-supplied credentials.
-                </p>
-                <div class="table-wrap" role="region" aria-label="Optional Git handoff configuration" tabindex="0">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Configuration</th>
-                        <th>Behavior</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td><code>off</code> or absent</td>
-                        <td>Normal Artifact Server behavior without Git. This is the default everywhere.</td>
-                      </tr>
-                      <tr>
-                        <td><code>cloudflare-artifacts</code></td>
-                        <td>Makes one dedicated <a href="https://developers.cloudflare.com/artifacts/">Cloudflare Artifacts</a> namespace available. It enables no project and creates no repository by itself.</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p>
-                  Every project has one durable Git-history switch, and it starts off. An
-                  administrator first sees a current-inventory estimate for repositories,
-                  versions, operations, copied bytes, and pointer bytes. Enabling that project
-                  schedules a bounded, resumable backfill. There is no installation-wide mode,
-                  inheritance rule, or automatic enablement for future projects. Browser, HTTP,
-                  and MCP use the same authorized, naturally idempotent project operation.
-                </p>
-                <p>
-                  Disabling a project or provider stops applicable mirror work but does not delete
-                  remote repositories, jobs, or mappings; re-enabling the same project and provider
-                  resumes. Changing the persisted provider account or namespace after repositories
-                  exist requires a separate migration instead of silently moving or deleting history.
-                </p>
-                <p>
-                  Permanent removal uses an operator-only
-                  <code>artifactserver history purge</code> plan/apply command with exact
-                  installation-ID confirmation. It is resumable and cannot delete primary artifact
-                  data or the Cloudflare namespace. No purge surface exists in HTTP, MCP, or the
-                  member application.
-                </p>
-                <p>
-                  Authenticated HTTP and MCP capability discovery separately reports provider state
-                  and each project's disabled, waiting, backfilling, ready, degraded, or
-                  budget-limited state. It never exposes credentials or repository coordinates. Git
-                  provider health never controls the application's readiness check.
-                </p>
-                <p>
-                  Deterministic per-file and per-version limits leave excluded bytes in the normal
-                  file store while path, media type, size, and fingerprint stay in the Git pointer
-                  manifest. An optional logical copied-byte budget pauses new provider writes before
-                  overshoot without affecting saved versions. Cloudflare Artifacts currently
-                  <a href="https://developers.cloudflare.com/artifacts/platform/limits/">limits each repository to 10 GB</a>
-                  and its <a href="https://developers.cloudflare.com/artifacts/platform/pricing/">published pricing</a>
-                  requires Workers Paid and bills aggregate operations and storage, not a per-repository
-                  fee. Estimates are guidance rather than invoice guarantees.
-                </p>
-                <p>
-                  Each installation environment persists one exclusive Cloudflare account and
-                  namespace identity. The adapter has no account-wide or namespace-delete operation.
-                  Live tests use a separate <code>artifact-server-test-</code> namespace, unique
-                  run-prefixed repositories, a separate revocable token, hard bounds, and cleanup
-                  restricted to a durable run manifest. Existing namespaces such as
-                  <code>workspaces</code> remain outside that route and cleanup boundary, although
-                  the Cloudflare control credential and billing remain account-wide. Access is not
-                  universal, so the product remains complete when the provider is unavailable or
-                  disabled.
-                </p>
-                <p>
-                  Git repositories remain private. A public artifact link never grants Git access
-                  or exposes earlier versions through a Git remote.
                 </p>
               </div>
             </details>
@@ -2727,15 +2591,14 @@ v12-7f3a.content.example.net</code></pre>
         <section class="section" id="mcp" aria-labelledby="mcp-title">
           <div class="section-heading">
             <span class="section-label">AI agent access</span>
-            <h2 id="mcp-title">MCP connection, sign-in, and publishing</h2>
+            <h2 id="mcp-title">MCP connection, API keys, and publishing</h2>
             <p>
-              A remote AI client connects to one address: <code>/mcp</code>. On an external-storage server, its
-              first request opens browser sign-in and approval. After approval, the client receives
-              a short-lived credential that works only with this Artifact Server. On a laptop, the
-              user runs <code>artifactserver connect</code>. The registered stdio bridge retrieves a
-              private local credential automatically and forwards to the same loopback
-              <code>/mcp</code> endpoint. The credential is never printed or put in client
-              configuration. MCP sends publishing instructions and small results; large website
+              A remote AI client connects to one address: <code>/mcp</code>. On a team server, the client sends
+              an administrator-issued, scoped API key that works only with this Artifact Server. On a laptop, the
+              local owner creates an API key in the web app under Settings &rsaquo; API keys and the client
+              sends it to the local <code>/mcp</code> endpoint
+              (<code>http://localhost:8787/mcp</code> from <code>artifactserver start</code>). MCP sends
+              publishing instructions and small results; large website
               and file uploads use the normal upload path.
             </p>
           </div>
@@ -2746,43 +2609,41 @@ v12-7f3a.content.example.net</code></pre>
                 <tr><th>Condition</th><th>What the person does</th></tr>
               </thead>
               <tbody>
-                <tr><td>Local laptop</td><td>Install Artifact Server and run <code>artifactserver connect</code>. No browser, Docker, visible token, copied key, or startup-log step.</td></tr>
-                <tr><td>Hosted or team server with compatible MCP OAuth</td><td>Add the server's <code>/mcp</code> address, approve sign-in in the browser, then return to the AI client.</td></tr>
-                <tr><td>Private-network server with compatible MCP OAuth</td><td>Connect to the company network or VPN first, then use the same address and browser approval. Sign-in does not change network access.</td></tr>
-                <tr><td>Self-hosted server without compatible MCP OAuth</td><td>An administrator creates a scoped API key in an administration interface or CLI. Keys never come from startup logs.</td></tr>
+                <tr><td>Local laptop</td><td>Run <code>artifactserver start</code> (default <code>http://localhost:8787/mcp</code>) or <code>artifactserver open</code>, which starts a managed local service on a random port and prints its address. The local owner, who is an administrator, creates an API key under Settings &rsaquo; API keys and the client sends it as <code>Authorization: Bearer &lt;key&gt;</code>.</td></tr>
+                <tr><td>Team or self-hosted server</td><td>An administrator creates a scoped API key in an administration interface or CLI. The developer enters it once through the AI client's secret input and points the client at <code>&lt;origin&gt;/mcp</code>. For a private network, connect to the company network or VPN first; the key does not change network access. Keys never come from startup logs.</td></tr>
                 <tr><td>CI or unattended agents</td><td>An administrator creates a scoped service key and puts it in the deployment's secret manager. No browser is involved.</td></tr>
               </tbody>
             </table>
           </div>
 
           <aside class="callout">
-            <strong>Local commands are part of the release contract.</strong>
+            <strong>Every connection is HTTP MCP with an API key.</strong>
             <p>
-              <code>artifactserver connect</code> installs and verifies the bridge,
-              <code>artifactserver disconnect</code> removes its client registration, and
-              <code>artifactserver doctor</code> checks the service and registration without
-              revealing credentials. Account-required artifact links still use normal browser
+              For example, <code>claude mcp add --transport http artifact-server
+              http://localhost:8787/mcp --header "Authorization: Bearer &lt;key&gt;"</code>.
+              Artifact Server does not register MCP connections in AI clients and has no stdio
+              transport. Account-required artifact links still use normal browser
               sign-in; MCP credentials never become browser cookies.
             </p>
           </aside>
 
           <figure class="architecture" aria-labelledby="mcp-auth-diagram-title">
             <div class="architecture-top">
-              <strong class="architecture-title" id="mcp-auth-diagram-title">Remote connection and browser sign-in</strong>
+              <strong class="architecture-title" id="mcp-auth-diagram-title">Remote connection with an API key</strong>
               <p class="architecture-caption">
-                Artifact Server tells the client where to sign in. WorkOS is the proposed hosted
-                service. A private installation can use another compatible authorization service.
+                An administrator issues a scoped key. The client sends it with every request.
+                Artifact Server checks it before any product code runs.
               </p>
             </div>
             <div class="diagram-shell">
               <div class="diagram-heading">
                 <strong>Connection flow</strong>
-                <span>The access credential is valid only for the exact Artifact Server address.</span>
+                <span>A key belongs to one member or service principal of one installation.</span>
               </div>
               <div class="diagram-scroll">
                 <svg class="architecture-diagram" viewBox="0 0 1040 550" role="img" aria-labelledby="mcp-flow-title mcp-flow-desc">
-                  <title id="mcp-flow-title">MCP connection and authorization flow</title>
-                  <desc id="mcp-flow-desc">An AI client contacts Artifact Server, reads its sign-in instructions, opens a browser at the configured sign-in service, receives a credential for this Artifact Server, and then calls publishing tools. Large file bytes upload separately to file storage.</desc>
+                  <title id="mcp-flow-title">MCP connection and authentication flow</title>
+                  <desc id="mcp-flow-desc">An administrator issues a scoped API key. An AI client sends it as a bearer credential to Artifact Server, which checks the key and then calls publishing tools. Large file bytes upload separately to file storage.</desc>
                   <defs>
                     <marker id="mcp-auth-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
                       <path d="M0,0 L8,4 L0,8 Z" style="fill: var(--code-ink)"></path>
@@ -2798,21 +2659,21 @@ v12-7f3a.content.example.net</code></pre>
                   <text class="svg-title" x="72" y="114">Codex or Claude</text>
                   <text class="svg-copy" x="72" y="138">Stores the server address</text>
                   <rect class="svg-node" x="52" y="190" width="170" height="118" rx="8"></rect>
-                  <text class="svg-title" x="72" y="220">OAuth client</text>
-                  <text class="svg-copy" x="72" y="244">Opens the browser</text>
-                  <text class="svg-copy" x="72" y="264">proves it started sign-in</text>
-                  <text class="svg-small" x="72" y="287">PKCE · refresh · revoke</text>
+                  <text class="svg-title" x="72" y="220">Secret input</text>
+                  <text class="svg-copy" x="72" y="244">Holds the API key</text>
+                  <text class="svg-copy" x="72" y="264">entered once</text>
+                  <text class="svg-small" x="72" y="287">NOT IN PROJECT FILES</text>
 
                   <text class="svg-label" x="292" y="34">ARTIFACT SERVER</text>
                   <rect class="svg-boundary" x="292" y="54" width="420" height="432" rx="12"></rect>
                   <rect class="svg-node-primary" x="318" y="84" width="176" height="92" rx="8"></rect>
                   <text class="svg-title" x="338" y="116">POST /mcp</text>
-                  <text class="svg-copy" x="338" y="140">Returns sign-in instructions</text>
-                  <text class="svg-small" x="338" y="159">when no credential is present</text>
+                  <text class="svg-copy" x="338" y="140">Reads the bearer key</text>
+                  <text class="svg-small" x="338" y="159">no key: 401 Bearer</text>
                   <rect class="svg-node-auth" x="510" y="84" width="176" height="92" rx="8"></rect>
-                  <text class="svg-title" x="530" y="116">Credential check</text>
-                  <text class="svg-copy" x="530" y="140">Issuer · server address</text>
-                  <text class="svg-small" x="530" y="159">expiry · signature · user</text>
+                  <text class="svg-title" x="530" y="116">Key check</text>
+                  <text class="svg-copy" x="530" y="140">Digest · expiry · revoked</text>
+                  <text class="svg-small" x="530" y="159">installation · capabilities</text>
                   <rect class="svg-node-primary" x="318" y="236" width="368" height="92" rx="8"></rect>
                   <text class="svg-title" x="338" y="268">Artifact product rules</text>
                   <text class="svg-copy" x="338" y="292">Permissions, publish, versions, access settings and comparisons</text>
@@ -2821,61 +2682,50 @@ v12-7f3a.content.example.net</code></pre>
                   <text class="svg-title" x="338" y="418">Direct upload storage</text>
                   <text class="svg-copy" x="338" y="440">Website and file bytes do not pass through MCP messages</text>
 
-                  <text class="svg-label" x="758" y="34">SIGN-IN SERVICE</text>
+                  <text class="svg-label" x="758" y="34">ADMINISTRATOR</text>
                   <rect class="svg-boundary-optional" x="758" y="54" width="254" height="304" rx="12"></rect>
                   <rect class="svg-node-auth" x="782" y="84" width="206" height="92" rx="8"></rect>
-                  <text class="svg-title" x="802" y="116">Browser sign-in</text>
-                  <text class="svg-copy" x="802" y="140">WorkOS for hosted service</text>
-                  <text class="svg-small" x="802" y="159">or a compatible private service</text>
+                  <text class="svg-title" x="802" y="116">Issue key</text>
+                  <text class="svg-copy" x="802" y="140">Scoped user or service key</text>
+                  <text class="svg-small" x="802" y="159">shown once · revocable</text>
                   <rect class="svg-node-auth" x="782" y="216" width="206" height="92" rx="8"></rect>
-                  <text class="svg-title" x="802" y="248">Issue credential</text>
-                  <text class="svg-copy" x="802" y="272">Only for this /mcp address</text>
-                  <text class="svg-small" x="802" y="291">short life · renewable · revocable</text>
+                  <text class="svg-title" x="802" y="248">Rotate or revoke</text>
+                  <text class="svg-copy" x="802" y="272">Ends the key at once</text>
+                  <text class="svg-small" x="802" y="291">and its browser sessions</text>
 
                   <path class="svg-line" d="M222 122 H318" marker-end="url(#mcp-auth-arrow)"></path>
                   <circle class="svg-step" cx="266" cy="122" r="13"></circle>
                   <text class="svg-step-number" x="266" y="126">1</text>
-                  <text class="svg-small" x="236" y="103">first request</text>
+                  <text class="svg-small" x="236" y="103">request + key</text>
 
-                  <path class="svg-line" d="M318 154 H246 V206 H222" marker-end="url(#mcp-auth-arrow)"></path>
-                  <circle class="svg-step" cx="246" cy="180" r="13"></circle>
-                  <text class="svg-step-number" x="246" y="184">2</text>
-                  <text class="svg-small" x="262" y="184">sign-in location</text>
+                  <path class="svg-line" d="M494 130 H510" marker-end="url(#mcp-auth-arrow)"></path>
+                  <circle class="svg-step" cx="502" cy="178" r="13"></circle>
+                  <text class="svg-step-number" x="502" y="182">2</text>
 
-                  <path class="svg-line-optional" d="M222 244 H744 V130 H782" marker-end="url(#mcp-auth-arrow-optional)"></path>
-                  <circle class="svg-step" cx="734" cy="244" r="13"></circle>
-                  <text class="svg-step-number" x="734" y="248">3</text>
-                  <text class="svg-small" x="602" y="229">browser opens; user signs in and approves</text>
-
-                  <path class="svg-line-optional" d="M782 272 H744 V326 H222 V282" marker-end="url(#mcp-auth-arrow-optional)"></path>
-                  <circle class="svg-step" cx="734" cy="326" r="13"></circle>
-                  <text class="svg-step-number" x="734" y="330">4</text>
-                  <text class="svg-small" x="556" y="346">client receives and stores the credential</text>
-
-                  <path class="svg-line" d="M222 300 H276 V130 H510" marker-end="url(#mcp-auth-arrow)"></path>
-                  <circle class="svg-step" cx="276" cy="300" r="13"></circle>
-                  <text class="svg-step-number" x="276" y="304">5</text>
-                  <text class="svg-small" x="52" y="340">Later MCP calls include the credential</text>
+                  <path class="svg-line-optional" d="M782 130 H686" marker-end="url(#mcp-auth-arrow-optional)"></path>
+                  <circle class="svg-step" cx="734" cy="130" r="13"></circle>
+                  <text class="svg-step-number" x="734" y="134">3</text>
+                  <text class="svg-small" x="700" y="111">key digest</text>
 
                   <path class="svg-line" d="M598 176 V210 H502 V236" marker-end="url(#mcp-auth-arrow)"></path>
                   <circle class="svg-step" cx="550" cy="210" r="13"></circle>
-                  <text class="svg-step-number" x="550" y="214">6</text>
-                  <text class="svg-small" x="568" y="214">verified user and permissions</text>
+                  <text class="svg-step-number" x="550" y="214">4</text>
+                  <text class="svg-small" x="568" y="214">verified principal and permissions</text>
 
                   <path class="svg-line" d="M502 328 V388" marker-end="url(#mcp-auth-arrow)"></path>
                   <circle class="svg-step" cx="502" cy="358" r="13"></circle>
-                  <text class="svg-step-number" x="502" y="362">7</text>
+                  <text class="svg-step-number" x="502" y="362">5</text>
                   <text class="svg-small" x="520" y="363">direct upload plan</text>
 
                   <rect class="svg-boundary" x="28" y="394" width="218" height="92" rx="12"></rect>
                   <text class="svg-label" x="52" y="423">LAPTOP MODE</text>
                   <text class="svg-title" x="52" y="450">Local helper + local token</text>
-                  <text class="svg-copy" x="52" y="470">No browser OAuth is required.</text>
+                  <text class="svg-copy" x="52" y="470">No API key is required.</text>
                 </svg>
               </div>
               <div class="diagram-legend" aria-label="MCP connection diagram legend">
                 <span><i class="diagram-key" aria-hidden="true"></i>Required Artifact Server path</span>
-                <span><i class="diagram-key optional" aria-hidden="true"></i>Replaceable sign-in provider</span>
+                <span><i class="diagram-key optional" aria-hidden="true"></i>Administrator action</span>
               </div>
             </div>
           </figure>
@@ -3052,10 +2902,10 @@ v12-7f3a.content.example.net</code></pre>
                   they are never written into the project file.
                 </p>
                 <p>
-                  The two credential stores are intentionally separate. <code>artifactserver
-                  connect</code> registers MCP in an AI client. <code>artifactserver auth login
-                  &lt;server&gt;</code> signs the command-line program into an exact server origin,
-                  opens browser approval when supported, and stores the renewable credential in
+                  The two credential stores are intentionally separate. An AI client keeps its
+                  MCP API key in its own configuration. <code>artifactserver auth login
+                  &lt;server&gt;</code> signs the command-line program into an exact server origin
+                  with an API key read from standard input and stores it in
                   the operating-system credential store. Local mode uses private user-only state
                   without browser login or a visible key. CI uses a scoped service credential from
                   its secret manager.
@@ -3127,7 +2977,7 @@ v12-7f3a.content.example.net</code></pre>
               </div>
             </details>
             <details open>
-              <summary>Deployment choices for MCP sign-in</summary>
+              <summary>Deployment choices for MCP authentication</summary>
               <div class="detail-body">
                 <div class="table-wrap" role="region" aria-label="MCP authorization choices" tabindex="0">
                   <table>
@@ -3140,14 +2990,9 @@ v12-7f3a.content.example.net</code></pre>
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Hosted Artifact Server</td>
-                        <td>WorkOS AuthKit</td>
-                        <td>Add the server address, sign in and approve in the browser, then return to the AI client.</td>
-                      </tr>
-                      <tr>
                         <td>Private or self-hosted server</td>
                         <td>Server API key</td>
-                        <td>Configure a revocable key. A compatible company authorization service may replace it. Better Auth is a candidate for optional built-in browser authorization after its current beta MCP path passes testing.</td>
+                        <td>An administrator issues a revocable, scoped key. The user enters it once in the AI client's secret input.</td>
                       </tr>
                       <tr>
                         <td>One laptop</td>
@@ -3158,9 +3003,9 @@ v12-7f3a.content.example.net</code></pre>
                   </table>
                 </div>
                 <p>
-                  Ordinary OpenID Connect sign-in proves who a person is in a browser. It is not, by
-                  itself, enough for an MCP client. Remote MCP also needs discovery, approval,
-                  a credential issued for the exact <code>/mcp</code> address, renewal, and revocation.
+                  MCP has no OAuth flow. There is no sign-in metadata, no client registration, and no
+                  access token from an external identity provider. A key is valid only for the
+                  installation that issued it.
                 </p>
               </div>
             </details>
@@ -3186,30 +3031,21 @@ v12-7f3a.content.example.net</code></pre>
               </div>
             </details>
             <details>
-              <summary>Hosted OAuth and Artifact Server's responsibility</summary>
+              <summary>API keys and Artifact Server's responsibility</summary>
               <div class="detail-body">
                 <p>
-                  In the hosted service, WorkOS owns the authorization page, approval screen,
-                  authorization codes, client registration, access credentials, renewal, and revoke
-                  behavior. Artifact Server remains the protected service. It publishes the standard
-                  metadata that tells clients where to sign in and verifies every credential before an MCP request reaches product code.
+                  Artifact Server verifies every API key before an MCP request reaches product code.
+                  It checks the key's stored digest, expiry, revoke state, installation, and
+                  capabilities. A request without a valid key gets a <code>401</code> with a plain
+                  <code>Bearer</code> challenge and no sign-in metadata.
                 </p>
                 <p>
-                  The credential must name the exact Artifact Server MCP address as its audience.
-                  WorkOS identity scopes do not grant artifact permissions. Artifact Server also verifies the issuer,
-                  signature, expiry, and user, then maps that user to an account admitted to this
-                  installation. Artifact Server does not copy WorkOS organizations into a second
-                  organization system. The same membership and service-capability checks used by the
-                  browser still apply.
+                  A key belongs to one member or service principal of this installation. The same
+                  membership and service-capability checks used by the browser still apply. Keys
+                  never pass to file storage, background workers, or published websites.
                 </p>
                 <p>
-                  The hosted authorization service enables Client ID Metadata Documents first and
-                  keeps Dynamic Client Registration temporarily for clients that still require it.
-                  Authorization uses the browser authorization-code flow with S256 PKCE. WorkOS
-                  credentials never pass to file storage, background workers, or published websites.
-                </p>
-                <p>
-                  The exact wire behavior, metadata, token checks, self-hosted modes, and release
+                  The exact wire behavior, key checks, self-hosted modes, and release
                   test matrix are recorded in the <a href="artifact-server-mcp-baseline.md">Artifact Server MCP engineering baseline</a>.
                 </p>
               </div>
@@ -3232,7 +3068,7 @@ artifact_delete</code></pre>
                 <p>
                   Each tool has a strict input and output schema. Publishing returns the artifact,
                   immutable version, canonical manifest digest, and browser links. Management tools
-                  return the exact artifact or deletion state they changed. Git is not part of the MCP result contract.
+                  return the exact artifact or deletion state they changed.
                 </p>
                 <p>
                   One read-only MCP resource returns the canonical manifest for a selected version.
@@ -3300,11 +3136,11 @@ artifact_delete</code></pre>
             </article>
             <article class="deployment-item">
               <h3>First release: private team</h3>
-              <p>Compact Compose runs one container with SQLite and attached disk. External-storage Compose uses the same image with existing Postgres and object storage, and it can run multiple application processes. Each teammate signs in through the installation's configured OpenID Connect or WorkOS provider.</p>
+              <p>Compact Compose runs one container with SQLite and attached disk. External-storage Compose uses the same image with existing Postgres and object storage, and it can run multiple application processes. Each teammate signs in to the browser with an API key that an administrator issues.</p>
             </article>
             <article class="deployment-item">
               <h3>Cloudflare</h3>
-              <p>Cloudflare Workers, D1 records, R2 files, nearby copies of public files, and off-by-default Cloudflare Artifacts handoff.</p>
+              <p>Cloudflare Workers, D1 records, R2 files, and nearby copies of public files.</p>
             </article>
             <article class="deployment-item">
               <h3>AWS, GCP, and Azure</h3>
@@ -3331,12 +3167,12 @@ artifact_delete</code></pre>
             <div class="diagram-shell">
               <div class="diagram-heading">
                 <strong>Deployment map</strong>
-                <span>Git handoff is off by default in every column.</span>
+                <span>The same product rules run in every column.</span>
               </div>
               <div class="diagram-scroll">
                 <svg class="architecture-diagram" viewBox="0 0 1040 520" role="img" aria-labelledby="deployment-map-title deployment-map-desc">
                   <title id="deployment-map-title">Deployment architecture map</title>
-                  <desc id="deployment-map-desc">The same Artifact Server product rules connect to different application runtimes, databases, file stores, and optional Git providers on a laptop, one server, Kubernetes, and Cloudflare. AWS and GCP use direct managed-cloud packages. Azure uses the Kubernetes shape on AKS.</desc>
+                  <desc id="deployment-map-desc">The same Artifact Server product rules connect to different application runtimes, databases, and file stores on a laptop, one server, Kubernetes, and Cloudflare. AWS and GCP use direct managed-cloud packages. Azure uses the Kubernetes shape on AKS.</desc>
                   <defs>
                     <marker id="deployment-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
                       <path d="M0,0 L8,4 L0,8 Z" fill="currentColor"></path>
@@ -3388,11 +3224,7 @@ artifact_delete</code></pre>
                   <rect class="svg-node-store" x="548" y="300" width="196" height="68" rx="7"></rect>
                   <text class="svg-title" x="566" y="328">Postgres + S3-compatible</text>
                   <text class="svg-copy" x="566" y="349">External records and files</text>
-                  <rect class="svg-boundary-optional" x="548" y="386" width="196" height="68" rx="7"></rect>
-                  <text class="svg-title" x="566" y="414">Cloudflare Artifacts</text>
-                  <text class="svg-copy" x="566" y="435">Optional through REST</text>
                   <path class="svg-line" d="M616 282 V300" marker-end="url(#deployment-arrow)"></path>
-                  <path class="svg-line-optional" d="M676 282 H752 V420 H744" marker-end="url(#deployment-arrow)"></path>
 
                   <rect class="svg-boundary" x="778" y="174" width="240" height="318" rx="12"></rect>
                   <text class="svg-label" x="800" y="204">CLOUDFLARE</text>
@@ -3401,16 +3233,11 @@ artifact_delete</code></pre>
                   <rect class="svg-node-store" x="800" y="300" width="196" height="68" rx="7"></rect>
                   <text class="svg-title" x="818" y="328">D1 + R2</text>
                   <text class="svg-copy" x="818" y="349">Records and published files</text>
-                  <rect class="svg-boundary-optional" x="800" y="386" width="196" height="68" rx="7"></rect>
-                  <text class="svg-title" x="818" y="414">Cloudflare Artifacts</text>
-                  <text class="svg-copy" x="818" y="435">Optional Workers binding</text>
                   <path class="svg-line" d="M868 282 V300" marker-end="url(#deployment-arrow)"></path>
-                  <path class="svg-line-optional" d="M928 282 H1004 V420 H996" marker-end="url(#deployment-arrow)"></path>
                 </svg>
               </div>
               <div class="diagram-legend" aria-label="Deployment diagram legend">
                 <span><i class="diagram-key" aria-hidden="true"></i>Required component</span>
-                <span><i class="diagram-key optional" aria-hidden="true"></i>Off-by-default Git handoff</span>
               </div>
             </div>
           </figure>
@@ -3423,7 +3250,6 @@ artifact_delete</code></pre>
                   <th>How it runs</th>
                   <th>Where records are stored</th>
                   <th>Where files are stored</th>
-                  <th>Optional Git handoff</th>
                   <th>Can it read local files?</th>
                 </tr>
               </thead>
@@ -3433,7 +3259,6 @@ artifact_delete</code></pre>
                   <td>Artifact Server runs directly on the host. A local container is optional.</td>
                   <td>SQLite</td>
                   <td>Local disk</td>
-                  <td>Off by default; Cloudflare Artifacts through REST when explicitly configured</td>
                   <td>Yes. The local publishing client reads a user-selected path with that user's operating-system permissions, validates it, and uploads bytes immediately.</td>
                 </tr>
                 <tr>
@@ -3441,7 +3266,6 @@ artifact_delete</code></pre>
                   <td>One software container</td>
                   <td>SQLite</td>
                   <td>One persistent local or attached data directory</td>
-                  <td>Off by default; Cloudflare Artifacts through REST when explicitly configured</td>
                   <td>Only when a publishing client runs on that server. Artifact Server itself never accepts a filesystem path through HTTP or MCP.</td>
                 </tr>
                 <tr>
@@ -3449,7 +3273,6 @@ artifact_delete</code></pre>
                   <td>One or more stateless software containers</td>
                   <td>Existing Postgres</td>
                   <td>Existing S3-compatible object storage</td>
-                  <td>Off by default; Cloudflare Artifacts through REST when explicitly configured</td>
                   <td>Only when a publishing client runs on that server. Artifact Server itself never accepts a filesystem path through HTTP or MCP.</td>
                 </tr>
                 <tr>
@@ -3457,7 +3280,6 @@ artifact_delete</code></pre>
                   <td>Node.js containers that keep no data on their own disks</td>
                   <td>Postgres</td>
                   <td>S3, Google Cloud Storage, a tested compatible object store, or the preview Azure Blob adapter</td>
-                  <td>Off by default; Cloudflare Artifacts through REST when explicitly configured</td>
                   <td>Normally no</td>
                 </tr>
                 <tr>
@@ -3465,7 +3287,6 @@ artifact_delete</code></pre>
                   <td>Cloudflare Workers</td>
                   <td>D1</td>
                   <td>Cloudflare R2</td>
-                  <td>Off by default; Cloudflare Artifacts through the Workers binding when explicitly configured</td>
                   <td>No</td>
                 </tr>
                 <tr>
@@ -3473,7 +3294,6 @@ artifact_delete</code></pre>
                   <td>ECS Fargate</td>
                   <td>RDS PostgreSQL</td>
                   <td>Amazon S3</td>
-                  <td>Off by default; Cloudflare Artifacts through REST when explicitly configured</td>
                   <td>No</td>
                 </tr>
                 <tr>
@@ -3481,7 +3301,6 @@ artifact_delete</code></pre>
                   <td>Cloud Run</td>
                   <td>Cloud SQL PostgreSQL</td>
                   <td>Google Cloud Storage</td>
-                  <td>Off by default; Cloudflare Artifacts through REST when explicitly configured</td>
                   <td>No</td>
                 </tr>
               </tbody>
@@ -3510,13 +3329,9 @@ artifact_delete</code></pre>
                   default uses ECS Fargate; it does not create or replace an existing EKS cluster.
                 </p>
                 <p>
-                  Browser login and MCP authorization are separate protocols even when they use the
-                  same identity provider. Team browser login uses WorkOS AuthKit or any OpenID Connect
-                  provider, configured directly on the installation; one installation configures one
-                  browser-login provider. Hosted MCP
-                  connections use WorkOS AuthKit. Private installations can use server API keys or a
-                  compatible authorization service. A single-user installation may rely on the
-                  operating-system account or a local token.
+                  Team browser sign-in and MCP both use managed API keys. There is no external
+                  identity provider. A single-user installation may rely on the operating-system
+                  account or a local token.
                 </p>
               </div>
             </details>
@@ -3527,15 +3342,14 @@ artifact_delete</code></pre>
                   The product rules do not know which database or file storage is in use. Each
                   deployment supplies small pieces of code for saving records, saving files, signing
                   users in, and running cleanup work. The product rules do not call Node.js file
-                  functions or a specific database library directly. Optional Git handoff follows
-                  the same rule through one small provider interface.
+                  functions or a specific database library directly.
                 </p>
                 <ul>
-                  <li><strong>Laptop:</strong> one process runs directly on the host by default, with SQLite for records, files stored on disk by their SHA-256 fingerprints, and optional local file links. Cloudflare Artifacts may be configured through REST. Docker is optional.</li>
-                  <li><strong>One server, compact:</strong> one process, SQLite in write-ahead logging mode, and one persistent data directory. Cloudflare Artifacts may be configured through REST. This profile does not support multiple application writers or claim failover.</li>
+                  <li><strong>Laptop:</strong> one process runs directly on the host by default, with SQLite for records, files stored on disk by their SHA-256 fingerprints, and optional local file links. Docker is optional.</li>
+                  <li><strong>One server, compact:</strong> one process, SQLite in write-ahead logging mode, and one persistent data directory. This profile does not support multiple application writers or claim failover.</li>
                   <li><strong>One server, external storage:</strong> the same image connected to existing Postgres and object storage through a supported adapter. The Compose package does not bundle those providers.</li>
-                  <li><strong>Kubernetes:</strong> Postgres plus S3, Google Cloud Storage, R2, a tested compatible object store, or the preview Azure Blob adapter. Cloudflare Artifacts may be configured through REST. This is the official Azure path on AKS.</li>
-                  <li><strong>Cloudflare:</strong> Workers for the application, D1 for records, R2 for files, and off-by-default Cloudflare Artifacts handoff through a configured Workers binding. External Postgres is supported through a separate adapter but is not the default.</li>
+                  <li><strong>Kubernetes:</strong> Postgres plus S3, Google Cloud Storage, R2, a tested compatible object store, or the preview Azure Blob adapter. This is the official Azure path on AKS.</li>
+                  <li><strong>Cloudflare:</strong> Workers for the application, D1 for records, R2 for files. External Postgres is supported through a separate adapter but is not the default.</li>
                   <li><strong>AWS:</strong> ECS Fargate, RDS PostgreSQL, and S3 through the AWS Pulumi project.</li>
                   <li><strong>GCP:</strong> Cloud Run, Cloud SQL PostgreSQL, and native Google Cloud Storage through the GCP Pulumi project.</li>
                 </ul>
@@ -3563,7 +3377,7 @@ artifact_delete</code></pre>
                   application image, application domain, separate content domain, initial
                   administrator email, public or private ingress choice, replica limits, CPU,
                   memory, database size, backup retention, deletion protection, network choice,
-                  and optional WorkOS and telemetry references. Secret inputs are references to
+                  and optional telemetry references. Secret inputs are references to
                   the provider secret manager, not secret values in ordinary configuration.
                 </p>
                 <p>
@@ -3761,12 +3575,6 @@ artifact_delete</code></pre>
               </div>
             </article>
             <article class="feature-row">
-              <h3>Private Git handoff</h3>
-              <div class="feature-copy">
-                <p>Optional Git repositories remain private. Making an artifact available through a public link never grants Git access or exposes its earlier versions through a Git remote.</p>
-              </div>
-            </article>
-            <article class="feature-row">
               <h3>Recorded responsibility</h3>
               <div class="feature-copy">
                 <p>Publishing actions record the signed-in user, agent, or automated account that performed the action.</p>
@@ -3798,7 +3606,6 @@ artifact_delete</code></pre>
                 <li>Finished client-side output directories and arbitrary individual files.</li>
                 <li>Saved versions that never change, plus the ability to restore an earlier one.</li>
                 <li>File and text comparisons between any two saved versions.</li>
-                <li>Optional private Git handoff, off by default and selected by explicit installation configuration.</li>
                 <li>Exactly two access settings: account required and public link.</li>
                 <li>Browser access, MCP, the Artifact Server command-line program, and normal web requests from software.</li>
                 <li>An optional connection from one Artifact Server installation to one Plannotator organization, including signed operation requests and temporary browser sessions.</li>
@@ -3811,7 +3618,6 @@ artifact_delete</code></pre>
               <h3>Not included</h3>
               <ul>
                 <li>Review status, notifications, or workspace collaboration. Plannotator provides these features. Artifact Server does store comment threads on its own artifact versions.</li>
-                <li>A general-purpose Git service for arbitrary source-code repositories. Optional Git handoff exists only for Artifact Server artifacts.</li>
                 <li>Installing packages or turning source code into a finished application.</li>
                 <li>Code inside an artifact that must run on the server.</li>
                 <li>Media conversion, thumbnails, ZIP extraction, Markdown rendering, source-code highlighting, custom PDF viewing, or specialized binary comparisons in the first release.</li>
@@ -3857,8 +3663,8 @@ artifact_delete</code></pre>
                   change, comparisons between versions, support for complete client-side output
                   directories, the separate artifact website, SQLite and
                   local file storage, the modern stateless MCP route, web publishing,
-                  <code>artifactserver connect</code> and the credential-hidden local stdio bridge,
-                  the two sharing modes, with Git handoff off by default. Add secure
+                  MCP over HTTP with an API key,
+                  the two sharing modes. Add secure
                   command-line profiles and make
                   <code>artifactserver publish</code> the local-file path. Ship the
                   <code>artifact-server</code> skill after its CLI and MCP routing is stable.
@@ -3874,9 +3680,9 @@ artifact_delete</code></pre>
                   Keep SQLite for a single-server installation. Add Postgres and cloud file storage
                   for Kubernetes or any deployment with multiple application replicas. Support S3,
                   Google Cloud Storage, R2, compatible object stores, and a preview Azure Blob adapter through one
-                  narrow interface. Add browser login, API-key and external-issuer modes for private
+                  narrow interface. Add browser API-key sign-in and API-key MCP access for private
                   deployments, staged direct uploads, expired-staging cleanup, a Docker image, a
-                  Compose file, a Helm chart, backup and restore, and optional private Git handoff.
+                  Compose file, a Helm chart, and backup and restore.
                   Add structured request logs, standard OTLP export for logs, metrics, and traces,
                   and separate process-health and dependency-readiness checks.
                   Enable the <code>artifact-server</code> server-operation reference after install,
@@ -3905,11 +3711,10 @@ artifact_delete</code></pre>
               <div class="roadmap-copy">
                 <h3>The optional Cloudflare deployment</h3>
                 <p>
-                  Add Cloudflare Workers, D1 records, R2 file storage, and the optional Cloudflare
-                  Artifacts provider. Enforce tenant-scoped storage from trusted routing. Start the
+                  Add Cloudflare Workers, D1 records, and R2 file storage.
+                  Enforce tenant-scoped storage from trusted routing. Start the
                   hosted service with one D1 database. Before a second database, select and test a
-                  D1 directory and binding rollout or external Postgres control plane. Copy to Git only after the normal
-                  saved version is complete, and retry temporary failures. Verify file delivery with
+                  D1 directory and binding rollout or external Postgres control plane. Verify file delivery with
                   and without an account, upload limits, complete website behavior, comparisons, and signed-in MCP access over the web.
                 </p>
               </div>
@@ -3933,12 +3738,12 @@ artifact_delete</code></pre>
               <summary>How we know each release is ready</summary>
               <div class="detail-body">
                 <ul>
-                  <li><strong>Local:</strong> <code>artifactserver connect</code> works in every advertised local client without browser sign-in, Docker, a visible key, copied secret, or log inspection; one service then publishes one file and a complete static site, opens the unique version host, compares versions without Git, retries safely, and survives a restart.</li>
+                  <li><strong>Local:</strong> a local server accepts a managed API key at <code>/mcp</code> in every advertised local client without Docker or log inspection; one service then publishes one file and a complete static site, opens the unique version host, compares versions, retries safely, and survives a restart.</li>
                   <li><strong>Private team:</strong> account-required subresources load, forbidden mutations fail, backup and restore preserve IDs, and cross-tenant and hostile-path tests pass on one server and Kubernetes.</li>
-                  <li><strong>Optional Cloudflare package:</strong> WorkOS MCP sign-in, R2 staged uploads, D1 transactions, public cache purge, private no-cache delivery, tenant isolation, and a restore drill pass. Service-operator policy is separate from core OSS conformance.</li>
+                  <li><strong>Optional Cloudflare package:</strong> R2 staged uploads, D1 transactions, public cache purge, private no-cache delivery, tenant isolation, and a restore drill pass. Service-operator policy is separate from core OSS conformance.</li>
                   <li><strong>Plannotator connection:</strong> one-click approval, cross-organization rejection, signed-request scope, one-use browser links, disconnect, key rotation, exact-version comments, hostile review-page tests, and private-route failure and recovery all pass.</li>
                   <li><strong>Major clouds:</strong> every provider package passes install, upgrade, rollback, backup, restore, private-network, and removal tests before support is advertised.</li>
-                  <li><strong>All releases:</strong> browsers open native file types without a conversion service; arbitrary URL fetch is absent; optional Git failure never blocks or loses the primary saved version.</li>
+                  <li><strong>All releases:</strong> browsers open native file types without a conversion service; arbitrary URL fetch is absent.</li>
                 </ul>
               </div>
             </details>
@@ -3960,8 +3765,7 @@ artifact_delete</code></pre>
             <article class="decision-item"><p>An artifact keeps one identity. Each intentional publish creates an immutable version with a canonical manifest and unique version origin. Restoring only changes which version is current.</p></article>
             <article class="decision-item"><p>A retry with the same idempotency key returns the stored result. A new key creates a new version even when the manifest matches an earlier version.</p></article>
             <article class="decision-item"><p>An artifact may have up to 20 normalized tags for exact filtering. Tags belong to the artifact, persist across version changes and tombstones, and are replaced through one authorized, idempotent, audited operation. The first release has no tag hierarchy or per-version tags.</p></article>
-            <article class="decision-item"><p>Comparisons use canonical manifests and changed text. Binary comparison shows metadata and links. Git is not required.</p></article>
-            <article class="decision-item"><p>Git handoff is an optional private copy that is off by default and never selected automatically. Configuring Cloudflare Artifacts makes it available but copies nothing until an administrator estimates and enables selected projects or explicitly selects all projects. Each artifact has its own repository. The normal object store remains authoritative, and Git failure or a copy budget never blocks or loses a saved version.</p></article>
+            <article class="decision-item"><p>Comparisons use canonical manifests and changed text. Binary comparison shows metadata and links.</p></article>
             <article class="decision-item"><p>Account required and public link are the only two read settings. A public link opens only the current version; history and comparisons still require an account. Every admitted human member may manage project artifacts; services require explicit capabilities.</p></article>
             <article class="decision-item"><p>One installation represents one person, team, or company and contains projects. Every artifact belongs to one project. A new installation creates a default project. There is no organization switcher or separate Artifact Store object.</p></article>
             <article class="decision-item"><p>Projects use installation membership and have no separate member list or access-control list in the first release. Project identity is enforced by storage, authorization, HTTP, MCP, browser sessions, audit, backup, and restore.</p></article>
@@ -3973,10 +3777,10 @@ artifact_delete</code></pre>
             <article class="decision-item"><p>Changing public content back to account required stops future public access and purges supported caches, but cannot recall downloaded or externally cached copies.</p></article>
             <article class="decision-item"><p>Manifest paths follow one portable safety contract. Publishing clients upload bytes. A local client may read a user-selected path with its operating-system permissions, but HTTP and MCP never receive that path. The server does not fetch arbitrary source URLs.</p></article>
             <article class="decision-item"><p>Uploads stage, verify, then write content-addressed blobs without overwrite before the database commit. The first release deletes expired staging only and does not garbage-collect committed blobs.</p></article>
-            <article class="decision-item"><p>Browser, normal software requests, the command-line program, and MCP share the same product and authorization rules. Local MCP uses <code>artifactserver connect</code> without a human-visible secret. Hosted MCP uses browser approval through WorkOS AuthKit. Self-hosted MCP uses compatible browser authorization when configured and administration-issued scoped API keys otherwise. Startup logs never distribute keys.</p></article>
+            <article class="decision-item"><p>Browser, normal software requests, the command-line program, and MCP share the same product and authorization rules. MCP uses administration-issued scoped API keys on a local or remote server. Startup logs never distribute keys.</p></article>
             <article class="decision-item"><p>MCP and the command-line program intentionally overlap. Files on the user's computer use the command-line program. Work that only needs information already on Artifact Server may use either. <code>artifactserver auth login</code> gives the command-line program its own secure server profile. A remote MCP server never reads a user's local path.</p></article>
             <article class="decision-item"><p>Artifact Server ships one router skill with separate artifact and server-operation references. The artifact route uses the command-line program for local files and MCP or the command-line program for information already on the server. The server-operation route loads only for explicit administrator work. Stored references include the server and artifact, so agents open local or team artifacts at the correct address.</p></article>
-            <article class="decision-item"><p>The product core uses narrow database, file-storage, login, background-work, and optional Git interfaces. Operators use Compose for one server, Helm for Kubernetes, Alchemy directly for Cloudflare, and Pulumi directly for AWS and GCP. Artifact Server does not add an infrastructure wrapper.</p></article>
+            <article class="decision-item"><p>The product core uses narrow database, file-storage, login, and background-work interfaces. Operators use Compose for one server, Helm for Kubernetes, Alchemy directly for Cloudflare, and Pulumi directly for AWS and GCP. Artifact Server does not add an infrastructure wrapper.</p></article>
             <article class="decision-item"><p>Azure has no separate installer or release claim. Azure teams use Helm on AKS. The Azure Blob adapter remains preview until it passes a real Azure storage test.</p></article>
             <article class="decision-item"><p>Support is phased: the simple local OSS tool first, then private team and Kubernetes packages, optional Cloudflare, and direct AWS and GCP packages. A target is not supported until its install, upgrade, rollback, backup, restore, and isolation tests pass. Optional artifactserver.com operating policy is not a core OSS release gate.</p></article>
             <article class="decision-item"><p>Committed versions cannot be edited or deleted individually. Deleting an artifact creates a tombstone and stops access; physical reclamation waits for a proven retention and garbage-collection design.</p></article>
@@ -3987,9 +3791,6 @@ artifact_delete</code></pre>
             <ol>
               <li><strong>Private site delivery:</strong> current tests exercise the bootstrap token and version-scoped content cookie, but the complete supported-browser and per-deployment matrix remains open.</li>
               <li><strong>Version origins:</strong> local <code>*.localhost</code> behavior and a real Cloudflare wildcard TLS probe have evidence. Equivalent DNS, certificate, proxy, and hostile-host proof remains open for each deployment before support is advertised.</li>
-              <li><strong>Cloudflare Artifacts:</strong> complete bounded live binding, REST, smart-HTTP, token, project-switch, estimate, budget, namespace-isolation, run-manifest cleanup, backfill, disable, deletion, recovery, limits, jurisdiction, and cost probes before advertising the off-by-default provider. The product must remain complete without access, and tests must not touch another namespace.</li>
-              <li><strong>WorkOS MCP:</strong> browser approval, resource-bound tokens, refresh, revocation, reconnect, DCR, and CIMD pass for Codex and Claude Code. Visual Studio Code and claude.ai are deferred client qualifications, not first-release gates.</li>
-              <li><strong>Embedded self-hosted OAuth:</strong> decide whether Better Auth's beta MCP path is mature enough; API keys and compatible external issuers remain the default until it passes the same hostile tests.</li>
               <li><strong>Cross-cloud packages:</strong> selected live AWS, GCP, and Cloudflare lifecycle probes have evidence, but no direct-cloud package has complete signed conformance proof. The AWS private-ingress variant remains unqualified.</li>
               <li><strong>Optional hosted-service policy:</strong> quotas, egress limits, abuse response, phishing and malware handling, reporting, suspension, and domain reputation belong to a future artifactserver.com operator, not the core OSS first release.</li>
               <li><strong>Capacity claims:</strong> the OSS release need not advertise universal capacity or cost envelopes. Any target-specific claim must be backed by measured evidence.</li>

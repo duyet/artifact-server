@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { Context, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Duration, Effect, Layer } from "effect";
 
 import type { ApplicationClock } from "./application-clock.js";
 import {
@@ -16,12 +16,15 @@ import {
   type ProjectManagementFailure,
   ProjectManagementService,
 } from "./project-management.js";
+import {dayOf, publicCatalogWindowDays} from "./public-artifact-catalog.js";
+import {parseArtifactName} from "./publish-artifact.js";
 import {
   ArtifactNotFound,
   type ArtifactMutationConflict,
   type ArtifactRepositoryFailure,
   type AuthorizationDenied,
   type IdempotencyConflict,
+  type InvalidArtifactName,
   type InvalidArtifactTags,
   type InvalidIdempotencyKey,
   InvalidPagination,
@@ -33,18 +36,24 @@ import type {
   ArtifactActionPage,
   ArtifactDeletion,
   ArtifactPage,
+  ArtifactPageWithViews,
   ArtifactRecord,
   ArtifactState,
   ArtifactVersion,
+  ArtifactViewDay,
+  ArtifactViewTotal,
   PageCursor,
   VersionRecord,
 } from "../core/model.js";
 import type {
+  ArtifactOwnerFilter,
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
   DeleteArtifact,
   ListArtifactActions,
   ListArtifacts,
+  ReadArtifactViewDays,
+  RenameArtifact,
   RestoreArtifactVersion,
 } from "../core/ports.js";
 
@@ -94,11 +103,25 @@ export interface ChangeArtifactTagsCommand extends ReadArtifactCommand {
   readonly tags: readonly string[];
 }
 
+/**
+ * Whose artifacts a listing keeps, relative to the caller: everything, the
+ * ones the caller created, or the ones someone else created and shared.
+ */
+export type ArtifactOwnerScope = "all" | "me" | "others";
+
+/** Input for changing one artifact's display name. */
+export interface RenameArtifactCommand extends ReadArtifactCommand {
+  readonly expectedCurrentVersionId: string;
+  readonly idempotencyKey: string;
+  readonly name: string;
+}
+
 /** Input for listing active artifacts visible to one principal. */
 export interface ListArtifactsCommand {
   readonly comments?: "all" | "with" | "without";
   readonly cursor: PageCursor | null;
   readonly limit: number;
+  readonly owner?: ArtifactOwnerScope;
   readonly principal: Principal;
   readonly projectId: string | null;
   readonly search: string | null;
@@ -138,6 +161,15 @@ export interface ArtifactManagementRepository {
     | IdempotencyConflict
     | ArtifactRepositoryFailure
   >;
+  readonly renameArtifact: (
+    command: RenameArtifact,
+  ) => Effect.Effect<
+    ArtifactState,
+    | ArtifactMutationConflict
+    | ArtifactNotFound
+    | IdempotencyConflict
+    | ArtifactRepositoryFailure
+  >;
   readonly deleteArtifact: (
     command: DeleteArtifact,
   ) => Effect.Effect<
@@ -170,6 +202,12 @@ export interface ArtifactManagementRepository {
   readonly listArtifacts: (
     command: ListArtifacts,
   ) => Effect.Effect<ArtifactPage, ArtifactRepositoryFailure>;
+  readonly readArtifactViewDays: (
+    command: ReadArtifactViewDays,
+  ) => Effect.Effect<readonly ArtifactViewDay[], ArtifactRepositoryFailure>;
+  readonly readArtifactViewTotals: (
+    artifactIds: readonly string[],
+  ) => Effect.Effect<readonly ArtifactViewTotal[], ArtifactRepositoryFailure>;
   readonly restoreVersion: (
     command: RestoreArtifactVersion,
   ) => Effect.Effect<
@@ -195,6 +233,7 @@ export type ArtifactManagementFailure =
   | ArtifactMutationConflict
   | IdempotencyConflict
   | InvalidIdempotencyKey
+  | InvalidArtifactName
   | InvalidArtifactTags
   | InvalidPagination
   | AuthorizationDenied
@@ -211,6 +250,9 @@ interface ArtifactManagementOperations {
   readonly deleteArtifact: (
     command: DeleteArtifactCommand,
   ) => Effect.Effect<ArtifactDeletion, ArtifactManagementFailure>;
+  readonly renameArtifact: (
+    command: RenameArtifactCommand,
+  ) => Effect.Effect<ArtifactState, ArtifactManagementFailure>;
   readonly getArtifact: (
     command: ReadArtifactCommand,
   ) => Effect.Effect<ArtifactDetails, ArtifactManagementFailure>;
@@ -228,7 +270,7 @@ interface ArtifactManagementOperations {
   ) => Effect.Effect<ArtifactActionPage, ArtifactManagementFailure>;
   readonly listArtifacts: (
     command: ListArtifactsCommand,
-  ) => Effect.Effect<ArtifactPage, ArtifactManagementFailure>;
+  ) => Effect.Effect<ArtifactPageWithViews, ArtifactManagementFailure>;
   readonly restoreVersion: (
     command: RestoreArtifactVersionCommand,
   ) => Effect.Effect<ArtifactState, ArtifactManagementFailure>;
@@ -430,15 +472,49 @@ function makeArtifactManagementService(
         command.principal,
         command.projectId,
       );
-      return yield* dependencies.repository.listArtifacts({
+      const page = yield* dependencies.repository.listArtifacts({
         comments,
         cursor: command.cursor,
         limit,
+        owner: ownerFilter(command.owner ?? "all", command.principal),
         projectId: project.id,
         search,
         sort,
         tags,
       });
+      return yield* withListedViews(page);
+    },
+  );
+
+  const withListedViews = Effect.fn("ArtifactManagementService.withListedViews")(
+    function*(page: ArtifactPage) {
+      const artifactIds = page.items.map((item) => item.id);
+      if (artifactIds.length === 0) return {...page, items: []};
+      const now = yield* dependencies.clock.now;
+      const [days, totals] = yield* Effect.all([
+        dependencies.repository.readArtifactViewDays({
+          artifactIds,
+          sinceDay: dayOf(DateTime.subtractDuration(
+            now,
+            Duration.days(publicCatalogWindowDays - 1),
+          )),
+          untilDay: dayOf(now),
+        }),
+        dependencies.repository.readArtifactViewTotals(artifactIds),
+      ], {concurrency: 2});
+      return {
+        ...page,
+        items: page.items.map((item) => ({
+          ...item,
+          views: {
+            last30Days: days
+              .filter((day) => day.artifactId === item.id)
+              .reduce((sum, day) => sum + day.count, 0),
+            total: totals.find((total) => total.artifactId === item.id)
+              ?.count ?? 0,
+          },
+        })),
+      };
     },
   );
 
@@ -558,6 +634,38 @@ function makeArtifactManagementService(
     },
   );
 
+  const renameArtifact = Effect.fn("ArtifactManagementService.renameArtifact")(
+    function*(command: RenameArtifactCommand) {
+      const project = yield* resolveProjectForRead(
+        command.principal,
+        command.projectId,
+      );
+      const artifact = yield* requireArtifact(project.id, command.artifactId);
+      yield* authorization.requireArtifactManagement(command.principal);
+      const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
+      const name = yield* parseArtifactName(command.name);
+      const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
+      return yield* dependencies.repository.renameArtifact({
+        artifactId: artifact.id,
+        authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
+        createdAt,
+        expectedCurrentVersionId: command.expectedCurrentVersionId,
+        idempotencyKey,
+        inputDigest: managementInputDigest({
+          artifactId: artifact.id,
+          expectedCurrentVersionId: command.expectedCurrentVersionId,
+          operation: "rename",
+          principalId: command.principal.id,
+          projectId: project.id,
+          value: name,
+        }),
+        name,
+        principalId: command.principal.id,
+        projectId: project.id,
+      });
+    },
+  );
+
   const deleteArtifact = Effect.fn("ArtifactManagementService.deleteArtifact")(
     function*(command: DeleteArtifactCommand) {
       const project = yield* resolveProjectForRead(
@@ -601,8 +709,20 @@ function makeArtifactManagementService(
     listArtifactActions,
     listArtifacts,
     listVersions,
+    renameArtifact,
     restoreVersion,
   });
+}
+
+function ownerFilter(
+  scope: ArtifactOwnerScope,
+  principal: Principal,
+): ArtifactOwnerFilter {
+  if (scope === "me") return {kind: "owned_by", principalId: principal.id};
+  if (scope === "others") {
+    return {kind: "not_owned_by", principalId: principal.id};
+  }
+  return {kind: "any"};
 }
 
 interface ManagementInputDigest {
@@ -612,6 +732,7 @@ interface ManagementInputDigest {
     | "change_access"
     | "change_tags"
     | "delete"
+    | "rename"
     | "restore";
   readonly principalId: string;
   readonly projectId: string;

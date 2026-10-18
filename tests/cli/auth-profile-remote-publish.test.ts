@@ -1,5 +1,4 @@
 import {spawn, type ChildProcessWithoutNullStreams} from "node:child_process";
-import {createHash} from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -14,7 +13,6 @@ import {
   createServer as createHttpServer,
   type IncomingMessage,
   type Server as HttpServer,
-  type ServerResponse,
 } from "node:http";
 import {createServer} from "node:net";
 import {tmpdir} from "node:os";
@@ -32,7 +30,7 @@ const runningProcesses = new Set<ChildProcessWithoutNullStreams>();
 const assignedAddressSchema = z.object({port: z.number().int().positive()});
 const profileOutputSchema = z.object({
   accountId: z.string(),
-  authentication: z.enum(["api_key", "oauth"]),
+  authentication: z.literal("api_key"),
   installationId: z.string(),
   name: z.string(),
   origin: z.url(),
@@ -43,13 +41,6 @@ const publicationSchema = z.object({
   links: z.object({artifact: z.url(), version: z.url()}),
   version: z.object({id: z.string(), number: z.number().int().positive()}),
 });
-type JsonValue =
-  | boolean
-  | null
-  | number
-  | string
-  | {readonly [key: string]: JsonValue}
-  | readonly JsonValue[];
 
 afterEach(async () => {
   await Promise.all([...runningProcesses].map(stopProcess));
@@ -419,92 +410,27 @@ describe("authenticated CLI profiles and remote publication", () => {
     }
   }, 30_000);
 
-  test("completes browser PKCE, refresh, status, and revocation against real HTTP boundaries", async () => {
+  test("refuses a login that does not read the API key from standard input", async () => {
     const temporaryDirectory = await mkdtemp(
-      path.join(tmpdir(), "artifact-server-cli-oauth-"),
+      path.join(tmpdir(), "artifact-server-cli-login-"),
     );
     const profileData = path.join(temporaryDirectory, "profiles");
-    const helperState = path.join(temporaryDirectory, "credential-helper.json");
-    const helper = path.join(temporaryDirectory, "credential-helper.mjs");
-    const browser = path.join(temporaryDirectory, "browser.mjs");
-    const environment = await credentialHelperEnvironment(helper, helperState);
-    await writeBrowserHelper(browser);
-    environment["ARTIFACT_SERVER_BROWSER_COMMAND"] = browser;
-    const oauth = await startOAuthFixture();
     try {
       const login = await runCli([
         "auth",
         "login",
-        oauth.origin,
-        "--name",
-        "browser-team",
+        "https://artifacts.example.test",
         "--profile-data",
         profileData,
-      ], environment);
-      expect({exitCode: login.exitCode, stderr: login.stderr}).toEqual({
-        exitCode: 0,
-        stderr: "",
-      });
-      expect(profileOutputSchema.parse(JSON.parse(login.stdout))).toMatchObject({
-        authentication: "oauth",
-        name: "browser-team",
-        status: "authenticated",
-      });
-      expect(oauth.observations).toMatchObject({
-        authorizationCount: 1,
-        codeExchangeCount: 1,
-        registrationCount: 1,
-      });
-      expect(oauth.observations.pkceVerified).toBe(true);
-      expect(login.stdout).not.toContain("oauth-access-one");
-      expect(login.stdout).not.toContain("oauth-refresh-one");
-
-      const status = await runCli([
-        "auth",
-        "status",
-        "browser-team",
-        "--profile-data",
-        profileData,
-      ], environment);
-      expect(status.exitCode).toBe(0);
-      expect(oauth.observations.refreshCount).toBe(1);
-      expect(oauth.observations.lastSessionBearer).toBe("oauth-access-two");
-      expect(status.stdout).not.toContain("oauth-access-two");
-      expect(status.stdout).not.toContain("oauth-refresh-two");
-
-      const logout = await runCli([
-        "auth",
-        "logout",
-        "browser-team",
-        "--profile-data",
-        profileData,
-      ], environment);
-      expect(logout.exitCode).toBe(0);
-      expect(JSON.parse(logout.stdout)).toMatchObject({
-        remoteRevocation: "confirmed",
-        status: "logged_out",
-      });
-      expect(oauth.observations.revocationCount).toBe(1);
-      expect(oauth.observations.revokedToken).toBe("oauth-refresh-two");
-
-      oauth.advertiseWrongResource();
-      const rejected = await runCli([
-        "auth",
-        "login",
-        oauth.origin,
-        "--name",
-        "wrong-resource",
-        "--profile-data",
-        profileData,
-      ], environment);
-      expect(rejected.exitCode).not.toBe(0);
-      expect(rejected.stderr).toContain("authorization metadata is invalid");
-      expect(oauth.observations.authorizationCount).toBe(1);
+      ], process.env);
+      expect(login.exitCode).not.toBe(0);
+      expect(login.stderr).toContain("--api-key-stdin");
+      await expect(readFile(path.join(profileData, "cli-profiles.json"), "utf8"))
+        .rejects.toMatchObject({code: "ENOENT"});
     } finally {
-      await oauth.stop();
       await rm(temporaryDirectory, {force: true, recursive: true});
     }
-  }, 30_000);
+  });
 });
 
 interface ProcessResult {
@@ -715,211 +641,6 @@ if (operation === "read") {
   };
 }
 
-async function writeBrowserHelper(target: string): Promise<void> {
-  await writeFile(target, `#!/usr/bin/env node
-const target = process.argv[2];
-if (target === undefined) process.exit(2);
-const response = await fetch(target, {redirect: "follow"});
-if (!response.ok) process.exit(3);
-`, {mode: 0o700});
-  await chmod(target, 0o700);
-}
-
-interface OAuthFixtureObservations {
-  authorizationCount: number;
-  codeExchangeCount: number;
-  lastSessionBearer: string | null;
-  pkceVerified: boolean;
-  refreshCount: number;
-  registrationCount: number;
-  revocationCount: number;
-  revokedToken: string | null;
-  sessionCount: number;
-}
-
-interface OAuthFixture {
-  readonly observations: OAuthFixtureObservations;
-  readonly origin: string;
-  advertiseWrongResource(): void;
-  stop(): Promise<void>;
-}
-
-async function startOAuthFixture(): Promise<OAuthFixture> {
-  const observations: OAuthFixtureObservations = {
-    authorizationCount: 0,
-    codeExchangeCount: 0,
-    lastSessionBearer: null,
-    pkceVerified: false,
-    refreshCount: 0,
-    registrationCount: 0,
-    revocationCount: 0,
-    revokedToken: null,
-    sessionCount: 0,
-  };
-  let wrongResource = false;
-  let codeChallenge: string | null = null;
-  let expectedRedirect: string | null = null;
-  let origin = "";
-  const server = createHttpServer(async (request, response) => {
-    const target = new URL(request.url ?? "/", origin);
-    if (target.pathname === "/.well-known/oauth-protected-resource/api") {
-      sendJson(response, 200, {
-        authorization_servers: [origin],
-        bearer_methods_supported: ["header"],
-        resource: wrongResource ? `${origin}/wrong` : `${origin}/api`,
-        scopes_supported: ["artifactserver"],
-      });
-      return;
-    }
-    if (
-      target.pathname === "/.well-known/oauth-authorization-server"
-      || target.pathname === "/.well-known/openid-configuration"
-    ) {
-      sendJson(response, 200, {
-        authorization_endpoint: `${origin}/authorize`,
-        code_challenge_methods_supported: ["S256"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        issuer: origin,
-        jwks_uri: `${origin}/jwks`,
-        registration_endpoint: `${origin}/register`,
-        response_types_supported: ["code"],
-        revocation_endpoint: `${origin}/revoke`,
-        token_endpoint: `${origin}/token`,
-        token_endpoint_auth_methods_supported: ["none"],
-      });
-      return;
-    }
-    if (target.pathname === "/register" && request.method === "POST") {
-      observations.registrationCount += 1;
-      const registration = z.object({
-        redirect_uris: z.array(z.url()).min(1),
-      }).passthrough().parse(JSON.parse(await readTextBody(request)));
-      sendJson(response, 201, {
-        client_id: "artifactserver-cli-test-client",
-        redirect_uris: registration.redirect_uris,
-        token_endpoint_auth_method: "none",
-      });
-      return;
-    }
-    if (target.pathname === "/authorize" && request.method === "GET") {
-      observations.authorizationCount += 1;
-      codeChallenge = target.searchParams.get("code_challenge");
-      expectedRedirect = target.searchParams.get("redirect_uri");
-      const state = target.searchParams.get("state");
-      if (
-        codeChallenge === null
-        || target.searchParams.get("code_challenge_method") !== "S256"
-        || expectedRedirect === null
-        || state === null
-      ) {
-        response.writeHead(400).end();
-        return;
-      }
-      const redirect = new URL(expectedRedirect);
-      redirect.searchParams.set("code", "authorization-code-one");
-      redirect.searchParams.set("iss", origin);
-      redirect.searchParams.set("state", state);
-      response.writeHead(302, {Location: redirect.toString()}).end();
-      return;
-    }
-    if (target.pathname === "/token" && request.method === "POST") {
-      const body = new URLSearchParams(await readTextBody(request));
-      const grantType = body.get("grant_type");
-      if (grantType === "authorization_code") {
-        observations.codeExchangeCount += 1;
-        const verifier = body.get("code_verifier");
-        const redirect = body.get("redirect_uri");
-        observations.pkceVerified = verifier !== null
-          && codeChallenge === createHash("sha256")
-            .update(verifier)
-            .digest("base64url")
-          && redirect === expectedRedirect;
-        if (!observations.pkceVerified) {
-          sendJson(response, 400, {error: "invalid_grant"});
-          return;
-        }
-        sendJson(response, 200, {
-          access_token: "oauth-access-one",
-          expires_in: 3_600,
-          refresh_token: "oauth-refresh-one",
-          scope: "artifactserver offline_access",
-          token_type: "Bearer",
-        });
-        return;
-      }
-      if (grantType === "refresh_token") {
-        observations.refreshCount += 1;
-        if (body.get("refresh_token") !== "oauth-refresh-one") {
-          sendJson(response, 400, {error: "invalid_grant"});
-          return;
-        }
-        sendJson(response, 200, {
-          access_token: "oauth-access-two",
-          expires_in: 3_600,
-          refresh_token: "oauth-refresh-two",
-          scope: "artifactserver offline_access",
-          token_type: "Bearer",
-        });
-        return;
-      }
-    }
-    if (target.pathname === "/api/v1/session" && request.method === "GET") {
-      const authorization = request.headers.authorization;
-      const bearer = authorization?.startsWith("Bearer ") === true
-        ? authorization.slice("Bearer ".length)
-        : null;
-      observations.lastSessionBearer = bearer;
-      observations.sessionCount += 1;
-      const accepted = bearer === "oauth-access-two"
-        || (bearer === "oauth-access-one" && observations.sessionCount === 1);
-      if (!accepted) {
-        sendJson(response, 401, {error: {code: "AUTHENTICATION_REQUIRED"}});
-        return;
-      }
-      sendJson(response, 200, {
-        authenticationMethod: "bearer",
-        principal: {
-          authorizedByPrincipalId: null,
-          capabilities: [
-            "artifact:create",
-            "artifact:publish:any",
-            "artifact:read",
-          ],
-          id: "usr_oauth_test",
-          installationId: "ins_oauth_test",
-          kind: "human",
-          membershipRole: "member",
-        },
-      });
-      return;
-    }
-    if (target.pathname === "/revoke" && request.method === "POST") {
-      observations.revocationCount += 1;
-      observations.revokedToken = new URLSearchParams(
-        await readTextBody(request),
-      ).get("token");
-      response.writeHead(200).end();
-      return;
-    }
-    if (target.pathname === "/jwks") {
-      sendJson(response, 200, {keys: []});
-      return;
-    }
-    response.writeHead(404).end();
-  });
-  await listenHttp(server);
-  const address = assignedAddressSchema.parse(server.address());
-  origin = `http://127.0.0.1:${address.port}`;
-  return {
-    advertiseWrongResource: () => {
-      wrongResource = true;
-    },
-    observations,
-    origin,
-    stop: () => closeHttp(server),
-  };
-}
-
 function readTextBody(
   request: IncomingMessage,
 ): Promise<string> {
@@ -929,15 +650,6 @@ function readTextBody(
     request.once("error", reject);
     request.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
   });
-}
-
-function sendJson(
-  response: ServerResponse,
-  status: number,
-  value: JsonValue,
-): void {
-  response.writeHead(status, {"Content-Type": "application/json"});
-  response.end(JSON.stringify(value));
 }
 
 function listenHttp(server: HttpServer): Promise<void> {

@@ -11,7 +11,6 @@ import {
 import {
   AuthenticationRequired,
   AuthorizationDenied,
-  IdentityAdmissionDenied,
   IdentityConflict,
   IdentityNotFound,
 } from "../core/errors.js";
@@ -22,10 +21,10 @@ import type {
 import type {CreateApplicationSessionRecord} from "../core/identity-ports.js";
 import {
   type ApplicationSession,
-  type ExternalIdentity,
   type InstallationMember,
   type IssuedApplicationSession,
   type IssuedManagedApiKey,
+  installationOperatorPrincipalId,
   type LoginAttempt,
   managedApiKeyCredentialPattern,
   type ManagedApiKey,
@@ -56,15 +55,6 @@ export interface InstallationIdentityRepository {
       readonly role: MembershipRole;
     },
   ) => Effect.Effect<InstallationMember, IdentityConflict | IdentityRepositoryFailure>;
-  readonly bindExternalIdentity: (
-    command: {
-      readonly boundAt: string;
-      readonly email: string;
-      readonly memberId: string;
-      readonly provider: string;
-      readonly subject: string;
-    },
-  ) => Effect.Effect<void, IdentityConflict | IdentityRepositoryFailure>;
   readonly createApiKey: (
     key: StoredManagedApiKey,
   ) => Effect.Effect<ManagedApiKey, IdentityRepositoryFailure>;
@@ -93,11 +83,6 @@ export interface InstallationIdentityRepository {
   readonly findActiveMemberByEmail: (
     installationId: string,
     email: string,
-  ) => Effect.Effect<InstallationMember | null, IdentityRepositoryFailure>;
-  readonly findActiveMemberByExternalIdentity: (
-    installationId: string,
-    provider: string,
-    subject: string,
   ) => Effect.Effect<InstallationMember | null, IdentityRepositoryFailure>;
   readonly findMember: (
     installationId: string,
@@ -183,6 +168,19 @@ export interface AdmitMemberCommand {
   readonly role: MembershipRole;
 }
 
+/** A human administrator key minted by an operator with storage access. */
+export interface IssueOperatorAdministratorKeyCommand {
+  readonly displayName: string;
+  readonly email: string;
+  readonly expiresAt: string;
+}
+
+/** The administrator an operator key belongs to, and its one-time secret. */
+export interface IssuedOperatorAdministratorKey {
+  readonly issued: IssuedManagedApiKey;
+  readonly member: InstallationMember;
+}
+
 export interface IssueApiKeyCommand {
   readonly capabilities: readonly PrincipalCapability[];
   readonly expiresAt: string;
@@ -207,29 +205,11 @@ export interface InstallationAccessOperations {
   readonly authenticateManagedApiKey: (
     credential: Redacted.Redacted,
   ) => Effect.Effect<Principal, AuthenticationRequired | IdentityRepositoryFailure>;
-  readonly authenticateExternalIdentity: (
-    identity: ExternalIdentity,
-  ) => Effect.Effect<
-    Principal,
-    IdentityAdmissionDenied | IdentityConflict | IdentityRepositoryFailure
-  >;
-  readonly authenticateExternalSubject: (
-    provider: string,
-    subject: string,
-  ) => Effect.Effect<Principal | null, IdentityRepositoryFailure>;
   readonly authenticateSession: (
     credential: Redacted.Redacted,
   ) => Effect.Effect<
     AuthenticatedApplicationSession,
     AuthenticationRequired | IdentityRepositoryFailure
-  >;
-  readonly completeExternalIdentity: (
-    identity: ExternalIdentity,
-  ) => Effect.Effect<
-    IssuedApplicationSession,
-    | IdentityAdmissionDenied
-    | IdentityConflict
-    | IdentityRepositoryFailure
   >;
   readonly deactivateMember: (
     principal: Principal,
@@ -255,6 +235,17 @@ export interface InstallationAccessOperations {
   ) => Effect.Effect<
     readonly InstallationMember[],
     AuthorizationDenied | IdentityRepositoryFailure
+  >;
+  /**
+   * Create or reuse an active administrator member by email and mint a key
+   * whose browser sign-in acts as that administrator. Operators call it with
+   * storage access, so no application principal authorizes it.
+   */
+  readonly issueOperatorAdministratorKey: (
+    command: IssueOperatorAdministratorKeyCommand,
+  ) => Effect.Effect<
+    IssuedOperatorAdministratorKey,
+    IdentityConflict | IdentityRepositoryFailure
   >;
   readonly issueLocalBrowserLogin: (
     credential: Redacted.Redacted,
@@ -442,84 +433,6 @@ function makeInstallationAccessService(
     return yield* loginAsLocalOwner();
   });
 
-  const completeExternalIdentity = Effect.fn(
-    "InstallationAccessService.completeExternalIdentity",
-  )(function*(identity: ExternalIdentity) {
-    const member = yield* resolveExternalMember(identity);
-    return yield* issueMemberSession(member);
-  });
-
-  const resolveExternalMember = Effect.fn(
-    "InstallationAccessService.resolveExternalMember",
-  )(function*(identity: ExternalIdentity) {
-    if (!identity.emailVerified) {
-      return yield* Effect.fail(new IdentityAdmissionDenied({
-        message: "The login provider did not verify the email address.",
-      }));
-    }
-    const email = yield* normalizeEmail(identity.email);
-    let member = yield* dependencies.repository.findActiveMemberByExternalIdentity(
-      dependencies.installationId,
-      identity.provider,
-      identity.subject,
-    );
-    if (member === null) {
-      member = yield* dependencies.repository.findActiveMemberByEmail(
-        dependencies.installationId,
-        email,
-      );
-    }
-    if (member === null) {
-      const hasMembers = yield* dependencies.repository.hasMembers(
-        dependencies.installationId,
-      );
-      const bootstrapAdministratorEmail = yield* normalizeEmail(
-        dependencies.bootstrapAdministratorEmail,
-      );
-      if (
-        hasMembers ||
-        email !== bootstrapAdministratorEmail
-      ) {
-        return yield* Effect.fail(new IdentityAdmissionDenied({
-          message: "This person has not been admitted to the Artifact Server.",
-        }));
-      }
-      member = yield* dependencies.repository.admitMember({
-        createdAt: dependencies.clock.now().toISOString(),
-        displayName: identity.displayName,
-        email,
-        id: dependencies.ids.memberId(),
-        installationId: dependencies.installationId,
-        role: membershipRoles.administrator,
-      });
-    }
-    yield* dependencies.repository.bindExternalIdentity({
-      boundAt: dependencies.clock.now().toISOString(),
-      email,
-      memberId: member.id,
-      provider: identity.provider,
-      subject: identity.subject,
-    });
-    return member;
-  });
-
-  const authenticateExternalIdentity = Effect.fn(
-    "InstallationAccessService.authenticateExternalIdentity",
-  )(function*(identity: ExternalIdentity) {
-    return humanPrincipal(yield* resolveExternalMember(identity));
-  });
-
-  const authenticateExternalSubject = Effect.fn(
-    "InstallationAccessService.authenticateExternalSubject",
-  )(function*(provider: string, subject: string) {
-    const member = yield* dependencies.repository.findActiveMemberByExternalIdentity(
-      dependencies.installationId,
-      provider,
-      subject,
-    );
-    return member === null ? null : humanPrincipal(member);
-  });
-
   const authenticateSession = Effect.fn(
     "InstallationAccessService.authenticateSession",
   )(function*(credential: Redacted.Redacted) {
@@ -540,7 +453,7 @@ function makeInstallationAccessService(
     const authenticated: AuthenticatedApplicationSession = {
       csrfDigest: session.csrfDigest,
       expiresAt: session.expiresAt,
-      principal: sessionPrincipal(session.subject),
+      principal: yield* sessionPrincipal(session.subject),
     };
     sessionCache?.set(
       cacheKey(tokenDigest),
@@ -714,6 +627,76 @@ function makeInstallationAccessService(
     return {apiKey, token};
   });
 
+  const issueOperatorAdministratorKey = Effect.fn(
+    "InstallationAccessService.issueOperatorAdministratorKey",
+  )(function*(command: IssueOperatorAdministratorKeyCommand) {
+    const email = yield* normalizeEmail(command.email);
+    const displayName = yield* requireText(command.displayName, "display name");
+    const now = dependencies.clock.now();
+    const expiresAt = yield* requireFutureDate(command.expiresAt, now);
+    const existing = yield* dependencies.repository.findActiveMemberByEmail(
+      dependencies.installationId,
+      email,
+    );
+    const member = existing ?? (yield* dependencies.repository.admitMember({
+      createdAt: now.toISOString(),
+      displayName,
+      email,
+      id: dependencies.ids.memberId(),
+      installationId: dependencies.installationId,
+      role: membershipRoles.administrator,
+    }));
+    if (member.role !== membershipRoles.administrator) {
+      return yield* Effect.fail(new IdentityConflict({
+        message: "That email belongs to a member who is not an administrator.",
+      }));
+    }
+    const id = dependencies.ids.apiKeyId();
+    const token = `as_key_${id}_${dependencies.secrets.issue()}`;
+    const apiKey = yield* dependencies.repository.createApiKey({
+      authorizedByPrincipalId: installationOperatorPrincipalId,
+      capabilities: allCapabilities,
+      createdAt: now.toISOString(),
+      expiresAt,
+      id,
+      installationId: dependencies.installationId,
+      name: "Operator administrator key",
+      prefix: token.slice(0, Math.min(token.length, 32)),
+      principalId: member.id,
+      principalKind: principalKinds.human,
+      revokedAt: null,
+      rotatedFromId: null,
+      secretDigest: dependencies.secrets.digest(token),
+    });
+    const issued: IssuedOperatorAdministratorKey = {
+      issued: {apiKey, token},
+      member,
+    };
+    return issued;
+  });
+
+  // An operator key signs its member in directly, so the session acts as that
+  // administrator while the member stays active. Bearer use stays delegated.
+  const sessionPrincipal = Effect.fn(
+    "InstallationAccessService.sessionPrincipal",
+  )(function*(subject: ApplicationSession["subject"]) {
+    if (subject.kind === "member") return humanPrincipal(subject.member);
+    const key = subject.apiKey;
+    if (key.authorizedByPrincipalId !== installationOperatorPrincipalId) {
+      return apiKeyPrincipal(key);
+    }
+    const member = yield* dependencies.repository.findMember(
+      dependencies.installationId,
+      key.principalId,
+    );
+    if (member?.status !== memberStatuses.active) {
+      return yield* Effect.fail(new AuthenticationRequired({
+        message: "A valid application session is required.",
+      }));
+    }
+    return humanPrincipal(member);
+  });
+
   const listApiKeys = Effect.fn(
     "InstallationAccessService.listApiKeys",
   )(function*(principal: Principal) {
@@ -793,14 +776,12 @@ function makeInstallationAccessService(
 
   return InstallationAccessService.of({
     admitMember,
-    authenticateExternalIdentity,
-    authenticateExternalSubject,
     authenticateManagedApiKey,
     authenticateSession,
-    completeExternalIdentity,
     deactivateMember,
     issueApiKey,
     issueLocalBrowserLogin,
+    issueOperatorAdministratorKey,
     loginAsLocalOwner,
     listApiKeys,
     listMembers,
@@ -810,17 +791,6 @@ function makeInstallationAccessService(
     revokeSession,
     rotateApiKey,
   });
-}
-
-function sessionPrincipal(subject: ApplicationSession["subject"]): Principal {
-  switch (subject.kind) {
-    case "member":
-      return humanPrincipal(subject.member);
-    case "api_key":
-      return apiKeyPrincipal(subject.apiKey);
-    default:
-      return subject satisfies never;
-  }
 }
 
 function apiKeyPrincipal(key: ManagedApiKey): Principal {

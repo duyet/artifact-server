@@ -10,16 +10,13 @@ import type { ArtifactCommentService } from "./artifact-comments.js";
 import type { ArtifactManagementService } from "./artifact-management.js";
 import type { CompareArtifactService } from "./compare-artifact.js";
 import type { InstallationAccessService } from "./installation-access.js";
-import type { InteractiveLoginService } from "./interactive-login.js";
-import type { LinkedArtifactService } from "./linked-artifacts.js";
 import type {ProjectManagementService} from "./project-management.js";
-import type {ProjectGitHistoryService} from "./project-git-history.js";
 import type {ExpiredStagingCleanupService} from "./expired-staging-cleanup.js";
-import type {GitHistoryAccessService} from "./git-history-access.js";
 import type {PublicLinkAdministrationService} from
   "./public-link-administration.js";
 import type {PublicArtifactCatalogService} from
   "./public-artifact-catalog.js";
+import type {ProjectAnalyticsService} from "./project-analytics.js";
 
 /** Application services shared by every Artifact Server entry point. */
 export type ApplicationServices =
@@ -31,13 +28,10 @@ export type ApplicationServices =
   | CompareArtifactService
   | ContentAccessService
   | ExpiredStagingCleanupService
-  | GitHistoryAccessService
   | InstallationAccessService
-  | InteractiveLoginService
-  | LinkedArtifactService
   | PublishArtifactService
   | ProjectManagementService
-  | ProjectGitHistoryService
+  | ProjectAnalyticsService
   | PublicArtifactCatalogService
   | PublicLinkAdministrationService
   | StagedUploadService;

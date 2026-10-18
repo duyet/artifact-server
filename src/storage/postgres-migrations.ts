@@ -3,8 +3,6 @@ import * as Migrator from "effect/unstable/sql/Migrator";
 import {SqlClient} from "effect/unstable/sql/SqlClient";
 
 import {normalizeArtifactSearchText} from "../application/artifact-tags.js";
-import {defaultGitHistoryMaximumCopiedFiles} from
-  "../git-history/git-history-capability.js";
 
 const initialSchema = Effect.gen(function*() {
   const sql = yield* SqlClient;
@@ -540,7 +538,7 @@ const addGitHistoryMirror = Effect.gen(function*() {
       ADD COLUMN file_copy_limit_bytes BIGINT NOT NULL DEFAULT 10485760,
       ADD COLUMN version_copy_limit_bytes BIGINT NOT NULL DEFAULT 52428800,
       ADD COLUMN maximum_copied_files INTEGER NOT NULL
-        DEFAULT ${defaultGitHistoryMaximumCopiedFiles},
+        DEFAULT 500,
       ADD COLUMN storage_budget_bytes BIGINT`,
     `CREATE TABLE git_history_repositories (
       installation_id TEXT NOT NULL REFERENCES artifact_installations(id),
@@ -710,6 +708,79 @@ const addApiKeySessions = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+// An artifact's owner is the principal who created it. Artifacts created
+// before owners were recorded take the publisher of their first version and
+// keep a null name, because nobody recorded the name that publisher had then.
+const addArtifactOwner = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    "ALTER TABLE artifacts ADD COLUMN owner_principal_id TEXT",
+    "ALTER TABLE artifacts ADD COLUMN owner_display_name TEXT",
+    `UPDATE artifacts SET owner_principal_id = (
+      SELECT versions.publisher_principal_id FROM versions
+      WHERE versions.installation_id = artifacts.installation_id
+        AND versions.artifact_id = artifacts.id
+        AND versions.number = 1
+    )`,
+    // artifacts carries a deferred foreign key, so the backfill queues
+    // trigger events that would make the next ALTER TABLE fail.
+    "SET CONSTRAINTS ALL IMMEDIATE",
+    "ALTER TABLE artifacts ALTER COLUMN owner_principal_id SET NOT NULL",
+    "ALTER TABLE versions ADD COLUMN publisher_display_name TEXT",
+    `CREATE INDEX artifacts_owner_created
+      ON artifacts (
+        installation_id, project_id, owner_principal_id, deleted_at,
+        created_at DESC, id DESC
+      )`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
+// A rename replays the name it set, so its idempotency record keeps that
+// name. The action history gains the rename and edit kinds.
+const addRenameAndEditActions = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `ALTER TABLE actions
+      DROP CONSTRAINT actions_action_check,
+      ADD CONSTRAINT actions_action_check
+        CHECK (action IN (
+          'publish', 'restore', 'change_access', 'change_tags', 'delete',
+          'comment_create', 'comment_reply', 'comment_update',
+          'comment_resolve', 'comment_reopen', 'comment_delete',
+          'renamed', 'edited'
+        ))`,
+    `ALTER TABLE idempotency_records
+      DROP CONSTRAINT idempotency_records_operation_check,
+      ADD CONSTRAINT idempotency_records_operation_check
+        CHECK (operation IN (
+          'publish', 'restore', 'change_access', 'change_tags', 'rename', 'delete'
+        ))`,
+    "ALTER TABLE idempotency_records ADD COLUMN artifact_name TEXT",
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
+// Browser login through an external identity provider was removed, so no
+// member binds an external identity any more.
+const dropExternalIdentities = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  yield* sql.unsafe("DROP TABLE IF EXISTS external_identities");
+});
+
+// Git history was removed. Its tables only described copies of versions in an
+// external provider, so they are dropped, children before parents.
+const dropGitHistory = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  yield* sql.unsafe(`DROP TABLE IF EXISTS
+    git_history_budget_reservations,
+    git_history_jobs,
+    git_history_mappings,
+    git_history_repositories,
+    git_history_project_settings,
+    git_history_provider_identity`);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -725,10 +796,14 @@ const migrationLoader = Migrator.fromRecord({
   "0012_artifact_path": addArtifactPath,
   "0013_artifact_views": addArtifactViews,
   "0014_api_key_sessions": addApiKeySessions,
+  "0015_artifact_owner": addArtifactOwner,
+  "0016_rename_and_edit_actions": addRenameAndEditActions,
+  "0017_drop_external_identities": dropExternalIdentities,
+  "0018_drop_git_history": dropGitHistory,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 14;
+export const requiredPostgresSchemaVersion = 18;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -825,6 +900,18 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 14,
     name: "api_key_sessions",
+  }, {
+    migration_id: 15,
+    name: "artifact_owner",
+  }, {
+    migration_id: 16,
+    name: "rename_and_edit_actions",
+  }, {
+    migration_id: 17,
+    name: "drop_external_identities",
+  }, {
+    migration_id: 18,
+    name: "drop_git_history",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

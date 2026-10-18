@@ -2,6 +2,8 @@
 
 Status: accepted
 
+> Superseded in part (2026-10-18): `artifactserver connect` and the stdio bridge it registered were removed. Agents connect to `/mcp` over HTTP with an API key.
+
 ## Context
 
 Artifact Server has three ways to call product operations: HTTP, MCP, and the

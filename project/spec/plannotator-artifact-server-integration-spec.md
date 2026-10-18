@@ -147,7 +147,7 @@ Artifact Server creates a separate review session and serves the same saved vers
 
 Plannotator stores the comment and its anchor. The anchor includes the Artifact Server installation ID, project ID, artifact ID, exact version ID, route, and the selector or text information needed to find the reviewed content again. Opening the comment always requests the same saved version.
 
-The bridge must not contain or receive a reusable Plannotator credential. Stored files, fingerprints, manifests, downloads, normal browser responses, and optional Git history remain unchanged. Review responses are private and are not placed in a shared CDN cache.
+The bridge must not contain or receive a reusable Plannotator credential. Stored files, fingerprints, manifests, downloads, and normal browser responses remain unchanged. Review responses are private and are not placed in a shared CDN cache.
 
 The implementation team must prototype the review channel before committing to its final UI. The prototype must test:
 

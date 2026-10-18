@@ -3,11 +3,39 @@ export type SettingsRoute =
   | {readonly kind: "projects"}
   | {readonly kind: "project"; readonly projectId: string}
   | {readonly kind: "mcp"}
-  | {readonly kind: "webmcp"}
   | {readonly kind: "members"}
   | {readonly kind: "apiKeys"}
   | {readonly kind: "publicLinks"}
   | {readonly kind: "notFound"};
+
+/** One top-level destination in the review application. */
+export type ReviewRoute =
+  | {readonly kind: "artifacts"}
+  | {readonly kind: "analytics"}
+  | {readonly kind: "settings"; readonly settings: SettingsRoute};
+
+export const artifactsPath = "/review";
+export const analyticsPath = "/review/analytics";
+export const settingsPath = "/review/settings";
+export const mcpSettingsPath = "/review/settings/mcp";
+
+/** Parse the application path. Any unknown review path shows the artifacts. */
+export function parseReviewRoute(pathname: string): ReviewRoute {
+  if (isSettingsPath(pathname)) {
+    return {kind: "settings", settings: parseSettingsRoute(pathname)};
+  }
+  if (pathname === analyticsPath || pathname === `${analyticsPath}/`) {
+    return {kind: "analytics"};
+  }
+  return {kind: "artifacts"};
+}
+
+/** Add the project query to a review path, or leave it bare without one. */
+export function withProject(pathname: string, projectId: string): string {
+  return projectId === ""
+    ? pathname
+    : `${pathname}?${new URLSearchParams({project: projectId})}`;
+}
 
 /** Return whether the current document path belongs to the settings mode. */
 export function isSettingsPath(pathname: string): boolean {
@@ -30,8 +58,6 @@ export function parseSettingsRoute(pathname: string): SettingsRoute {
         return {kind: "projects"};
       case "mcp":
         return {kind: "mcp"};
-      case "webmcp":
-        return {kind: "webmcp"};
       case "members":
         return {kind: "members"};
       case "api-keys":

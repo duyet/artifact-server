@@ -3,6 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-08-23
 
+> Superseded in part (2026-10-18): OIDC and WorkOS browser login and MCP OAuth were removed. Private-team servers report login kind `none` and browsers sign in with managed API keys.
+
 ## Decision
 
 Artifact Server will ship two first-release access modes: **local owner** and

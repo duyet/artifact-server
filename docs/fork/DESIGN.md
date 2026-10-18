@@ -25,8 +25,7 @@ A middleware that runs before every application route reads the `Host` header (`
 
 1. `review-…` goes to `servePreviewLeaseContent`. The lease token in the host name is the credential.
 2. A `__artifact_bootstrap` query goes to `exchangeContentBootstrap` (`:3863`). It sets the HttpOnly, `SameSite=Strict` cookie `__Host-artifact_content` on that host (`:3937`).
-3. `live-…` goes to `serveLiveContent`. Linked sources work only on loopback.
-4. Any other label goes to `serveVersionContent` (`:3422`).
+3. Any other label goes to `serveVersionContent` (`:3422`).
 
 `serveVersionContent` turns the URL path into a manifest path (`manifestPathFromUrl`, `src/manifest/create-manifest.ts:73`) and calls `ContentAccessService.authorizeVersionContent` (`src/application/content-access.ts:357`). The repository maps (token, path) to one manifest entry. The service allows the read if the artifact is `public_link` and the version is current (`:367`). Otherwise it needs a content-session cookie bound to that token (`:373`). `serveStoredVersionContent` streams the blob (`src/http/create-http-app.ts:3501`). Content responses carry no CSP. The separate origin is the only isolation.
 
@@ -189,7 +188,7 @@ Without `allow-same-origin`, the browser gives the artifact document an opaque o
 - `fetch("/api/...", {credentials: "include"})` from an opaque origin is cross-site, so the browser drops the `SameSite=Lax` cookies. The API sends no CORS headers (AUTH-012), so the script cannot read the 401 either.
 - A form POST sends `Origin: null` without the Lax cookies. `requireBrowserMutationSecurity` also requires the application Origin, `Sec-Fetch-Site: same-origin`, and the CSRF header (`src/http/create-http-app.ts:2645`).
 - Service worker registration fails for an opaque origin, so artifact code cannot intercept application pages. This is spec behavior. The Phase 2 browser probe asserts it.
-- With no identity provider (section 5), the browser holds no session or CSRF cookie at all.
+- Until a person signs in with an API key (section 5), the browser holds no session or CSRF cookie at all.
 
 ### Review frame
 
@@ -204,50 +203,48 @@ Review renders artifact HTML in an opaque `srcdoc` iframe with `sandbox="allow-s
 | Client-side routers | `routingMode: spa` still serves the entry for unknown paths in the folder. A router that assumes `/` as its base picks the wrong route. | SPAs only. |
 | Canvas readback of same-folder images without `crossorigin` | The image is cross-origin to the opaque document, so the canvas is tainted. | Rarely. |
 | Workers from a script URL | An opaque origin cannot create one. A `blob:` worker is untested. | Rarely. |
-| A private (`account_required`) version opened in its own tab | An opaque document's subresource requests never carry the content-session cookie, so the bootstrap flow cannot work. Path mode answers it with `CapabilityUnavailable`. Review still shows private versions, because lease URLs carry the credential. | Only with OIDC. |
+| A private (`account_required`) version opened in its own tab | An opaque document's subresource requests never carry the content-session cookie, so the bootstrap flow cannot work. Path mode answers it with `CapabilityUnavailable`. Review still shows private versions, because lease URLs carry the credential. | Only for private versions, which need an API-key session. |
 | A page loaded during a publish | The folder serves the current version. A publish between the HTML load and a subresource load can mix two versions. A publish between resolving the folder and serving it can answer 401 once. Upstream redirects to an immutable origin instead. | A reload fixes it. |
 
 ### Residual risk
 
-Upstream isolates top-level content twice, with a separate registrable domain and with a per-version origin. Path mode has one layer, the CSP sandbox. If a browser bug let artifact code escape it while OIDC is on, that code could act as the viewer. With no identity provider, the browser holds no credential to take. Current Chromium, Firefox, and WebKit implement CSP `sandbox` (inferred, not tested here). The Phase 2 browser test runs in Chromium only, because `playwright.config.ts` defines no other project.
+Upstream isolates top-level content twice, with a separate registrable domain and with a per-version origin. Path mode has one layer, the CSP sandbox. If a browser bug let artifact code escape it while a viewer is signed in with an API key, that code could act as the viewer. A viewer who has not signed in has no credential to take. Current Chromium, Firefox, and WebKit implement CSP `sandbox` (inferred, not tested here). The Phase 2 browser test runs in Chromium only, because `playwright.config.ts` defines no other project.
 
 ## 5. No-login mode
 
-### Today
+### Behavior
 
-- Both server modes refuse to start without a browser login provider. They throw "A private-team server requires exactly one OIDC or WorkOS browser-login provider." External storage throws at `src/cli/lifecycle-commands.ts:323` and again in `startExternalStorageServer` (`src/external-storage/start-external-storage-server.ts:41`). Compact throws at `src/cli/lifecycle-commands.ts:394` and in `startLocalServer` (`src/local/start-local-server.ts:38`). `config check` throws too (`src/cli/lifecycle-commands.ts:535`).
-- Two tests pin the guard (`tests/cli/lifecycle-cli.test.ts:110`, `tests/conformance/installation-identity.test.ts:457`), and so does AUTH-025 (`project/spec/conformance.yml:1663`).
-- `maintenance cleanup-staging` loads no provider (`src/cli/lifecycle-commands.ts:490`), so it already runs without one.
-- Viewing already needs no login for the current version of a public-link artifact (`src/application/content-access.ts:367`).
-- `/api/*` and `/mcp` already accept the API key as a bearer token (`src/http/create-http-app.ts:800`).
-- The default access setting is `account_required` in HTTP (`src/http/create-http-app.ts:192`), in MCP (`src/mcp/artifact-mcp-server.ts:1250`), and in the CLI, which sends the value explicitly (`src/cli/publish-command.ts:162`, `:167`).
+- Both private-team server modes report the browser login kind `none` and start without any browser login provider. `/auth/context` reports `none`. The routes `/auth/login` and `/auth/callback` do not exist. The only other login kind is `local_owner`, for the loopback local server.
+- Viewing needs no login for the current version of a public-link artifact (`src/application/content-access.ts:367`).
+- `/api/*` and `/mcp` accept a managed API key as a bearer token (`src/http/create-http-app.ts:800`). No other token type is accepted.
+- Browsers sign in by posting a managed API key (see API-key sign-in below). AUTH-025 pins the contract (`project/spec/conformance.yml:1569`).
 
 ### Change
 
-1. Add the browser login kind `none` to `BrowserAccess` (`src/core/browser-access.ts:21`). Both server modes use `{mode: "private_team", loginKind: "none"}` when neither OIDC nor WorkOS is configured, instead of throwing. The two start guards accept it. `/auth/context` reports `none`. `/auth/login` already answers 404 `InteractiveLoginUnavailable` without a provider.
-2. The Review sign-in gate (`apps/web/src/review/review-app.tsx:458`) shows that browser sign-in is off instead of a dead **Sign in** button. The client schema at `apps/web/src/api/client.ts:83` accepts `none`.
+1. The browser login kind `none` in `BrowserAccess` (`src/core/browser-access.ts:21`) is the only private-team kind. Both server modes use `{mode: "private_team", loginKind: "none"}`. `/auth/context` reports `none`.
+2. The Review sign-in gate (`apps/web/src/review/review-app.tsx:458`) shows the API-key sign-in form (see below) instead of a dead **Sign in** button. The client schema at `apps/web/src/api/client.ts:83` accepts `none`.
 3. With login kind `none`, `GET /review?artifact=<id>…` redirects to `/artifacts/<id>`, which redirects to the folder. MCP tells agents to hand users the Review URL (`src/mcp/artifact-mcp-server.ts:1244`, `:2334`). Without this redirect, every link an agent shares would end at a sign-in page.
-4. With login kind `none`, new artifacts default to `public_link`. One function, `defaultAccessSetting(browserAccess)` in `src/core/browser-access.ts`, owns the rule. It returns `public_link` for `none` and `account_required` otherwise.
+4. With login kind `none`, new artifacts default to `public_link`. One function, `defaultAccessSetting(browserAccess)` in `src/core/browser-access.ts`, owns the rule. It returns `public_link` for `none` and `account_required` for `local_owner`.
    - HTTP: the commit schema (`src/http/create-http-app.ts:192`) makes `accessSetting` optional, and the commit route (`:2224`) fills in the default.
    - MCP: `McpHttpAdapterDependencies` and `ArtifactMcpServerDependencies` gain `defaultAccessSetting`, which `createHttpApp` sets. The commit tool schema (`src/mcp/artifact-mcp-server.ts:1250`) defaults to it.
-   - CLI: `publish` sends `accessSetting` only with `--public` (`src/cli/publish-command.ts:162`, `:167`), and `FilePublicationTarget.accessSetting` becomes optional (`src/client/file-publication-client.ts:189`). The server then applies its own default. Against a server with login on, the result is `account_required`, as before.
+   - CLI: `publish` sends `accessSetting` only with `--public` (`src/cli/publish-command.ts:162`, `:167`), and `FilePublicationTarget.accessSetting` becomes optional (`src/client/file-publication-client.ts:189`). The server then applies its own default. Against a local-owner server, the result is `account_required`.
    - The publish input digest includes the resolved setting (`src/application/publish-artifact.ts:232`), so retries on one server stay idempotent.
 
-With OIDC configured, both modes keep upstream login, Review, comments, members, and key administration, and the default stays `account_required`. Review previews work through `/v/review-…` leases with no extra code. Opening a private version in its own tab does not work (section 4).
+Review and comments work on a private-team server after API-key sign-in. A publisher can still set `account_required` on a version. Review previews work through `/v/review-…` leases with no extra code. Opening a private version in its own tab does not work (section 4).
 
 ### The API key in external storage
 
 The key comes from the runtime Secret as `ARTIFACT_SERVER_API_TOKEN_FILE` (`packaging/helm/artifact-server/templates/_helpers.tpl:142`). Its format is `as_key_key_<hex id>_<base64url secret>` (`src/core/installation-identity.ts:8`). Every serving start and every cleanup run calls `ensureBootstrapManagedApiKey` (`src/external-storage/create-external-storage-runtime.ts:154`). The first start registers the key with all capabilities. Later startups require the same key. A different key ID fails once any member or key exists (`src/storage/postgres-identity-repository.ts:412`), and a different secret under the same ID fails the digest check (`src/application/bootstrap-managed-api-key.ts:61`). Editing the Secret after the first start therefore crashes every pod and every cleanup run.
 
-Issuing, rotating, or revoking keys needs a human administrator (`src/application/installation-access.ts:797`), and an administrator needs browser login. Without login, all publishers share this one key. This is accepted for now.
+Admitting members and issuing, rotating, or revoking keys needs a direct human administrator session (`src/application/installation-access.ts:797`). An API-key session acts as the key's principal, which is never a direct human administrator, and a private-team server has no member sign-in. So all publishers share this one key unless an operator seeds an administrator session. This is accepted for now.
 
-`ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL` stays required in external storage (`src/lifecycle/runtime-configuration.ts:304`), even without login.
+`ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL` stays required in external storage (`src/lifecycle/runtime-configuration.ts:304`).
 
 ### API-key sign-in
 
-With login kind `none`, Review shows a form that posts `{"apiKey": "..."}` to `POST /auth/api-key`. The route exists only for login kind `none` and answers 404 otherwise.
+On a private-team server, Review shows a form that posts `{"apiKey": "..."}` to `POST /auth/api-key`. The route exists only for login kind `none` and answers 404 on a local-owner server.
 
-- A session has one subject, a member or an API key (`ApplicationSessionSubject` in `src/core/installation-identity.ts`). Key sessions live in their own table, `api_key_sessions`, in SQLite (schema 14) and Postgres (migration 13). D1 has no such table, because the Worker always requires OIDC or WorkOS.
+- A session has one subject, a member or an API key (`ApplicationSessionSubject` in `src/core/installation-identity.ts`). Key sessions live in their own table, `api_key_sessions`, in SQLite (schema 14) and Postgres (migration 13).
 - The key is checked exactly as a bearer key is. The session principal comes from the same `apiKeyPrincipal` function, so it equals the bearer principal. The session ends at the earlier of the normal session lifetime and the key's expiry.
 - A key session is valid only while both the session and its key are live. Revoking or rotating the key revokes its sessions in the same transaction and clears the in-process caches.
 - The request needs `Origin` equal to the application origin and `Sec-Fetch-Site: same-origin`. No CSRF token exists before sign-in.
@@ -261,20 +258,19 @@ With login kind `none`, Review shows a form that posts `{"apiKey": "..."}` to `P
 
 The fork patches `packaging/helm/artifact-server` (1,240 lines) instead of adding a chart. The patch touches about 40 chart lines plus about 25 README lines (counted from the files). A new chart would copy most of the 1,240 lines and then delete the same content-domain and provider paths.
 
-Both the content domain and the identity provider become optional. Values that set them render exactly as upstream, so the upstream render and kind tests keep passing.
+The content domain becomes optional. Values that set it render exactly as upstream, so the upstream render and kind tests keep passing.
 
 | File | Change |
 | --- | --- |
 | `Chart.yaml:7` | `kubeVersion` becomes `">=1.33.0-0 <1.37.0-0"`. The templates use only `apps/v1`, `batch/v1`, `networking.k8s.io/v1`, `policy/v1`, and `v1`, which 1.33 serves. |
 | `values.schema.json:75` | `configuration.contentDomain` accepts `""`, in the same `oneOf` form that `s3.endpoint` uses (`:88`). |
 | `values.schema.json:234` | No change. `ingress.contentTlsSecretName` is already a plain string that accepts `""`. |
-| `templates/_helpers.tpl:80` | Delete the rule that requires exactly one browser-login provider. The partial-configuration rules for OIDC and WorkOS (`:63` to `:79`) stay. |
 | `templates/_helpers.tpl:111` | Require `ingress.contentTlsSecretName` only when `configuration.contentDomain` is set. |
 | `templates/_helpers.tpl:146` | Emit `ARTIFACT_SERVER_CONTENT_DOMAIN` only when it is set. The runtime treats an empty value as missing (`src/lifecycle/runtime-configuration.ts:655`). |
 | `templates/ingress.yaml:22`, `:36` | Render the wildcard TLS entry and the wildcard rule only when `configuration.contentDomain` is set. The application rule already routes `path: /` with `pathType: Prefix` (`:26`), so path-mode content needs nothing more. |
 | `templates/NOTES.txt:15` | Print the content line only when a content domain is set. |
 | `templates/cleanup-cronjob.yaml:25` | Add `enableServiceLinks: false`. The CronJob passes no `--port` (`:38`), and a Service named `artifact-server` injects `ARTIFACT_SERVER_PORT=tcp://…`, which `portOption` reads (`src/cli/lifecycle-commands.ts:570`) and `parsePort` rejects. This is a latent upstream bug (inferred, not run). The Deployment already passes `--port 8787` (`deployment.yaml:77`). |
-| `README.md` | Kubernetes 1.33 to 1.36, one host with one TLS secret, no identity provider, `s3.endpoint` and `s3.forcePathStyle`, egress to the S3 port, and the ingress annotations for uploads. |
+| `README.md` | Kubernetes 1.33 to 1.36, one host with one TLS secret, `s3.endpoint` and `s3.forcePathStyle`, egress to the S3 port, and the ingress annotations for uploads. |
 
 These need no change:
 - `s3.endpoint` accepts `http://` in both the schema (`values.schema.json:88`) and the runtime (`src/lifecycle/runtime-configuration.ts:791`). The runtime accepts any region string (`:471`), but the gateway does not (section 2). MinIO over plain HTTP with path-style is already proved (`tests/release/helm-chart.test.ts:590`).
@@ -283,7 +279,7 @@ These need no change:
 
 Outside the chart:
 - `project/spec/decisions/0013-kubernetes-helm-release.md:12` to `:17` and `:83` add 1.33 to the window, and `:39` makes the wildcard host optional. The ADR asks for the window to move deliberately, and this is that change.
-- `scripts/verify-helm-chart.sh:24` adds `1.33.0` to the render loop. `:84` to `:87` expect the no-provider render to fail, so the fork deletes that case. It adds a render case with no content domain and no provider, which asserts one ingress host and no `ARTIFACT_SERVER_CONTENT_DOMAIN`.
+- `scripts/verify-helm-chart.sh:24` adds `1.33.0` to the render loop. It adds a render case with no content domain, which asserts one ingress host and no `ARTIFACT_SERVER_CONTENT_DOMAIN`.
 - `scripts/check-release-version.mjs:8` and `:99` pin `values.yaml` to `ghcr.io/plannotator/artifact-server`. The fork leaves `values.yaml` alone, and the release workflow writes the fork image into the packaged chart (section 8).
 
 ### Values the deployment sets
@@ -343,15 +339,15 @@ Branch `feat/k8s-compact-same-host`. Each commit passes its check before the nex
 | 7 | `feat(http): serve artifact folders` | FRK-003 test: folder names (ASCII, Vietnamese diacritics, CJK only, long names), current version served, a new version moves the folder, `account_required` gets 401, 308 for the trailing slash and for a wrong name part. The route-table collision test. |
 | 8 | `feat(http): scope the review frame CSP to /v/` | The CSP string test, and the CI browser run of the existing Review sandbox and preview specs in path mode. |
 | 9 | `feat(config): make the content domain optional` | In `tests/cli/lifecycle-cli.test.ts`, compact and external-storage `config check` pass without the variable, and a same-domain value still fails. `tests/integration/external-storage-runtime.test.ts` gains a path-mode publish and read (CI, Docker). |
-| 10 | `feat(auth): start without a browser login provider` | FRK-004 test for both modes: start with no provider, `/auth/context` reports `none`, `/auth/login` returns 404, `/review?artifact=` redirects, and bearer publish works. Update the two AUTH-025 tests. `pnpm --filter @artifact-server/web typecheck`. |
-| 11 | `feat(publish): default to public links without login` | FRK-005 test: with login `none`, HTTP, MCP, and CLI publishes without a setting produce `public_link`. With OIDC, they produce `account_required`. `--public` still works against both. |
-| 12 | `feat(helm): install on Kubernetes 1.33 without a content domain or login` | `pnpm verify:helm-static` with 1.33 and the new no-domain, no-provider case. The upstream kind test (`pnpm test:helm`, CI) still passes with its content domain and OIDC values. |
+| 10 | `feat(auth): report login kind none` | FRK-004 test for both modes: `/auth/context` reports `none`, `/auth/login` returns 404, `/review?artifact=` redirects, and bearer publish works. Update the AUTH-025 tests. `pnpm --filter @artifact-server/web typecheck`. |
+| 11 | `feat(publish): default to public links without login` | FRK-005 test: with login `none`, HTTP, MCP, and CLI publishes without a setting produce `public_link`. Against a local-owner server, they produce `account_required`. `--public` still works against both. |
+| 12 | `feat(helm): install on Kubernetes 1.33 without a content domain` | `pnpm verify:helm-static` with 1.33 and the new no-domain case. The upstream kind test (`pnpm test:helm`, CI) still passes with its content domain values. |
 | 13 | `ci(fork): publish the image and chart on fork tags` | `zizmor` and `actionlint` on the workflow, then the first tag `v0.1.2-fork.1`: both digests in the summary, and `helm template` of the pulled chart shows the image digest. |
 | 14 | `docs(fork): add the operator runbook` | It holds the operator steps below and the values of section 6. Every command matches the chart. |
 
 As built, three things differ from this table. Commit 3 was not needed, because the Versity contract test passed in CI. The Review frame CSP of commit 8 landed in commit 5, because widening the content domain type forces it. The Versity commit landed after commit 4 in history.
 
-The fork deviates from these ledger entries in path mode: CNT-004 and CNT-005 (per-version origins), DEP-014-F and DEP-016-B (path-only content as the isolation boundary), and AUTH-025 (start without a provider). The ledger entries for commits 5 to 12 say so. DEP-006 (stateless Kubernetes replicas) holds again.
+The fork deviates from these ledger entries in path mode: CNT-004 and CNT-005 (per-version origins), DEP-014-F and DEP-016-B (path-only content as the isolation boundary), and AUTH-025 (API-key sign-in instead of a provider). The ledger entries for commits 5 to 12 say so. DEP-006 (stateless Kubernetes replicas) holds again.
 
 ## 10. Operator steps
 
@@ -378,10 +374,9 @@ The operator is moving 29 static reports from `docs/artifacts/<yyyy>/<mm>/<slug>
 
 The path is a nullable column on the artifact row, not a separate table. Every reader that builds `links.artifact` already loads that row, so a column needs no join.
 
-- `ArtifactRecord` (`src/core/model.ts:72`) gains `path: string | null`. `CommitNewArtifact` (`src/core/ports.ts:104`) gains the same field. `CommitLinkedArtifact` extends it (`:377`), and linked artifacts pass `null`.
+- `ArtifactRecord` (`src/core/model.ts:72`) gains `path: string | null`. `CommitNewArtifact` (`src/core/ports.ts:104`) gains the same field.
 - A new version never writes the artifact row's name or tags (`CommitArtifactVersion`, `src/core/ports.ts:121`). It keeps the path the same way, with no new code.
 - The value is a plain string. The codebase has no branded types (no `Brand` anywhere in `src`), and one brand here would be the only one. Instead, `parseArtifactPath` is the only way a path enters the server (see "Validation and reserved segments").
-- The column is named `path`. In SQLite it sits next to `source_path`, which is the file-system path of a linked source. The migration's code comment says that the two are unrelated.
 
 Paths are prefix-free within an installation. No live path equals another, and no live path is a prefix of another at a `/` boundary. `2026/10/agent-console` and `2026/10/agent-console-v2` can both exist, but `2026/10` and `2026/10/agent-console` cannot. With nesting, the longer path would hide the shorter artifact's files under that subfolder, and nobody would notice until a reader got the wrong page. A prefix-free rule fails at publish time instead, and every request matches at most one artifact.
 
@@ -518,7 +513,7 @@ From this commit on, the fork owns migration numbers. Upstream's next migrations
 All seven open decisions from revision 1 are settled:
 
 1. Folder shape is `<name-slug>-<uuid>`.
-2. Without login, new artifacts default to `public_link` in HTTP, MCP, and CLI. With login, the default stays `account_required` (section 5).
+2. Without login, new artifacts default to `public_link` in HTTP, MCP, and CLI. On a local-owner server, the default stays `account_required` (section 5).
 3. A private version opened in its own tab returns `CapabilityUnavailable`.
 4. One shared API key is accepted for now (section 5).
 5. Both added sandbox flags stay.

@@ -3,6 +3,7 @@ import {z} from "zod";
 
 import {publishNew} from "../support/publishing.js";
 import {
+  chooseAccountMenuItem,
   localLogin,
   startBrowserFixture,
   stopBrowserFixture,
@@ -69,10 +70,12 @@ test.describe("DRF-002 draft isolation", () => {
       expect(await page.evaluate(([key]) => localStorage.getItem(key ?? ""), [foreignKey]))
         .not.toBeNull();
 
-      // A real sign-out (settings header, through api.logout) purges the
-      // departing principal's drafts and nobody else's.
-      await page.getByRole("link", {name: "Open settings"}).click();
-      await page.getByRole("button", {name: "Sign out"}).click();
+      // A real sign-out (the account menu, through api.logout) purges the
+      // departing principal's drafts and nobody else's. Signing out from the
+      // settings page keeps the landing URL distinct from the one it left.
+      await chooseAccountMenuItem(page, "Open settings");
+      await expect(page).toHaveURL(/\/review\/settings\/projects/u);
+      await chooseAccountMenuItem(page, "Sign out");
       // Sign-out purges the drafts and then navigates to /review. Reading
       // storage while that navigation is in flight destroys the evaluate's
       // execution context, so wait for the landing page first and treat a

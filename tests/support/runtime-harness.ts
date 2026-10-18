@@ -10,21 +10,7 @@ import {
   type LocalServerConfig,
   startLocalServer,
 } from "../../src/local/start-local-server.js";
-import type {
-  BearerCredentialVerifier,
-  ExternalMcpBearerVerifier,
-} from "../../src/application/authentication.js";
-import type {InteractiveIdentityProvider} from "../../src/application/interactive-login.js";
-import type {NodeGitHistoryConfiguration} from
-  "../../src/git-history/node-git-history-configuration.js";
-import type {GitHistoryProviderHealthProbe} from
-  "../../src/git-history/git-history-provider-health.js";
-import type {GitHistoryProvider} from
-  "../../src/git-history/git-history-mirror.js";
-import type {
-  ApiOAuthResourceConfiguration,
-  McpOAuthResourceConfiguration,
-} from "../../src/http/create-http-app.js";
+import type {BearerCredentialVerifier} from "../../src/application/authentication.js";
 import type {Clock} from "../../src/core/ports.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
@@ -91,21 +77,12 @@ export async function startTestServer(
     readonly bootstrapAdministratorEmail?: string;
     readonly browserAccess?: BrowserAccess;
     readonly contentDomain?: string | null;
-    readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
     readonly clock?: Clock;
     readonly completedRequestLogSampleRate?: number;
     readonly developmentProxyCredential?: string;
     readonly externalApiBearerVerifier?: BearerCredentialVerifier;
     readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
-    readonly externalMcpOAuthVerifier?: ExternalMcpBearerVerifier;
-    readonly gitHistory?: NodeGitHistoryConfiguration;
-    readonly gitHistoryHealthProbe?: GitHistoryProviderHealthProbe;
-    readonly gitHistoryProvider?: GitHistoryProvider;
     readonly hostname?: string;
-    readonly interactiveIdentityProvider?: InteractiveIdentityProvider;
-    readonly linkedFiles?: "off" | "on";
-    readonly linkRoots?: readonly string[];
-    readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
     readonly observability?: boolean;
     readonly port?: number;
     readonly webAssetsRoot?: string;
@@ -140,9 +117,6 @@ export async function startTestServer(
   if (options.clock !== undefined) {
     config = {...config, clock: options.clock};
   }
-  if (options.apiOAuthResource !== undefined) {
-    config = {...config, apiOAuthResource: options.apiOAuthResource};
-  }
   if (options.externalApiBearerVerifier !== undefined) {
     config = {
       ...config,
@@ -161,41 +135,8 @@ export async function startTestServer(
       externalMcpBearerVerifier: options.externalMcpBearerVerifier,
     };
   }
-  if (options.externalMcpOAuthVerifier !== undefined) {
-    config = {
-      ...config,
-      externalMcpOAuthVerifier: options.externalMcpOAuthVerifier,
-    };
-  }
-  if (options.interactiveIdentityProvider !== undefined) {
-    config = {
-      ...config,
-      interactiveIdentityProvider: options.interactiveIdentityProvider,
-    };
-  }
-  if (options.gitHistory !== undefined) {
-    config = {...config, gitHistory: options.gitHistory};
-  }
-  if (options.gitHistoryHealthProbe !== undefined) {
-    config = {
-      ...config,
-      gitHistoryHealthProbe: options.gitHistoryHealthProbe,
-    };
-  }
-  if (options.gitHistoryProvider !== undefined) {
-    config = {...config, gitHistoryProvider: options.gitHistoryProvider};
-  }
   if (options.hostname !== undefined) {
     config = {...config, hostname: options.hostname};
-  }
-  if (options.linkedFiles !== undefined) {
-    config = {...config, linkedFiles: options.linkedFiles};
-  }
-  if (options.linkRoots !== undefined) {
-    config = {...config, linkRoots: options.linkRoots};
-  }
-  if (options.mcpOAuthResource !== undefined) {
-    config = {...config, mcpOAuthResource: options.mcpOAuthResource};
   }
   if (options.webAssetsRoot !== undefined) {
     config = {...config, webAssetsRoot: options.webAssetsRoot};
@@ -283,20 +224,6 @@ export async function fetchVersion(
     outgoing.on("error", reject);
     outgoing.end();
   });
-}
-
-/**
- * Extract the login handshake cookie a browser replays at `/auth/callback`.
- */
-export function loginHandshakeCookie(loginResponse: Response): string {
-  const cookie = loginResponse.headers.getSetCookie().find((value) =>
-    value.startsWith("artifact_login=") ||
-    value.startsWith("__Host-artifact_login=")
-  );
-  if (cookie === undefined) {
-    throw new Error("/auth/login did not set a login handshake cookie.");
-  }
-  return cookie.split(";")[0] ?? "";
 }
 
 export function apiHeaders(

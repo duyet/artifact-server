@@ -14,17 +14,13 @@ source:
 # names that deployment is verified with evidence from that deployment.
 deployment_sets:
   all: &all
-    [local, single_server, kubernetes, cloudflare, aws, gcp]
+    [local, single_server, kubernetes]
   external_storage: &external_storage
-    [single_server, kubernetes, cloudflare, aws, gcp]
+    [single_server, kubernetes]
   replicated: &replicated
-    [kubernetes, cloudflare, aws, gcp]
-  hosted: &hosted
-    [cloudflare]
-  direct_clouds: &direct_clouds
-    [aws, gcp]
+    [kubernetes]
   plannotator_capable: &plannotator_capable
-    [single_server, kubernetes, cloudflare, aws, gcp]
+    [single_server, kubernetes]
 
 allowed_statuses:
   - specified
@@ -65,7 +61,6 @@ allowed_modules:
   - content-delivery
   - authorization
   - comparison
-  - git-history
   - web-application
   - http-api
   - mcp
@@ -75,7 +70,6 @@ allowed_modules:
   - agent-dispatch
   - agent-bridge
   - agent-presence
-  - local-workspace
   - kanban
   - plannotator-integration
   - database-adapters
@@ -87,7 +81,7 @@ required_source_sections:
   top: [PRD-001, PRD-002]
   product: [PRD-003]
   artifact: [PRJ-001, PRJ-002, PRJ-003, PRJ-004, ART-001, ART-002, ART-003, ART-004, ART-005, ART-008]
-  experience: [CNT-001, CNT-002, VER-001, DIF-001, GIT-001]
+  experience: [CNT-001, CNT-002, VER-001, DIF-001]
   sharing: [AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-018]
   plannotator: [PLN-001, PLN-002, PLN-003, PLN-004, PLN-005, PLN-017]
   architecture: [ARC-001, ARC-002, ARC-006, PUB-001, CNT-003]
@@ -95,8 +89,8 @@ required_source_sections:
   deployment: [DEP-001, DEP-002, DEP-003, DEP-004]
   safety: [SEC-001, SEC-002, SEC-003, SEC-004]
   scope: [SCP-001, SCP-002, SCP-003]
-  implementation: [REL-001, REL-002, REL-003, REL-004]
-  decisions: [GATE-001, GATE-002, GATE-003]
+  implementation: [REL-001, REL-002]
+  decisions: [GATE-001, GATE-002]
 
 requirements:
   - id: PRD-001
@@ -660,21 +654,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
-      - deployment: cloudflare
-        tests: [PUB-009-B]
-        result: pass
-        run: project/evidence/cloudflare-phase11-qualification.json
-        recorded_at: "2026-08-16T17:44:26Z"
-      - deployment: aws
-        tests: [PUB-009-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [PUB-009-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
 
   - id: PUB-010
     kind: security
@@ -751,15 +730,15 @@ requirements:
 
   - id: CLI-001
     kind: security
-    behavior: The Artifact Server CLI keeps profiles by exact server origin and account; remote interactive login uses browser authorization and operating-system credential storage, local mode uses private user-only state without visible secrets, and CI uses scoped service credentials from its secret manager.
+    behavior: The Artifact Server CLI keeps profiles by exact server origin and account; remote login stores an administrator-issued API key read from standard input in operating-system credential storage, local mode uses private user-only state without visible secrets, and CI uses scoped service credentials from its secret manager.
     owner: cli
     source: {file: artifact-server-product-spec.html, anchor: mcp}
     acceptance:
-      behavior: {id: CLI-001-B, description: "Log in, inspect status, renew, log out, and switch exact-origin profiles on a browser-authorized server; use local automatic authentication and a CI service credential through their documented paths."}
+      behavior: {id: CLI-001-B, description: "Log in with an API key, inspect status, log out, and switch exact-origin profiles; use local automatic authentication and a CI service credential through their documented paths."}
       failure: {id: CLI-001-F, description: "Credentials never appear in startup output, command output, project files, shell arguments, logs, traces, support bundles, or another origin's profile, and revoked or mismatched credentials fail closed."}
     deployments: *all
     status: implementing
-    proof_gap: The OAuth acceptance-ID test proves browser PKCE, refresh, status, and revocation, but not the local automatic-authentication and CI paths or every credential-leak surface named by CLI-001-F.
+    proof_gap: The API-key profile test proves login, status, logout, and remote publishing, but not the local automatic-authentication path or every credential-leak surface named by CLI-001-F.
     depends_on: [AUTH-009, AUTH-017]
     evidence: []
 
@@ -918,21 +897,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
-      - deployment: aws
-        tests: [CNT-007-B, CNT-007-F]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [CNT-007-B, CNT-007-F]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
-      - deployment: cloudflare
-        tests: [CNT-007-B, CNT-007-F]
-        result: pass
-        run: project/evidence/cloudflare-phase11-content.json
-        recorded_at: "2026-08-16T17:44:26.049Z"
 
   - id: CNT-008
     kind: security
@@ -981,12 +945,12 @@ requirements:
 
   - id: DIF-001
     kind: behavior
-    behavior: Comparisons use canonical manifests and do not require Git.
+    behavior: Comparisons use canonical manifests from primary version records and blobs.
     owner: comparison
     source: {file: artifact-server-product-spec.html, anchor: experience}
     acceptance:
-      behavior: {id: DIF-001-B, description: "Disable Git and compare two versions from primary records and blobs."}
-      failure: {id: DIF-001-F, description: "A missing or failed Git provider does not remove, change, or block comparison results."}
+      behavior: {id: DIF-001-B, description: "Compare two versions from primary records and blobs."}
+      failure: {id: DIF-001-F, description: "A comparison reads no copy of version bytes outside primary records and blobs, so nothing outside them can remove, change, or block its results."}
     deployments: *all
     status: behavior_verified
     depends_on: [MAN-001, VER-001]
@@ -1069,202 +1033,6 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
 
-  - id: GIT-001
-    kind: constraint
-    behavior: Git handoff is optional, private, disabled by default, and selected by explicit installation configuration; there is no automatic provider selection.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: experience}
-    acceptance:
-      behavior: {id: GIT-001-B, description: "Run with the provider variable absent and set to off; observe the disabled capability shape, identical artifact behavior, and no Git implementation load or provider request."}
-      failure: {id: GIT-001-F, description: "Missing, invalid, or inaccessible optional Git configuration cannot prevent the server from starting, publishing, opening, or comparing, and cannot trigger automatic provider selection."}
-    deployments: *all
-    status: implementing
-    proof_gap: Provider-off behavior, explicit configuration, and fail-open application startup are implemented for Node and Workers runtimes. The complete no-load/no-call and malformed-configuration acceptance matrix across every deployment remains unproved.
-    depends_on: [DIF-001]
-    evidence: []
-
-  - id: GIT-002
-    kind: behavior
-    behavior: Optional Git receives an asynchronous private copy only after the primary version is durable, with at most one commit mapped to each saved version.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-002-B, description: "Publish with Git enabled and confirm the browser link works before or independently of the recorded Git commit."}
-      failure: {id: GIT-002-F, description: "Retry and worker failures cannot create conflicting version-to-commit mappings or change the primary version."}
-    deployments: *all
-    status: implementing
-    proof_gap: SQLite, Postgres, and D1 atomically enqueue provider-neutral mirror jobs after primary publication, and deterministic mapping adoption prevents duplicate version commits across retries and restarts. Concurrent multi-worker convergence and the complete cross-deployment persistence matrix remain unproved.
-    depends_on: [PUB-005]
-    evidence: []
-
-  - id: GIT-003
-    kind: behavior
-    behavior: Git failure never blocks, deletes, or makes unavailable a primary saved version and is retried separately.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GIT-003-B, description: "Disable the configured Git provider during publish and confirm the version opens and the copy can retry later."}
-      failure: {id: GIT-003-F, description: "Git errors cannot roll back or corrupt the committed database and blob records."}
-    deployments: *all
-    status: implementing
-    proof_gap: Provider failures and logical budget exhaustion are isolated from primary publication and delivery, with durable retry and restart recovery proved on the local runtime. Sustained outage, database rollback, and all-deployment hostile recovery remain unproved.
-    depends_on: [GIT-002]
-    evidence: []
-
-  - id: GIT-004
-    kind: behavior
-    behavior: Files outside deterministic per-file and per-version copy limits remain only in primary blob storage while the Git manifest records their paths, media types, sizes, and fingerprints; each job snapshots the limits that define its retry-stable commit.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-004-B, description: "Publish above and below the configured per-file and per-version Git copy limits and verify deterministic copied-file and pointer representation across a retry and configuration change."}
-      failure: {id: GIT-004-F, description: "Excluded bytes cannot be silently omitted without path, media type, size, and fingerprint metadata, and a retry cannot change a commit because current limits differ from the job snapshot."}
-    deployments: *all
-    status: implementing
-    proof_gap: Mirror jobs snapshot copy limits, produce deterministic copied files and pointer metadata, and preserve the representation across a retry. Configuration changes after enqueue, maximum manifest size, and full adapter coverage remain unproved.
-    depends_on: [GIT-002]
-    evidence: []
-
-  - id: GIT-005
-    kind: security
-    behavior: Public artifact access never grants Git access or exposes earlier versions through a Git remote.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: safety}
-    acceptance:
-      behavior: {id: GIT-005-B, description: "Make an artifact public and confirm that only its current content path is available without authentication."}
-      failure: {id: GIT-005-F, description: "Probe Git protocols, repository paths, commit IDs, and earlier versions from a public session and receive no access."}
-    deployments: *all
-    status: implementing
-    proof_gap: Authenticated, short-lived clone credentials are scoped to one provisioned repository and public-link sessions are rejected. The complete Git-protocol, timing, log-redaction, and earlier-version probe matrix remains unproved.
-    depends_on: [GIT-001, AUTH-004]
-    evidence: []
-
-  - id: GIT-006
-    kind: deployment
-    behavior: The first managed Git handoff provider is Cloudflare Artifacts; additional provider names are not accepted or advertised until their adapters independently pass the common provider suite.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-006-B, description: "Run the Git provider conformance suite against every advertised provider for its deployment."}
-      failure: {id: GIT-006-F, description: "A deployment cannot advertise optional Git until its provider passes persistence, retry, upgrade, backup, and isolation tests."}
-    deployments: *all
-    status: implementing
-    proof_gap: Cloudflare Artifacts is the only accepted provider. The Node REST product path passed live availability, estimate, project enablement, backfill, two-version mirroring, read-only clone, disablement, artifact deletion, and cleanup; the remote Workers-binding path passed isolated live creation, deterministic commit, token, smart-HTTP, read, and cleanup qualification. Upgrade, backup, and the complete common provider suite remain unproved.
-    depends_on: [GIT-003]
-    evidence: []
-
-  - id: GIT-007
-    kind: release_gate
-    behavior: Cloudflare Artifacts ships only as an explicit off-by-default provider and remains non-authoritative while availability, pricing, limits, retry behavior, retention, regional behavior, Git compatibility, and production support are verified.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GIT-007-B, description: "Record verified Cloudflare Artifacts behavior and pass the optional Git provider suite without making it authoritative."}
-      failure: {id: GIT-007-F, description: "Every deployment remains complete and supported with Cloudflare Artifacts disabled or unavailable."}
-    deployments: *all
-    status: implementing
-    proof_gap: The provider remains explicit, private, off by default, and non-authoritative; checked-in evidence records successful isolated REST, Workers-binding, and bounded product-lifecycle qualification. Pricing, quota pressure, retention, regional behavior, sustained outage recovery, and Cloudflare production-support posture remain operator considerations rather than fully proved release evidence.
-    depends_on: [GIT-006]
-    evidence: []
-
-  - id: GIT-008
-    kind: behavior
-    behavior: Enabling Git handoff for a project with existing versions asynchronously backfills every unmapped version in that project in bounded, resumable, oldest-first order per artifact without delaying primary traffic or copying another project.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-008-B, description: "Enable one project after several versions exist and observe complete ordered repository history while new publishes continue and an unselected project remains untouched."}
-      failure: {id: GIT-008-F, description: "Crash and restart project reconciliation and race it with a new publish without losing a version, duplicating a commit mapping, exhausting foreground work, copying another project, or changing primary data."}
-    deployments: *all
-    status: implementing
-    proof_gap: Project enablement inserts bounded oldest-first jobs for existing versions, leaves other projects untouched, and resumes a failed mirror after restart without a duplicate mapping. Crash timing, foreground-work bounds, and complete SQLite/Postgres/D1 concurrency coverage remain unproved.
-    depends_on: [GIT-002, GIT-007]
-    evidence: []
-
-  - id: GIT-009
-    kind: behavior
-    behavior: Disabling Git handoff for a project or provider stops applicable mirror work without deleting remote data or durable state; deletion work stays durable, re-enabling the same project and provider resumes, and changing provider location requires an explicit migration.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-009-B, description: "Disable one project during backfill and the provider while idle, publish and delete while off, verify applicable calls stop and durable state remains, then re-enable the same project and provider and complete missing mirror and deletion work without duplicate commits."}
-      failure: {id: GIT-009-F, description: "A policy or configuration change cannot silently delete remote repositories, discard queued deletion work, or write persisted coordinates through a different provider, account, or namespace; an unsupported replacement reports migration-required while core behavior continues."}
-    deployments: *all
-    status: implementing
-    proof_gap: Project disablement preserves repositories and durable mappings, same-provider re-enable resumes work, artifact deletion queues repository deletion, and provider identity changes fail as migration-required. Provider-wide disablement during deletion and the complete cross-deployment lifecycle matrix remain unproved.
-    depends_on: [GIT-008]
-    evidence: []
-
-  - id: GIT-010
-    kind: behavior
-    behavior: Authenticated capability discovery separately reports provider availability, bounded limits and accounting, and each project's effective Git state without secrets, and optional Git health never controls application readiness.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-010-B, description: "Observe provider disabled, checking, available, degraded, misconfigured, and migration-required plus project disabled, waiting, backfilling, ready, degraded, and budget-limited through HTTP and MCP discovery with matching shapes."}
-      failure: {id: GIT-010-F, description: "Provider credentials, credential-bearing remotes, queue internals, or raw provider errors cannot appear in capability output, and no optional Git state can make readiness fail."}
-    deployments: *all
-    status: implementing
-    proof_gap: Node and Workers runtimes expose secret-free provider and project states through authenticated HTTP and MCP without joining readiness; SQLite, Postgres, and D1 persist provider identity, and both Cloudflare control planes passed live qualification. The complete state-transition, redaction, and cross-deployment readiness matrix remains unproved.
-    depends_on: [GIT-001, GIT-003]
-    evidence: []
-
-  - id: GIT-011
-    kind: security
-    behavior: Permanent removal of an installation's Git repositories requires an operator-only plan/apply command with exact installation confirmation; it is bounded and resumable and cannot delete primary data or the provider namespace.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-011-B, description: "Plan with no provider writes, apply with exact installation confirmation, interrupt the purge, and resume until every persisted repository is confirmed absent."}
-      failure: {id: GIT-011-F, description: "Reject a wrong confirmation or mismatched provider, never expose a purge through HTTP or MCP, and never delete primary artifacts, versions, blobs, backups, or the Cloudflare namespace."}
-    deployments: *all
-    status: implementing
-    proof_gap: Compact and external-storage operator commands provide read-only plans, exact installation and provider confirmation, bounded resumable deletion, and focused proof that planning makes no provider call and a partial purge resumes. The transient D1 operator path is typechecked but has not run against a dedicated live qualification database, and complete primary-data and backup invariance remain unproved.
-    depends_on: [GIT-006, GIT-009]
-    evidence: []
-
-  - id: GIT-012
-    kind: behavior
-    behavior: Provider availability and data selection are separate; configuration alone creates no repository or history job, every project has one off-by-default Git history setting, and an authorized project manager may enable one project only after reviewing and confirming an on-demand planning estimate.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-012-B, description: "Configure Cloudflare Artifacts with existing projects and observe zero copies, then read, estimate, enable, repeat, and disable one project through authorized, naturally idempotent HTTP and MCP operations with matching results while another and every newly created project remain disabled."}
-      failure: {id: GIT-012-F, description: "A missing estimate confirmation, unconfigured or invalid provider, unauthorized caller, project request, path, hostname, or ambient credential cannot enable a project or change another project's setting."}
-    deployments: *all
-    status: implementing
-    proof_gap: The real project setting, estimate confirmation, repository mirroring, and disablement are implemented through the Projects UI, authenticated HTTP, and MCP over SQLite, Postgres, and D1. The complete authorization, natural-idempotency, hostile-input, and cross-deployment parity matrix remains unproved.
-    depends_on: [GIT-001, GIT-008, AUTH-001, PRD-004, MCP-008, MCP-009]
-    evidence: []
-
-  - id: GIT-013
-    kind: security
-    behavior: Each Artifact Server installation environment uses one exclusive persisted Cloudflare account and namespace identity; the adapter is namespace-scoped, exposes no namespace or account-wide deletion, and live tests use a dedicated bounded run-manifest cleanup boundary.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: safety}
-    acceptance:
-      behavior: {id: GIT-013-B, description: "Run the bounded Node REST and remote Workers-binding suites in an artifact-server-test- namespace with unique run-prefixed repositories, a separate token, explicit opt-in, and resumable manifest-only cleanup."}
-      failure: {id: GIT-013-F, description: "A request-selected namespace, changed persisted location, wrong namespace prefix, missing opt-in, exceeded test bound, failed teardown, or cleanup manifest cannot cause writes or deletion in another namespace, another run, or the account at large."}
-    deployments: *all
-    status: implementing
-    proof_gap: SQLite, Postgres, and D1 persist immutable provider identity; both provider adapters are namespace scoped; and bounded REST and Workers-binding runs used unique repository prefixes and left the dedicated qualification namespace empty without deleting it. Wrong-prefix refusal, interrupted live cleanup recovery, and the complete isolation matrix remain unproved.
-    depends_on: [GIT-006, GIT-009, GIT-011]
-    evidence: []
-
-  - id: GIT-014
-    kind: constraint
-    behavior: Git handoff shows an on-demand planning estimate of repository, version, operation, copied-byte, and pointer-byte impact before project enablement; deterministic copy limits and an optional atomically reserved logical copied-byte budget bound provider work without changing primary behavior.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: architecture}
-    acceptance:
-      behavior: {id: GIT-014-B, description: "Confirm a current-inventory planning estimate labeled as non-billing guidance, race mirror workers at the configured budget, observe no overshoot and budget-limited, then increase capacity or delete repositories and resume."}
-      failure: {id: GIT-014-F, description: "Concurrent workers, retries, a lowered budget, provider pricing drift, or a hard provider limit cannot silently exceed configured logical capacity, rewrite mapped commits, block readiness, or change a saved primary version."}
-    deployments: *all
-    status: implementing
-    proof_gap: SQLite, Postgres, and D1 compute planning estimates, snapshot deterministic copy bounds, atomically reserve logical copied bytes, expose budget-limited, and can resume after an explicit budget increase. Multi-worker race proof, lowered-budget behavior, provider-pricing drift, and complete deployment coverage remain unproved.
-    depends_on: [GIT-004, GIT-012]
-    evidence: []
-
   - id: AUTH-001
     kind: behavior
     behavior: A standalone installation represents one person, team, or company and has no public self-sign-up or organization switcher; all projects use that installation membership group.
@@ -1316,12 +1084,12 @@ requirements:
 
   - id: AUTH-004
     kind: security
-    behavior: A public link opens only the current version; version lists, comparisons, earlier versions, mutations, and Git remain account-required.
+    behavior: A public link opens only the current version; version lists, comparisons, earlier versions, and mutations remain account-required.
     owner: authorization
     source: {file: artifact-server-product-spec.html, anchor: sharing}
     acceptance:
       behavior: {id: AUTH-004-B, description: "Open the public current version and confirm that no authenticated history or mutation surface is exposed."}
-      failure: {id: AUTH-004-F, description: "Probe earlier version hosts, comparison endpoints, mutation routes, and Git using only public access and receive no access."}
+      failure: {id: AUTH-004-F, description: "Probe earlier version hosts, comparison endpoints, and mutation routes using only public access and receive no access."}
     deployments: *all
     status: behavior_verified
     depends_on: [AUTH-003]
@@ -1463,12 +1231,12 @@ requirements:
 
   - id: AUTH-013
     kind: security
-    behavior: OAuth callbacks, browser login, MCP authorization, artifact metadata, and mutations remain on the application origin; version origins are read-only.
+    behavior: Browser sign-in, MCP authorization, artifact metadata, and mutations remain on the application origin; version origins are read-only.
     owner: authorization
     source: {file: artifact-server-product-spec.html, anchor: safety}
     acceptance:
       behavior: {id: AUTH-013-B, description: "Enumerate application and content routes and confirm the required separation."}
-      failure: {id: AUTH-013-F, description: "No content host exposes login callback, OAuth, metadata mutation, administration, or MCP endpoints."}
+      failure: {id: AUTH-013-F, description: "No content host exposes sign-in, metadata mutation, administration, or MCP endpoints."}
     deployments: *all
     status: specified
     depends_on: [CNT-003, CNT-004]
@@ -1554,60 +1322,6 @@ requirements:
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:20:00Z"
 
-  - id: AUTH-019
-    kind: behavior
-    behavior: A deployment configured with a generic OIDC issuer completes browser login through discovery, authorization code with PKCE and nonce, id_token verification, and normal admission, on every deployment kind.
-    owner: authorization
-    source: {file: oidc-interactive-login-spec.md, anchor: conformance}
-    acceptance:
-      behavior: {id: AUTH-019-B, description: "Sign in against a real stub OIDC provider; an admitted member gets a session, the bootstrap administrator is admitted on first contact, display name and issuer-qualified binding are recorded, and a second login reuses the binding."}
-      failure: {id: AUTH-019-F, description: "An unadmitted verified identity, an unverified email, and a missing email are refused without creating members or sessions."}
-    deployments: *all
-    status: behavior_verified
-    depends_on: [AUTH-001, AUTH-010]
-    evidence:
-      - deployment: local
-        tests: [AUTH-019-B, AUTH-019-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-18T15:31:35.706Z"
-
-  - id: AUTH-020
-    kind: security
-    behavior: The OIDC callback fails closed on every token-validation defect.
-    owner: authorization
-    source: {file: oidc-interactive-login-spec.md, anchor: conformance}
-    acceptance:
-      behavior: {id: AUTH-020-B, description: "Valid logins succeed under a thirty-second clock skew, and a returnTo that only becomes scheme-relative after path normalization still lands on an application path."}
-      failure: {id: AUTH-020-F, description: "Wrong signature, wrong issuer, wrong audience, expired token, replayed or unknown state, expired attempt, wrong nonce, and a callback presented without the handshake cookie minted at /auth/login are each refused; no session or member is created; codes and tokens never appear in logs."}
-    deployments: *all
-    status: behavior_verified
-    depends_on: [AUTH-019]
-    evidence:
-      - deployment: local
-        tests: [AUTH-020-B, AUTH-020-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-18T15:31:35.706Z"
-
-  - id: AUTH-021
-    kind: constraint
-    behavior: OIDC configuration is all-or-nothing, mutually exclusive with WorkOS, and issuer and endpoint URLs obey the HTTPS rules.
-    owner: authorization
-    source: {file: oidc-interactive-login-spec.md, anchor: conformance}
-    acceptance:
-      behavior: {id: AUTH-021-B, description: "A complete OIDC configuration boots and reports the oidc interactive identity provider; an application layer constructed without either provider keeps interactive login unavailable, while private-team process startup separately obeys AUTH-025."}
-      failure: {id: AUTH-021-F, description: "Partial OIDC configuration, any WorkOS variable configured beside any OIDC variable, a non-HTTPS non-local issuer, and discovery documents with a mismatched issuer or a credentialed or fragmented endpoint URL each fail startup or login without weakening the running server."}
-    deployments: *all
-    status: behavior_verified
-    depends_on: [AUTH-019]
-    evidence:
-      - deployment: local
-        tests: [AUTH-021-B, AUTH-021-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-18T15:31:35.706Z"
-
   - id: AUTH-022
     kind: constraint
     behavior: In-process authentication caching is a bounded-staleness optimization only; successful session and managed-key checks may be cached for at most 30 seconds in a bounded store, entries never outlive the credential's own expiry, failures are never cached, and same-process logout, key revocation, key rotation, and member deactivation evict immediately, so a credential revoked on another replica authenticates for at most 30 more seconds.
@@ -1656,43 +1370,43 @@ requirements:
 
   - id: AUTH-025
     kind: constraint
-    behavior: Private-team entry points require exactly one configured browser identity provider and accept neither a local browser-bootstrap credential nor the legacy installation bearer as HTTP API or MCP request authority.
+    behavior: Private-team entry points sign browsers in with managed API keys and accept neither a local browser-bootstrap credential nor the legacy installation bearer as HTTP API or MCP request authority.
     owner: authorization
     source: {file: local-owner-and-private-team-access-spec.md, anchor: conformance-requirements}
     acceptance:
-      behavior: {id: AUTH-025-B, description: "Start compact and external-storage team runtimes with one complete OIDC or WorkOS configuration, bootstrap the configured administrator through that provider, and authenticate non-browser clients only with managed keys or a compatible external OAuth verifier."}
-      failure: {id: AUTH-025-F, description: "Missing or multiple identity providers, a configured local bootstrap credential, the local-owner session route, the generated compact bootstrap credential, and the legacy installation bearer each fail startup or authentication without granting request authority."}
+      behavior: {id: AUTH-025-B, description: "Start compact and external-storage team runtimes, read login kind none from the access-mode contract, and authenticate non-browser clients only with managed keys."}
+      failure: {id: AUTH-025-F, description: "A configured local bootstrap credential, the local-owner session route, the generated compact bootstrap credential, and the legacy installation bearer each fail startup or authentication without granting request authority."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The Node runtime test proves provider discovery, missing-provider startup refusal, local-owner route absence, managed-key authority, and legacy-bearer refusal in private-team mode, and the real Keycloak suite proves the OIDC round trip. Compact Compose, external-storage Compose, and Kubernetes startup plus the compatible external OAuth verifier matrix remain unproved.
-    depends_on: [AUTH-009, AUTH-019, AUTH-021]
+    proof_gap: The Node runtime test proves the advertised login kind, local-owner route absence, managed-key authority, and legacy-bearer refusal in private-team mode. Compact, external-storage, and Kubernetes startup runs remain unproved.
+    depends_on: [AUTH-009]
     evidence: []
 
   - id: AUTH-026
     kind: behavior
-    behavior: The management application discovers a non-secret access-mode contract and follows one bounded local-owner session flow or the configured private-team sign-in flow, with mode-correct expiry, logout, denial, and recovery behavior.
+    behavior: The management application discovers a non-secret access-mode contract and follows one bounded local-owner session flow or the private-team API-key sign-in flow, with mode-correct expiry, logout, denial, and recovery behavior.
     owner: web-application
     source: {file: local-owner-and-private-team-access-spec.md, anchor: conformance-requirements}
     acceptance:
-      behavior: {id: AUTH-026-B, description: "Load authenticated, unauthenticated, expired, and deep-linked browser states in each mode; local owner recovers once without sign-in, while private team offers the configured provider, returns safely after login, and logs out to the signed-out state."}
-      failure: {id: AUTH-026-F, description: "The public context reveals no issuer, client, bootstrap email, member state, or credential; local failures do not loop or offer provider login; team denial, deactivation, and provider failure create no session and never offer local login."}
+      behavior: {id: AUTH-026-B, description: "Load authenticated, unauthenticated, expired, and deep-linked browser states in each mode; local owner recovers once without sign-in, while private team offers API-key sign-in, returns safely after sign-in, and logs out to the signed-out state."}
+      failure: {id: AUTH-026-F, description: "The public context reveals no bootstrap email, member state, or credential; local failures do not loop or offer API-key sign-in; team denial and deactivation create no session and never offer local login."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: The browser suite proves local-owner bootstrap, deep-link loading, cookie-clearing recovery, and no logout affordance, while the HTTP suite proves the non-secret private-team context and refusal of local bootstrap. Complete private-team browser expiry, logout, denial, deactivation, provider-failure recovery, and replicated-deployment runs remain unproved.
+    proof_gap: The browser suite proves local-owner bootstrap, deep-link loading, cookie-clearing recovery, and no logout affordance, while the HTTP suite proves the non-secret private-team context and refusal of local bootstrap. Complete private-team browser expiry, logout, denial, deactivation, and replicated-deployment runs remain unproved.
     depends_on: [AUTH-023, AUTH-024, AUTH-025]
     evidence: []
 
   - id: AUTH-027
     kind: security
-    behavior: Deactivating a member stops that member's provider login, application sessions, and member-owned API keys immediately in the handling process and within the documented authentication-cache bound on every other replica, while preserving durable attributed records.
+    behavior: Deactivating a member stops that member's application sessions and member-owned API keys immediately in the handling process and within the documented authentication-cache bound on every other replica, while preserving durable attributed records.
     owner: authorization
     source: {file: local-owner-and-private-team-access-spec.md, anchor: conformance-requirements}
     acceptance:
-      behavior: {id: AUTH-027-B, description: "Authenticate one member through the identity provider, an existing application session, and a member-owned managed key; deactivate the member; observe immediate same-process refusal and cross-replica refusal within the cache bound while the member's artifacts, actions, comments, and attribution remain."}
-      failure: {id: AUTH-027-F, description: "A deactivated member cannot create a new provider binding or session, renew an existing session, use a member-owned key, or regain access through stale cached authority after the bound; unrelated service principals and durable attributed records are not removed."}
+      behavior: {id: AUTH-027-B, description: "Authenticate one member through an existing application session and a member-owned managed key; deactivate the member; observe immediate same-process refusal and cross-replica refusal within the cache bound while the member's artifacts, actions, comments, and attribution remain."}
+      failure: {id: AUTH-027-F, description: "A deactivated member cannot create a new session, renew an existing session, use a member-owned key, or regain access through stale cached authority after the bound; unrelated service principals and durable attributed records are not removed."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The local acceptance tests prove immediate refusal of a deactivated member's session and member-owned key, preserve the installation service principal, and bound a warmed cross-process session decision through the authentication cache. Provider relogin, cross-replica managed-key expiry, and explicit preservation checks for every attributed record remain unproved.
+    proof_gap: The local acceptance tests prove immediate refusal of a deactivated member's session and member-owned key, preserve the installation service principal, and bound a warmed cross-process session decision through the authentication cache. Cross-replica managed-key expiry, and explicit preservation checks for every attributed record remain unproved.
     depends_on: [AUTH-008, AUTH-009, AUTH-022, AUTH-025]
     evidence: []
 
@@ -1717,7 +1431,7 @@ requirements:
     source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
     acceptance:
       behavior: {id: AUTH-029-B, description: "Sign in with a valid key, read a session principal equal to the bearer principal of the same key, then sign out and observe the old cookie refused."}
-      failure: {id: AUTH-029-F, description: "A wrong or malformed key is 401, a cross-origin or opaque-origin request is 403, a key outside the body is refused, and a server with OIDC or local-owner login answers 404, all without Set-Cookie."}
+      failure: {id: AUTH-029-F, description: "A wrong or malformed key is 401, a cross-origin or opaque-origin request is 403, a key outside the body is refused, and a local-owner server answers 404, all without Set-Cookie."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite only. The Postgres repository compiles but its tests need Docker, and no deployed run exists.
@@ -1976,75 +1690,6 @@ requirements:
     depends_on: [AUTH-008]
     evidence: []
 
-  - id: MCP-010
-    kind: security
-    behavior: Hosted remote MCP advertises protected-resource metadata, challenges unauthenticated clients, and uses WorkOS AuthKit for browser approval and resource-bound credentials.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-010-B, description: "Add only the hosted /mcp URL in supported clients and complete discovery, browser approval, callback, token use, refresh, revoke, and reconnect."}
-      failure: {id: MCP-010-F, description: "Missing, wrong-issuer, wrong-audience, expired, revoked, malformed, and web-session tokens are rejected with correct challenge behavior."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: Live staging covers selected WorkOS and named-client flows, but the complete supported-client discovery, callback, refresh, revoke, reconnect, and hostile-token matrix is not attached as MCP-010 behavior and failure evidence.
-    depends_on: [MCP-001, AUTH-017]
-    evidence: []
-
-  - id: MCP-011
-    kind: security
-    behavior: Hosted MCP tokens are verified for signature, allowed algorithm, exact issuer, exact /mcp audience, expiry, and subject using rotation-safe cached keys. The exact resource-bound audience grants MCP access; WorkOS does not issue a separate product scope.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-011-B, description: "Verify valid tokens before and after signing-key rotation and map them to an internal provider-neutral principal."}
-      failure: {id: MCP-011-F, description: "Reject algorithm confusion, unknown keys, multiple-resource confusion, missing subject, invalid time, issuer, or audience."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: Local verifier tests cover selected issuer, audience, expiry, and key failures, but there is no hosted MCP-011 run that includes signing-key rotation and the complete algorithm, key, resource, subject, time, issuer, and audience hostile matrix.
-    depends_on: [MCP-010]
-    evidence: []
-
-  - id: MCP-012
-    kind: security
-    behavior: WorkOS owns hosted authorization, consent, codes, client registration, access credentials, refresh, and revocation; bearer credentials never reach storage, workers, sites, files, or logs.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-012-B, description: "Trace a hosted authorization and tool call and confirm that Artifact Server receives only the bearer at its verification boundary and emits a redacted internal principal."}
-      failure: {id: MCP-012-F, description: "Authorization codes, refresh tokens, cookies, ID tokens, bearer values, and credential-bearing URLs never appear downstream or in logs."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: The live authorization record proves selected grant flows, but no MCP-012 trace demonstrates that every listed credential form is absent from storage, Worker, content, file, and log boundaries.
-    depends_on: [MCP-011]
-    evidence: []
-
-  - id: MCP-013
-    kind: behavior
-    behavior: Local mode connects through artifactserver connect and a stdio bridge without browser OAuth or a human-visible secret; self-hosted mode uses browser OAuth when compatible authorization is configured and otherwise uses administration-issued scoped API keys. A generic OIDC issuer is compatible authorization when it signs verifiable access-token JWTs, binds the exact <origin>/mcp audience, and offers a client registration path its clients can use; the installation registers that client and never runs an authorization server of its own.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-013-B, description: "Connect locally through the stdio bridge with no visible credential, connect to a private OAuth server through browser approval including a generic OIDC issuer whose access token names the exact /mcp resource, and connect to a no-OAuth server using an administration-issued revocable API key."}
-      failure: {id: MCP-013-F, description: "Startup logs, diagnostics, project files, generic OIDC ID tokens, browser login cookies, and wrong-resource tokens cannot expose or substitute for a valid MCP credential."}
-    deployments: [local, single_server, kubernetes, aws, gcp]
-    status: implementing
-    proof_gap: Local stdio, API-key, and generic OIDC access-token paths are implemented and covered by the local conformance suite and the real Keycloak harness, but the combined private OAuth, no-OAuth, local, wrong-credential, and credential-leak matrix has no deployment-specific MCP-013 evidence. The Keycloak harness obtains its MCP access tokens through the password grant; no MCP client has yet completed browser approval (authorization code with S256 PKCE, client registration, and the RFC 8707 resource parameter) against a generic OIDC issuer, so the browser-approval half of MCP-013-B is unproved for OIDC.
-    depends_on: [AUTH-009]
-    evidence: []
-
-  - id: MCP-014
-    kind: release_gate
-    behavior: Embedded Better Auth MCP OAuth is optional and unsupported until its beta path passes security, client compatibility, migration, durable-state, revocation, and recovery tests.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: MCP-014-B, description: "Pass the full hosted hostile and client matrix using the embedded provider before advertising it."}
-      failure: {id: MCP-014-F, description: "Self-hosted deployments remain usable through API keys and compatible external issuers when embedded OAuth is absent."}
-    deployments: [single_server, kubernetes, aws, gcp]
-    status: specified
-    depends_on: [MCP-010, MCP-013]
-    evidence: []
-
   - id: MCP-015
     kind: behavior
     behavior: artifact_get returns the current exact full-screen Review address, and artifact_open returns the selected exact full-screen Review address beside the raw immutable content address; agents prefer Review for human handoff and never label raw content as Review. Only a local helper opens an address on the local computer, while remote servers return addresses.
@@ -2062,33 +1707,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-30T17:56:35.366Z"
-
-  - id: MCP-016
-    kind: release_gate
-    behavior: The supported local MCP path is install Artifact Server, run artifactserver connect, and use the selected AI client without browser sign-in, Docker, a visible token, copied key, or startup-log inspection.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-016-B, description: "From a clean local package, connect Codex, Claude Code, Cursor, and VS Code through artifactserver connect, complete discovery and representative tool calls, restart, reconnect, disconnect, and run doctor."}
-      failure: {id: MCP-016-F, description: "Multiple-client ambiguity asks for a choice, stale or corrupt registration produces a useful diagnosis, and no command output, log, project file, process argument, or diagnostic bundle exposes the internal local credential."}
-    deployments: [local]
-    status: implementing
-    proof_gap: Adapter and packaged-bridge tests exist, but clean real-host connect, representative use, restart, reconnect, disconnect, doctor, stale-state, and credential-leak proof is not complete for all four named clients.
-    depends_on: [MCP-002, MCP-009, MCP-013, OPS-008]
-    evidence: []
-
-  - id: MCP-017
-    kind: release_gate
-    behavior: The supported hosted interactive MCP path is add or select the exact /mcp address, complete browser sign-in and approval, and return to a connected client with automatic credential renewal.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: mcp}
-    acceptance:
-      behavior: {id: MCP-017-B, description: "In every advertised remote client, add only the server address and pass discovery, browser approval, callback, tool use, renewal after access-token expiry, revoke, disconnect, and reconnect from fresh and stale client state."}
-      failure: {id: MCP-017-F, description: "Wrong issuer, audience, callback, network boundary, revoked grant, stale registration, and unadmitted user fail clearly without accepting a browser cookie or changing firewall or VPN access."}
-    deployments: *hosted
-    status: specified
-    depends_on: [MCP-010, MCP-011, MCP-012]
-    evidence: []
 
   - id: MCP-018
     kind: release_gate
@@ -2113,27 +1731,8 @@ requirements:
       failure: {id: MCP-019-F, description: "A host with missing transport, protocol, authorization, installation, upgrade, or stale-state evidence is omitted from the supported-client list rather than inferred to work."}
     deployments: *all
     status: specified
-    depends_on: [MCP-016, MCP-017, MCP-018]
+    depends_on: [MCP-018]
     evidence: []
-
-  - id: MCP-020
-    kind: security
-    behavior: Local MCP connect and disconnect preflight client and private registration state, journal every intended client change before mutation, resume forward or roll back after interruption, and refuse to overwrite independently changed client configuration.
-    owner: mcp
-    source: {file: artifact-server-mcp-baseline.md, anchor: transactional-client-onboarding}
-    acceptance:
-      behavior: {id: MCP-020-B, description: "Interrupt onboarding after the client mutation, restart the process, resume from the private journal, and finish with one exact client registration and no pending journal."}
-      failure: {id: MCP-020-F, description: "A failed client mutation rolls back cleanly, while an independently changed client or private registration state is preserved, blocks recovery, and retains the journal without being overwritten."}
-    deployments: [local]
-    status: behavior_verified
-    proof_gap: Real-process adapter proof covers native-client interruption, rollback, and conflict preservation. Current released Codex, Claude Code, Cursor, and VS Code host versions still require the full MCP-016 and MCP-019 qualification matrix.
-    depends_on: [MCP-016, MCP-019]
-    evidence:
-      - deployment: local
-        tests: [MCP-020-B, MCP-020-F]
-        result: pass
-        run: project/evidence/local-foundation.json
-        recorded_at: "2026-08-25T18:29:58.000Z"
 
   - id: SKL-001
     kind: behavior
@@ -2472,7 +2071,7 @@ requirements:
 
   - id: CMT-015
     kind: behavior
-    behavior: Review routes use a dedicated artifact-first viewport shell; comments and version navigation are closed by default, exact-version and linked-source context stay compact, on-demand surfaces overlay rather than crush the artifact on narrow screens, sharing stays version-specific, and focus mode always has a visible exit.
+    behavior: Review routes use a dedicated artifact-first viewport shell; comments and version navigation are closed by default, exact-version context stays compact, on-demand surfaces overlay rather than crush the artifact on narrow screens, sharing stays version-specific, and focus mode always has a visible exit.
     owner: artifact-comments
     source: {file: artifact-comments-spec.md, anchor: conformance-requirements-to-add}
     acceptance:
@@ -2633,16 +2232,16 @@ requirements:
 
   - id: ADM-002
     kind: behavior
-    behavior: Canonical settings list active and archived projects, create and open a project, and provide one project-local surface for rename, archive, unarchive, and capability-gated optional Git history with estimate confirmation before enablement.
+    behavior: Canonical settings list active and archived projects, create and open a project, and provide one project-local surface for rename, archive, and unarchive.
     owner: web-application
     source: {file: single-application-administration-spec.md, anchor: project-settings}
     acceptance:
-      behavior: {id: ADM-002-B, description: "Create and rename a project, archive and unarchive it, return to it in Review, and—when an optional Git provider is available—review an estimate before enabling and later disabling Git history while the displayed state follows the server result."}
-      failure: {id: ADM-002-F, description: "A failed create or rename preserves the entered name, archive cannot erase reads or immutable history, unavailable Git cannot be enabled, enablement without estimate confirmation is refused, and the interface never invents project ACLs or exposes provider secrets and internals."}
+      behavior: {id: ADM-002-B, description: "Create and rename a project, archive and unarchive it, and return to it in Review while the displayed state follows the server result."}
+      failure: {id: ADM-002-F, description: "A failed create or rename preserves the entered name, archive cannot erase reads or immutable history, and the interface never invents project ACLs."}
     deployments: *all
     status: behavior_verified
-    proof_gap: Local browser evidence proves project lifecycle behavior and the absent-provider boundary. A configured provider's estimate and enable-disable browser flow, plus team deployments, remain unrecorded.
-    depends_on: [PRJ-003, GIT-010, GIT-012]
+    proof_gap: Local browser evidence proves project lifecycle behavior. Team deployments remain unrecorded.
+    depends_on: [PRJ-003]
     evidence:
       - deployment: local
         tests: [ADM-002-B, ADM-002-F]
@@ -2728,16 +2327,16 @@ requirements:
 
   - id: ADM-007
     kind: behavior
-    behavior: Before the legacy application is removed, canonical Review provides the existing browser operations for version comparison, action history, artifact tombstoning, linked-source freshness and capture, eligible live view, and comment dispatch with agent presence by reusing their established product contracts.
+    behavior: Before the legacy application is removed, canonical Review provides the existing browser operations for version comparison, action history, artifact tombstoning, and comment dispatch with agent presence by reusing their established product contracts.
     owner: web-application
     source: {file: single-application-administration-spec.md, anchor: legacy-capability-parity}
     acceptance:
-      behavior: {id: ADM-007-B, description: "In canonical Review, compare two versions, page action history, tombstone an artifact after confirmation, inspect and capture a drifted linked source, open its eligible live view, and send a comment to a connected agent while observing its stated presence."}
-      failure: {id: ADM-007-F, description: "Unavailable capabilities remain absent, destructive confirmation cannot be bypassed, linked operations cannot appear outside the qualified local deployment, dispatch authority and presence follow existing contracts, and deleting the legacy bundle cannot remove a still-specified browser operation."}
+      behavior: {id: ADM-007-B, description: "In canonical Review, compare two versions, page action history, tombstone an artifact after confirmation, and send a comment to a connected agent while observing its stated presence."}
+      failure: {id: ADM-007-F, description: "Unavailable capabilities remain absent, destructive confirmation cannot be bypassed, dispatch authority and presence follow existing contracts, and deleting the legacy bundle cannot remove a still-specified browser operation."}
     deployments: *all
     status: behavior_verified
-    proof_gap: Local browser evidence proves canonical comparison, action history, tombstoning, linked capture, dispatch, and presence through their existing contracts. Eligible live-view and equivalent team-deployment evidence remain unrecorded.
-    depends_on: [ART-006, AUD-001, DIF-001, LNK-003, LNK-004, LNK-007, DSP-010, PRS-004, PRS-006, ADM-001]
+    proof_gap: Local browser evidence proves canonical comparison, action history, tombstoning, dispatch, and presence through their existing contracts. Equivalent team-deployment evidence remains unrecorded.
+    depends_on: [ART-006, AUD-001, DIF-001, DSP-010, PRS-004, PRS-006, ADM-001]
     evidence:
       - deployment: local
         tests: [ADM-007-B, ADM-007-F]
@@ -3261,44 +2860,6 @@ requirements:
         run: project/evidence/browser.json
         recorded_at: "2026-08-26T16:24:08.705Z"
 
-  - id: WMC-001
-    kind: behavior
-    behavior: When a model context is present the review application registers seven provenance-prefixed WebMCP tools; one get_view orients, and mutations through the tools update the server and the UI with each result carrying the post-mutation thread and counts. Without a model context the application behaves identically and logs nothing.
-    owner: web-application
-    source: {file: webmcp-review-tools-spec.md, anchor: out-of-the-box-tool-set-v1-seven-tools}
-    acceptance:
-      behavior: {id: WMC-001-B, description: "The seven tools register with provenance names; get_view orients; reply then resolve through the tools update the server and the UI, each result carrying the updated thread and post-mutation counts with no read-back."}
-      failure: {id: WMC-001-F, description: "Without a model context the application behaves identically and logs nothing, and the per-user toggle unregisters and re-registers the tools live."}
-    deployments: [local]
-    status: behavior_verified
-    proof_gap: document.modelContext is faked in the browser suite to the adapter's reading of the WebMCP draft (commit bd99438, August 2026); fidelity to the real browser API is untested until a WebMCP-capable browser drives it.
-    depends_on: [CMT-012]
-    evidence:
-      - deployment: local
-        tests: [WMC-001-B, WMC-001-F]
-        result: pass
-        run: project/evidence/browser.json
-        recorded_at: "2026-08-26T16:24:08.705Z"
-
-  - id: WMC-002
-    kind: behavior
-    behavior: WebMCP tools never widen authority. Every call is refused or allowed exactly as the same session's UI operation, tools never register on content frames, and descriptions stay bounded and quote no untrusted text.
-    owner: web-application
-    source: {file: webmcp-review-tools-spec.md, anchor: stances}
-    acceptance:
-      behavior: {id: WMC-002-B, description: "A missing thread and an archived project refuse a tool call with the identical failure code the same session receives through the UI path."}
-      failure: {id: WMC-002-F, description: "No non-main frame holds a registration, and every description is at or under 300 characters, carries provenance, and never contains seeded hostile text."}
-    deployments: [local]
-    status: behavior_verified
-    proof_gap: Descriptions are static literals, so the no-untrusted-text assertion guards future changes rather than a live path; resolve and reopen read before writing, so an archived-project refusal is proven at the read.
-    depends_on: [WMC-001]
-    evidence:
-      - deployment: local
-        tests: [WMC-002-B, WMC-002-F]
-        result: pass
-        run: project/evidence/browser.json
-        recorded_at: "2026-08-26T16:24:08.705Z"
-
   - id: PLN-001
     kind: behavior
     behavior: One Artifact Server installation connects to one Plannotator organization through browser approval in the first integration release.
@@ -3319,7 +2880,7 @@ requirements:
     source: {file: artifact-server-product-spec.html, anchor: plannotator}
     acceptance:
       behavior: {id: PLN-002-B, description: "Trace pairing and managed operations and observe only connection identity and short-lived signed requests at Artifact Server."}
-      failure: {id: PLN-002-F, description: "Credential scanning finds no Plannotator or WorkOS user credential in Artifact Server records, logs, storage, content, or Git."}
+      failure: {id: PLN-002-F, description: "Credential scanning finds no Plannotator or WorkOS user credential in Artifact Server records, logs, storage, or content."}
     deployments: *plannotator_capable
     status: specified
     depends_on: [PLN-001]
@@ -3409,7 +2970,7 @@ requirements:
     owner: plannotator-integration
     source: {file: artifact-server-product-spec.html, anchor: plannotator}
     acceptance:
-      behavior: {id: PLN-009-B, description: "Compare stored bytes, normal responses, downloads, manifests, Git, and explicit review responses and observe the bridge only in review HTML."}
+      behavior: {id: PLN-009-B, description: "Compare stored bytes, normal responses, downloads, manifests, and explicit review responses and observe the bridge only in review HTML."}
       failure: {id: PLN-009-F, description: "Review mode cannot alter stored bytes, fingerprints, exact-version identity, normal caching, non-HTML files, or later normal requests."}
     deployments: *plannotator_capable
     status: specified
@@ -3522,7 +3083,7 @@ requirements:
 
   - id: ARC-001
     kind: constraint
-    behavior: The product core is one modular application and does not import a specific database, blob store, login provider, background-job system, Git provider, or deployment framework.
+    behavior: The product core is one modular application and does not import a specific database, blob store, login provider, background-job system, or deployment framework.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: architecture}
     acceptance:
@@ -3639,15 +3200,15 @@ requirements:
 
   - id: DEP-004
     kind: deployment
-    behavior: The default local target runs directly on the host without Docker, using SQLite, local blob storage, a local token, isolated localhost content origins, and Git handoff disabled by default. A local container is optional, and Cloudflare Artifacts may be configured separately through REST.
+    behavior: The default local target runs directly on the host without Docker, using SQLite, local blob storage, a local token, and isolated localhost content origins. A local container is optional.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
-      behavior: {id: DEP-004-B, description: "Install and complete the local publish, open, version, compare, visibility, MCP, restart, and optional-Git workflows without an external service."}
+      behavior: {id: DEP-004-B, description: "Install and complete the local publish, open, version, compare, visibility, MCP, and restart workflows without an external service."}
       failure: {id: DEP-004-F, description: "Local operation does not require Docker, another container runtime, browser OAuth, a cloud account, a hosted database, or internet access."}
     deployments: [local]
     status: specified
-    depends_on: [MCP-013, CNT-004]
+    depends_on: [CNT-004]
     evidence: []
 
   - id: DEP-005
@@ -3704,48 +3265,6 @@ requirements:
         run: project/evidence/helm-kubernetes.json
         recorded_at: "2026-08-17T03:12:42.551Z"
 
-  - id: DEP-007
-    kind: deployment
-    behavior: The Cloudflare target uses Workers, D1 for metadata, R2 for file bytes, Alchemy for provisioning, WorkOS for hosted MCP authorization, and an off-by-default Cloudflare Artifacts binding for Git handoff.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: deployment}
-    acceptance:
-      behavior: {id: DEP-007-B, description: "Provision a clean Cloudflare deployment and pass publish, delivery, private access, MCP OAuth, backup, failure, and optional-history tests."}
-      failure: {id: DEP-007-F, description: "D1 never stores artifact file bytes, optional history failure never blocks primary storage, and a missing optional provider leaves core behavior intact."}
-    deployments: [cloudflare]
-    status: implementing
-    proof_gap: Selected live D1, R2, WorkOS, routing, cleanup, and recovery probes exist, but no DEP-007 run covers the complete clean provision, publish, delivery, private access, OAuth, backup, failure, optional-history, and optional-provider failure matrix.
-    depends_on: [DEP-021, MCP-010, GIT-007, GATE-003]
-    evidence: []
-
-  - id: DEP-008
-    kind: deployment
-    behavior: The default AWS target is a direct Pulumi project that creates ECS Fargate, RDS PostgreSQL, S3, workload identity, secrets, networking, DNS, TLS, telemetry, and required support outputs.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: deployment}
-    acceptance:
-      behavior: {id: DEP-008-B, description: "Create, upgrade, roll back, recover state, back up, restore, and delete the AWS target with native S3 and private-network options."}
-      failure: {id: DEP-008-F, description: "A failed update cannot orphan durable data, expose private content, or require Pulumi Cloud."}
-    deployments: [aws]
-    status: implementing
-    proof_gap: Mocked Pulumi tests prove configuration and the resource graph, and live reports cover selected public-stack lifecycle probes; the complete native-S3, private-network, failed-update, state, backup/restore, and no-Pulumi-Cloud acceptance run is absent.
-    depends_on: [DEP-003, DEP-021, OPS-003]
-    evidence: []
-
-  - id: DEP-009
-    kind: deployment
-    behavior: The default GCP target is a direct Pulumi project that creates Cloud Run, Cloud SQL PostgreSQL, native Google Cloud Storage, workload identity, secrets, networking, DNS, TLS, telemetry, and required support outputs.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: deployment}
-    acceptance:
-      behavior: {id: DEP-009-B, description: "Create, upgrade, roll back, recover state, back up, restore, and delete the GCP target with native GCS and private-network options."}
-      failure: {id: DEP-009-F, description: "The supported path cannot depend on an S3 compatibility shim, lose durable state during replacement, or require Pulumi Cloud."}
-    deployments: [gcp]
-    status: implementing
-    proof_gap: Mocked Pulumi tests prove configuration and the resource graph, and live reports cover selected public-stack lifecycle probes; the acceptance still names a private-network option that is not advertised, and complete native-GCS, replacement, state, backup/restore, and no-Pulumi-Cloud proof is absent.
-    depends_on: [DEP-003, DEP-021, OPS-003]
-    evidence: []
-
   - id: DEP-011
     kind: constraint
     behavior: The external runtime consumes one provider-neutral factory with immutable blob, staging, readiness, and shutdown capabilities; supported factories cover S3-compatible storage, native Google Cloud Storage, and Worker R2 without cloud SDK types entering product or protocol code. A native Azure Blob factory is available as preview and does not imply a supported Azure deployment.
@@ -3775,20 +3294,6 @@ requirements:
     deployments: *all
     status: specified
     depends_on: [DEP-002]
-    evidence: []
-
-  - id: DEP-021
-    kind: deployment
-    behavior: Every cloud package accepts the shared installation, domain, ingress, capacity, database, backup, deletion, identity, telemetry, state, and secret-reference inputs and returns the shared URL, digest, provider-resource, identity, network, log, state, and support-manifest outputs without returning a secret.
-    owner: deployment
-    source: {file: cloud-deployment-contract.md, anchor: shared-operator-inputs}
-    acceptance:
-      behavior: {id: DEP-021-B, description: "Validate one minimal and one fully configured stack for each cloud, apply it, and verify every required runtime value and machine-readable output against the shared contract."}
-      failure: {id: DEP-021-F, description: "Reject unpinned images, equal application and content domains, invalid capacity, missing production deletion protection, missing public DNS, unknown inputs, secret outputs, and a main stack that creates its own state backend."}
-    deployments: [cloudflare, aws, gcp]
-    status: implementing
-    proof_gap: Shared contract parsing and mocked package graphs cover many inputs and outputs, but no minimal and fully configured live apply for all three clouds verifies every required runtime value, output, and hostile input under DEP-021.
-    depends_on: [DEP-002, DEP-003, DEP-012, DEP-014, DEP-016]
     evidence: []
 
   - id: DEP-022
@@ -3831,14 +3336,10 @@ requirements:
       behavior: {id: DEP-014-B, description: "Resolve and validate application and unique version hosts through supported DNS, TLS, proxy, and localhost configurations."}
       failure: {id: DEP-014-F, description: "A same-site application subdomain, invalid certificate, untrusted forwarded host, or path-only alias cannot be advertised as the supported isolation boundary."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
     depends_on: [CNT-003, CNT-004]
-    evidence:
-      - deployment: cloudflare
-        tests: [DEP-014-B]
-        result: pass
-        run: project/evidence/cloudflare-phase11-content.json
-        recorded_at: "2026-08-16T17:44:26.049Z"
+    evidence: []
 
   - id: DEP-015
     kind: deployment
@@ -3848,7 +3349,7 @@ requirements:
     acceptance:
       behavior: {id: DEP-015-B, description: "Build and run both architectures, execute compact and external-storage workflows from the released image, replace the container, and verify the image digest and secret-free support manifest."}
       failure: {id: DEP-015-F, description: "The image cannot require root, a writable root filesystem, source files, development packages, floating tags, or undeclared container-local durable state."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [DEP-005, DEP-006, DEP-012]
     evidence: []
@@ -3861,7 +3362,7 @@ requirements:
     acceptance:
       behavior: {id: DEP-016-B, description: "Start Compose and Kubernetes packages with mounted secret files behind a configured TLS proxy and resolve both the application and unique content hosts."}
       failure: {id: DEP-016-F, description: "Conflicting direct and file credentials, unreadable secret files, untrusted forwarded hosts, invalid wildcard DNS or certificates, and incomplete provider configuration fail before the process reports ready."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [DEP-014, SEC-004]
     evidence: []
@@ -3892,7 +3393,7 @@ requirements:
     acceptance:
       behavior: {id: DEP-018-B, description: "Verify image and chart signatures, provenance, SBOM contents, pinned dependencies, source revision, and compatibility metadata from a clean release download."}
       failure: {id: DEP-018-F, description: "A release with a floating image, unverifiable origin, missing dependency inventory, embedded test credential, or undocumented compatibility range cannot be published."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [DEP-012, DEP-015]
     evidence: []
@@ -3963,21 +3464,6 @@ requirements:
         result: pass
         run: project/evidence/compact-compose.json
         recorded_at: "2026-08-17T03:10:29.404Z"
-      - deployment: cloudflare
-        tests: [OPS-003-B]
-        result: pass
-        run: project/evidence/cloudflare-phase11-qualification.json
-        recorded_at: "2026-08-16T17:44:26Z"
-      - deployment: aws
-        tests: [OPS-003-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-003-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
 
   - id: OPS-004
     kind: behavior
@@ -3988,19 +3474,10 @@ requirements:
       behavior: {id: OPS-004-B, description: "Scan a valid installation and report all manifests, fingerprints, sizes, paths, and blobs consistent."}
       failure: {id: OPS-004-F, description: "Detect missing blobs, digest mismatches, invalid paths, orphaned current pointers, and cross-installation references without repairing them silently."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
     depends_on: [MAN-001, MAN-006]
-    evidence:
-      - deployment: aws
-        tests: [OPS-004-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-004-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
+    evidence: []
 
   - id: OPS-005
     kind: release_gate
@@ -4011,19 +3488,10 @@ requirements:
       behavior: {id: OPS-005-B, description: "Follow only the published operator procedure on a populated deployment and obtain a verified clean restore."}
       failure: {id: OPS-005-F, description: "A target lacking repeatable backup, restore, integrity, and recovery evidence cannot be marked team-ready or supported."}
     deployments: *external_storage
-    status: behavior_verified
+    status: implementing
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
     depends_on: [OPS-003, OPS-004]
-    evidence:
-      - deployment: aws
-        tests: [OPS-005-B]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-005-B]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
+    evidence: []
 
   - id: OPS-006
     kind: constraint
@@ -4043,21 +3511,6 @@ requirements:
         result: pass
         run: project/evidence/local-foundation.json
         recorded_at: "2026-08-17T03:17:21.421Z"
-      - deployment: cloudflare
-        tests: [OPS-006-F]
-        result: pass
-        run: project/evidence/cloudflare-phase11-qualification.json
-        recorded_at: "2026-08-16T17:44:26Z"
-      - deployment: aws
-        tests: [OPS-006-F]
-        result: pass
-        run: project/evidence/aws-phase11-qualification.json
-        recorded_at: "2026-08-16T03:24:47Z"
-      - deployment: gcp
-        tests: [OPS-006-F]
-        result: pass
-        run: project/evidence/gcp-phase11-qualification.json
-        recorded_at: "2026-08-16T14:36:48Z"
 
   - id: OPS-007
     kind: release_gate
@@ -4111,7 +3564,7 @@ requirements:
     acceptance:
       behavior: {id: OPS-010-B, description: "Terminate idle, reading, uploading, and committing containers during Compose and Kubernetes replacement and observe the documented durable result for every request."}
       failure: {id: OPS-010-F, description: "A draining process cannot remain ready, accept unbounded new work, exceed the termination deadline, leak providers, or return a successful publish that disappears after exit."}
-    deployments: [single_server, kubernetes, aws, gcp]
+    deployments: [single_server, kubernetes]
     status: specified
     depends_on: [OPS-001, PUB-003, PUB-004]
     evidence: []
@@ -4131,7 +3584,7 @@ requirements:
 
   - id: REL-001
     kind: release_gate
-    behavior: The local-owner first-release mode includes automatic credential-free browser access, one-process offline operation, single-file and complete-site publishing, immutable versions, comparisons, restore, two read settings, HTTP, MCP, the artifact route of the Artifact Server skill, and browser isolation. Optional Git history is deferred and is not a first-release gate.
+    behavior: The local-owner first-release mode includes automatic credential-free browser access, one-process offline operation, single-file and complete-site publishing, immutable versions, comparisons, restore, two read settings, HTTP, MCP, the artifact route of the Artifact Server skill, and browser isolation.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: implementation}
     acceptance:
@@ -4139,7 +3592,7 @@ requirements:
       failure: {id: REL-001-F, description: "The local release cannot be declared complete when any applicable behavior or hostile test lacks passing local evidence."}
     deployments: [local]
     status: specified
-    depends_on: [AUTH-023, AUTH-024, AUTH-026, DEP-004, DEP-019, MCP-016, MCP-018, MCP-019, REL-006]
+    depends_on: [AUTH-023, AUTH-024, AUTH-026, DEP-004, DEP-019, MCP-018, MCP-019, REL-006]
     evidence: []
 
   - id: REL-002
@@ -4153,32 +3606,6 @@ requirements:
     deployments: [single_server, kubernetes]
     status: specified
     depends_on: [AUTH-025, AUTH-026, AUTH-027, AUTH-028, DEP-005, DEP-006, GATE-002, MCP-018, MCP-019, OPS-005, REL-006]
-    evidence: []
-
-  - id: REL-003
-    kind: release_gate
-    behavior: The optional Cloudflare deployment includes Workers, D1, R2, browser login, WorkOS MCP authorization, public CDN delivery, trusted installation routing, tenant isolation, audit, and recovery; artifactserver.com service-operator policy is not a core OSS release gate.
-    owner: product-core
-    source: {file: artifact-server-product-spec.html, anchor: implementation}
-    acceptance:
-      behavior: {id: REL-003-B, description: "Pass the complete Cloudflare technical requirement set under provider failure, OAuth, restore, and cross-installation tests."}
-      failure: {id: REL-003-F, description: "The Cloudflare package cannot be called supported until its tenant-isolation, recovery, authorization, and deployment gates have passing evidence; optional service policy cannot block the core OSS release."}
-    deployments: [cloudflare]
-    status: specified
-    depends_on: [DEP-007, MCP-017, MCP-019, REL-006]
-    evidence: []
-
-  - id: REL-004
-    kind: release_gate
-    behavior: Each direct-cloud release includes its official installer, native object storage, private-network option, upgrades, rollback, state recovery, backup, restore, deletion, and the external-storage Helm alternative.
-    owner: product-core
-    source: {file: artifact-server-product-spec.html, anchor: implementation}
-    acceptance:
-      behavior: {id: REL-004-B, description: "Independently pass create-to-delete and full product conformance on AWS and GCP and publish per-target evidence."}
-      failure: {id: REL-004-F, description: "Success on one cloud cannot stand in for evidence on another, and a target with incomplete lifecycle or native-storage tests remains unsupported."}
-    deployments: *direct_clouds
-    status: specified
-    depends_on: [DEP-008, DEP-009, MCP-018, MCP-019, REL-006]
     evidence: []
 
   - id: REL-005
@@ -4259,26 +3686,13 @@ requirements:
     depends_on: [PLN-003]
     evidence: []
 
-  - id: SCP-004
-    kind: exclusion
-    behavior: Optional Git handoff is only a private derivative of Artifact Server versions and is not general-purpose source-code hosting.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: scope}
-    acceptance:
-      behavior: {id: SCP-004-B, description: "Create only Artifact Server-controlled version commits through the history adapter."}
-      failure: {id: SCP-004-F, description: "Users cannot push arbitrary branches, host unrelated repositories, make Git the render source, or bypass artifact authorization through Git."}
-    deployments: *all
-    status: specified
-    depends_on: [GIT-001, GIT-002]
-    evidence: []
-
   - id: SCP-005
     kind: exclusion
     behavior: Artifact Server does not run arbitrary add-ons or third-party programs inside the server.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: scope}
     acceptance:
-      behavior: {id: SCP-005-B, description: "Extend only through documented deployment, storage, auth, Git, MCP, and integration contracts."}
+      behavior: {id: SCP-005-B, description: "Extend only through documented deployment, storage, auth, MCP, and integration contracts."}
       failure: {id: SCP-005-F, description: "Configuration or uploaded content cannot load arbitrary server plugins, native modules, hooks, or executable extensions."}
     deployments: *all
     status: specified
@@ -4329,48 +3743,6 @@ requirements:
     depends_on: [PRJ-003, AUTH-001, AUTH-006, PLN-004]
     evidence: []
 
-  - id: HOST-001
-    kind: security
-    behavior: Public hosting enforces measured per-installation and per-principal quotas, rate limits, upload limits, version limits, and egress controls before artifactserver.com public links launch.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: HOST-001-B, description: "Exercise documented default and maximum limits under normal and burst load and observe clear retry and quota responses without cross-installation impact."}
-      failure: {id: HOST-001-F, description: "Oversized, excessive, parallel, distributed, and retry-amplified workloads cannot bypass limits, exhaust another installation's allowance, or create unbounded spend."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: Hosted quotas and spend controls are optional artifactserver.com operating policy, not a core OSS first-release requirement; retain this candidate only for traceability until a hosted service has an owner and launch plan.
-    depends_on: [PUB-008, GATE-009]
-    evidence: []
-
-  - id: HOST-002
-    kind: security
-    behavior: Public hosting has an executable-file policy and documented malware, phishing, copyright, report, suspension, deletion, appeal, and domain-reputation procedures.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: HOST-002-B, description: "Run a tabletop and staging exercise from report intake through containment, audit, communication, deletion or restoration, and domain-reputation monitoring."}
-      failure: {id: HOST-002-F, description: "A malicious or disputed artifact cannot remain publicly reachable because the system lacks project and actor lookup, suspension, evidence preservation, or deletion controls."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: Malware, copyright, appeal, and reputation operations belong to an optional artifactserver.com service policy, not the core OSS implementation; retain this candidate only for traceability.
-    depends_on: [AUTH-012, AUD-001]
-    evidence: []
-
-  - id: HOST-003
-    kind: security
-    behavior: Hosted customer controls explicitly define encryption, regional placement, audit export, legal hold, permanent deletion, backup frequency, restore target, acceptable data-loss window, availability, and support tier before regulated-team sales.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: HOST-003-B, description: "Map every published promise to configuration, enforcement, monitoring, backup, restore, deletion, audit, and support evidence."}
-      failure: {id: HOST-003-F, description: "Marketing, contract, or user-interface claims cannot exceed measured and tested technical behavior for the selected region and tier."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: Regulated-enterprise promises and sales controls are outside the simple OSS first release and must not drive speculative product features; retain this candidate only for traceability.
-    depends_on: [OPS-003, OPS-008, GATE-010, GATE-011]
-    evidence: []
-
   - id: GATE-001
     kind: release_gate
     behavior: Private multi-file delivery must prove both top-level raw-content sessions and exact-version embedded Review leases in supported browsers before the private-team release.
@@ -4396,86 +3768,6 @@ requirements:
     deployments: *all
     status: specified
     depends_on: [DEP-014]
-    evidence: []
-
-  - id: GATE-003
-    kind: release_gate
-    behavior: The hosted service begins with one D1 database only after load and failure tests, and chooses a tested installation-directory rollout or external Postgres control plane before a second database is required.
-    owner: database-adapters
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-003-B, description: "Measure D1 latency, contention, growth, backup, restore, and failure limits and record the threshold and tested second-database design."}
-      failure: {id: GATE-003-F, description: "Adding bindings, accepting a request-supplied installation ID, or manually moving data cannot be presented as automatic sharding or a supported control plane."}
-    deployments: *hosted
-    status: specified
-    depends_on: [DEP-013]
-    evidence: []
-
-  - id: GATE-004
-    kind: release_gate
-    behavior: The off-by-default Cloudflare Artifacts adapter is advertised only after current access, pricing, repository and rate limits, token behavior, Git compatibility, project selection, estimate and budget behavior, namespace isolation, bounded live-test cleanup, failure containment, deletion, jurisdiction, cost, and recovery are verified.
-    owner: git-history
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-004-B, description: "Complete the bounded live Cloudflare Artifacts binding, REST, smart-HTTP, token, per-project switch, estimate, budget, namespace, run-manifest cleanup, backfill, disable, deletion, recovery, limit, and cost probes and document the supported envelope."}
-      failure: {id: GATE-004-F, description: "Absent beta access, invalid configuration, stale pricing, a provider or test bound, missing Git behavior, cleanup failure, or provider outage cannot touch another namespace or block startup, readiness, saved versions, delivery, or core comparison."}
-    deployments: *all
-    status: specified
-    depends_on: [GIT-007, GIT-012, GIT-013, GIT-014]
-    evidence: []
-
-  - id: GATE-005
-    kind: release_gate
-    behavior: Hosted WorkOS MCP authorization ships only after live consent, token lifetime, refresh rotation, revocation, claims, audience, CIMD, DCR, callback, and stale-client probes pass.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-005-B, description: "Run fresh and stale-state browser authorization, refresh, revoke, disconnect, and reconnect tests in Codex, Claude Code, claude.ai where reachable, and compatibility clients."}
-      failure: {id: GATE-005-F, description: "Wrong issuer, audience, callback, PKCE, registration, revoked grant, stale token, or cross-tenant object access cannot authorize an MCP tool."}
-    deployments: *hosted
-    status: implementing
-    proof_gap: Codex and Claude Code staging flows cover selected consent, refresh, revoke, CIMD, and DCR behavior, but the fresh/stale named-client matrix and every callback, PKCE, registration, revoked, stale, and cross-tenant denial are incomplete.
-    depends_on: [MCP-010, MCP-011, MCP-012]
-    evidence: []
-
-  - id: GATE-006
-    kind: release_gate
-    behavior: Embedded Better Auth MCP OAuth is not supported until its beta path passes interoperability, security, migration, durable-state, refresh, revoke, recovery, CIMD, and DCR tests.
-    owner: mcp
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-006-B, description: "Run the complete hosted OAuth matrix against the embedded provider and document operational responsibility and upgrade behavior."}
-      failure: {id: GATE-006-F, description: "Beta incompatibility, lost client or consent state, weak audience binding, refresh replay, failed migration, or missing revocation keeps the option disabled."}
-    deployments: *external_storage
-    status: specified
-    depends_on: [MCP-014]
-    evidence: []
-
-  - id: GATE-007
-    kind: release_gate
-    behavior: AWS and GCP remain unsupported until their default managed-container projects independently pass create, upgrade, rollback, state recovery, backup, restore, workload-identity, delete, and every advertised ingress-mode test; the direct GCP target advertises public ingress only, while private GCP teams use the qualified Helm path on GKE; Azure is not a direct target and uses the qualified Helm path on AKS.
-    owner: deployment
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-007-B, description: "Publish a complete signed evidence run for the full lifecycle on each cloud and each advertised runtime variant."}
-      failure: {id: GATE-007-F, description: "Documentation, code generation, success on another cloud, or a create-only smoke test cannot qualify a deployment as supported."}
-    deployments: *direct_clouds
-    status: specified
-    depends_on: [DEP-008, DEP-009]
-    evidence: []
-
-  - id: GATE-008
-    kind: release_gate
-    behavior: Public artifactserver.com links do not launch until abuse, executable-file, malware, phishing, copyright, reputation, suspension, and deletion policy is both decided and exercised.
-    owner: hosted-policy
-    source: {file: artifact-server-product-spec.html, anchor: decisions}
-    acceptance:
-      behavior: {id: GATE-008-B, description: "Complete policy approval and operational exercises for every public-hosting abuse path with responsible teams and response evidence."}
-      failure: {id: GATE-008-F, description: "A public-link launch is blocked when any report, containment, deletion, appeal, or domain-reputation path has no responsible team or working control."}
-    deployments: *hosted
-    status: not_applicable
-    rationale: This is an optional artifactserver.com launch-policy gate, not an OSS release gate; core content isolation and authorization safety remain covered by the technical requirements.
-    depends_on: [HOST-002]
     evidence: []
 
   - id: GATE-009
@@ -4512,10 +3804,10 @@ requirements:
     source: {file: artifact-server-product-spec.html, anchor: decisions}
     acceptance:
       behavior: {id: GATE-011-B, description: "Trace each enterprise control through configuration, enforcement, storage, backup, export, deletion, monitoring, and customer-visible evidence."}
-      failure: {id: GATE-011-F, description: "Backups, replicas, CDN copies, Git history, logs, or integration references cannot be omitted from a claimed regional, hold, encryption, export, or deletion boundary."}
+      failure: {id: GATE-011-F, description: "Backups, replicas, CDN copies, logs, or integration references cannot be omitted from a claimed regional, hold, encryption, export, or deletion boundary."}
     deployments: *external_storage
     status: specified
-    depends_on: [OPS-003, GIT-001, AUD-001]
+    depends_on: [OPS-003, AUD-001]
     evidence: []
 
   - id: GATE-012
@@ -4568,118 +3860,6 @@ requirements:
     deployments: *plannotator_capable
     status: specified
     depends_on: [PLN-014, PLN-015]
-    evidence: []
-
-  - id: LNK-001
-    kind: constraint
-    behavior: Linked artifacts are off by default, exist only on the local deployment behind capability discovery, reference the file in place, and are created only by an explicit protocol call naming the path.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-001-B, description: "Enable linked artifacts on a local deployment, observe the advertised capability, link a file through the MCP tool and the HTTP endpoint, and verify the file stays at its original path and is never copied, moved, watched, or scanned into an artifact without that explicit call."}
-      failure: {id: LNK-001-F, description: "With the feature off or on any non-local deployment, the capability is absent, every linked-artifact route answers the stable capability-unavailable shape, and enabling the flag outside the local runtime fails startup; no file on disk becomes an artifact without an explicit link call."}
-    deployments: *all
-    status: implementing
-    proof_gap: The acceptance-ID tests prove the off-by-default 501 shape, capability discovery, reference-in-place linking over MCP and HTTP, and the absence of scanning on the local deployment, and a worker runtime test proves the Cloudflare absence; the single-server, kubernetes, aws, and gcp deployment suites do not yet assert the absence shape, and no recorded run is attached to these IDs yet.
-    depends_on: [ART-001, VER-001]
-    evidence: []
-
-  - id: LNK-007
-    kind: security
-    behavior: The live view streams the source's current disk bytes with no-store caching only to admitted members authenticated on the local deployment over the artifact's live origin; every other reader receives only captured immutable versions.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-007-B, description: "As an admitted local member, read a linked artifact's live view, edit the file on disk, re-read, and observe the current bytes with no-store caching while captured-version routes keep immutable caching."}
-      failure: {id: LNK-007-F, description: "Public-link possession, anonymous requests, non-member sessions, content-origin version routes, and every non-local deployment never receive a live disk byte, and a missing or unreadable source degrades the live view to the last captured version without an error."}
-    deployments: *all
-    status: implementing
-    proof_gap: The acceptance-ID tests prove no-store live delivery to an admitted local member, the 401 for anonymous and version-cookie callers, the captured-only public path under drift, and the degrade-to-captured behavior, and a worker runtime test proves the Cloudflare absence; the single-server, kubernetes, aws, and gcp deployment suites do not yet assert the absence, and no recorded run is attached to these IDs yet.
-    depends_on: [LNK-001, AUTH-008]
-    evidence: []
-
-  - id: LNK-008
-    kind: behavior
-    behavior: A comment thread on a linked artifact anchors to a captured version, and creating one on a drifted binding implicitly captures first, attributed to the commenting principal, in the same request.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-008-B, description: "Comment on an in-sync linked artifact and observe the thread on the current version with no new version; drift the file, comment again, and observe one implicit capture attributed to the commenter with the thread anchored to the new version."}
-      failure: {id: LNK-008-F, description: "An implicit capture aborted by a drift race fails the whole comment request with the retryable drift error and creates no thread, and no thread ever anchors to live bytes or to a version that was not durably captured."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove the in-sync anchor, the implicit capture attributed to the commenting principal, and that an aborted implicit capture creates no thread and no version; the abort is forced through the action ledger rather than a genuine mid-read drift race, so the retryable drift error on that race is unproved, and no recorded run is attached to these IDs yet.
-    depends_on: [LNK-004, CMT-001]
-    evidence: []
-
-  - id: LNK-002
-    kind: behavior
-    behavior: Linking a file creates an ordinary artifact with an initial captured version through the normal publish pipeline, so a linked artifact is never versionless.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-002-B, description: "Link one regular file and receive an artifact whose first version carries the file's verified bytes, canonical manifest, action record, and idempotency result."}
-      failure: {id: LNK-002-F, description: "Linking a directory, symlink, special file, missing path, or unreadable file creates no artifact and no version; replaying the same link idempotency key returns the original artifact."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests drive the HTTP link route and prove the first captured version, its canonical manifest, the link action record, the refusals for a directory, symlink, socket, missing, and unreadable path, and idempotent replay; the MCP and CLI link surfaces are not exercised by these IDs, and no recorded run is attached to them yet.
-    depends_on: [LNK-001, PUB-001]
-    evidence: []
-
-  - id: LNK-003
-    kind: behavior
-    behavior: External modification, removal, and unreadability of a linked source surface as binding freshness on metadata reads without creating, changing, or deleting any version.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-003-B, description: "Modify, remove, and restore the source file and observe the binding freshness move through modified, missing, and back while the version list and delivered bytes stay identical."}
-      failure: {id: LNK-003-F, description: "A freshness refresh cannot write a version, an action record, or any artifact mutation, and a failed stat degrades only the freshness field, never the read."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests observe freshness through the authenticated artifact read while the database refuses every version and action write, and they cover modification, replacement, removal, restoration, and a failed stat; freshness reported through the MCP read surface is not exercised by these IDs, and no recorded run is attached to them yet.
-    depends_on: [LNK-001]
-    evidence: []
-
-  - id: LNK-004
-    kind: behavior
-    behavior: Capture publishes the source's current bytes as a new immutable version using descriptor-verified fingerprint checks, an idempotency key, and the publish current-version conflict behavior.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-004-B, description: "Modify the source, capture, and receive a new version whose bytes hash-match the file read from one verified descriptor; capturing an in-sync binding replays the current version without a new one."}
-      failure: {id: LNK-004-F, description: "A file that changes between fingerprint checks aborts the capture with a retryable drift error and no version, and a stale expected current version returns the publish conflict shape with the actual current version."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove that captured bytes hash-match the file on disk, that an in-sync capture replays the current version under a fresh key, and that a stale expected current version returns the publish conflict naming the actual current version with no version written; a file that changes between the two fingerprint checks cannot be forced deterministically through the HTTP boundary, so the retryable drift abort is unproved, and no recorded run is attached to these IDs yet.
-    depends_on: [LNK-002, PUB-006]
-    evidence: []
-
-  - id: LNK-005
-    kind: behavior
-    behavior: Relink re-points a binding at a moved file under an expected content hash while preserving the artifact identity, versions, comments, and attachments.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-005-B, description: "Move the source file, relink with the expected hash, and observe the same artifact ID, version list, and comment threads with a healthy binding at the new path."}
-      failure: {id: LNK-005-F, description: "A relink whose target bytes do not match the expected hash is rejected and changes nothing, and a relink to a path outside the link roots or inside the data directory is refused."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove a moved file relinks under its expected hash with the same artifact ID, version list, and comment threads, and that a mismatched hash, a path outside every root, and a path inside the data directory each change nothing; artifact attachments are not exercised by these IDs, and no recorded run is attached to them yet.
-    depends_on: [LNK-002]
-    evidence: []
-
-  - id: LNK-006
-    kind: security
-    behavior: Link paths are canonicalized, restricted to configured link roots, denied for the server's own data and database files, accepted only from authorized principals over the loopback application origin, and never select storage or appear in public or content-origin responses.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: LNK-006-B, description: "Link inside a configured root as an admitted member over loopback and read the binding path back only through authenticated application-origin metadata."}
-      failure: {id: LNK-006-F, description: "Paths outside every root, the data directory, database files, symlink escapes, anonymous or public-link callers, and non-loopback origins are all refused; no public, content-origin, or log surface reveals a source path, and no request path ever resolves against the linked filesystem."}
-    deployments: [local]
-    status: implementing
-    proof_gap: The acceptance-ID tests prove root containment, dot-dot and symlink escape refusals, data-directory and database self-protection, anonymous and non-loopback refusals, path non-disclosure on every refusal body, and manifest-only delivery; no recorded run is attached to these IDs yet.
-    depends_on: [LNK-001, AUTH-008]
     evidence: []
 
   - id: KAN-001
@@ -4782,7 +3962,8 @@ requirements:
       behavior: {id: EDT-001-B, description: "Edit one text entry of a multi-file version and receive a new version identical to the base except that entry, with its action record and replayable idempotency result."}
       failure: {id: EDT-001-F, description: "An edit naming a path absent from the base manifest, a missing upload, or an aborted transaction creates no version, and no stored version's bytes ever change."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server, covering the copied manifest, the replaced bytes, the unchanged base, the edited action, the replay, and absent-path, mismatched, extra-file, unknown-base, and unverified uploads saving nothing. An aborted transaction is not exercised directly. The Postgres and D1 commit paths compile and pass the existing suites but no test runs an edit on them, and no deployed run exists.
     depends_on: [PUB-001, PUB-006, VER-001]
     evidence: []
 
@@ -4795,7 +3976,8 @@ requirements:
       behavior: {id: EDT-002-B, description: "Round-trip files with and without a byte order mark and with CRLF and LF endings, changing one line, and verify untouched lines are byte-identical."}
       failure: {id: EDT-002-F, description: "A save whose expected current version is stale returns the publish conflict shape with the actual current version and writes nothing; it never silently overwrites newer work."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: The server half is proved locally against SQLite. Committed bytes keep a byte order mark and CRLF endings exactly, and a stale save is the 409 publish conflict naming the actual current version with nothing saved. That the web editor preserves the mark and line endings when it builds the bytes is the client helper's job in apps/web/src/artifact-actions and is not proved by this ID. Postgres, D1, and deployed runs are unproved.
     depends_on: [EDT-001]
     evidence: []
 
@@ -4808,34 +3990,9 @@ requirements:
       behavior: {id: EDT-003-B, description: "Edit a markdown, plain-text, and JSON entry within the size bound through the staging-upload flow and verify the committed bytes hash-match the upload."}
       failure: {id: EDT-003-F, description: "An edit of a binary media type or an oversize text entry is rejected, and no MCP tool accepts edited file contents as an argument."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: Proved locally against SQLite. Markdown, plain text at exactly the 1 MiB bound, and JSON commit with hash-matching bytes; binary, text over binary, and one byte over the bound are 422; MCP capabilities advertise the bound with no edit tool and artifact_commit_upload refuses an edit target against a real staged upload. Postgres, D1, and deployed runs are unproved.
     depends_on: [EDT-001, MAN-001]
-    evidence: []
-
-  - id: OPN-001
-    kind: behavior
-    behavior: Open-in launches only catalog applications on a verified linked-artifact source, as an argument vector with the server-resolved path, on the local deployment over the loopback application origin.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: OPN-001-B, description: "List the installed-application catalog and open one linked artifact's source in a chosen application, launched as an argument vector containing the server-resolved verified path."}
-      failure: {id: OPN-001-F, description: "An application ID outside the catalog, an artifact whose binding is missing or unreadable, and a launch attempt while the feature is disabled are each refused with no process started."}
-    deployments: [local]
-    status: specified
-    depends_on: [LNK-001]
-    evidence: []
-
-  - id: OPN-002
-    kind: security
-    behavior: Open-in never accepts a client-supplied path or argument, never launches for a non-linked artifact, and is refused entirely on non-local deployments and non-loopback origins.
-    owner: local-workspace
-    source: {file: local-workspace-spec.md, anchor: conformance-requirements-to-add}
-    acceptance:
-      behavior: {id: OPN-002-B, description: "Verify the launch request carries only an artifact ID and catalog application ID, with the path resolved server-side from the verified binding."}
-      failure: {id: OPN-002-F, description: "Requests carrying paths or extra arguments, requests for managed artifacts, anonymous and public-link callers, non-loopback origins, and every non-local deployment are refused, and no shell string is ever composed."}
-    deployments: *all
-    status: specified
-    depends_on: [OPN-001]
     evidence: []
 
   - id: PRV-001
@@ -4992,7 +4149,7 @@ requirements:
     source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
     acceptance:
       behavior: {id: FRK-004-B, description: "Start with no provider, read login kind none from /auth/context, publish with the API key, and follow a Review link to the artifact folder."}
-      failure: {id: FRK-004-F, description: "Browser login returns InteractiveLoginUnavailable, and a partial OIDC or WorkOS configuration still fails startup."}
+      failure: {id: FRK-004-F, description: "Browser login routes answer 404 without a redirect or cookie, and a Review link cannot choose another route."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Tests are not written yet; no deployed run exists.
@@ -5067,4 +4224,74 @@ requirements:
     status: implementing
     proof_gap: Proved locally against SQLite over a real server, including the ordering, both windows, the sparse series, an anonymous read, the no-cache header, truncation at the 500 cap with the newest-first window, a private and a deleted artifact, the application policy on /, and the pure tree and chart builders with no server and no browser. The Postgres read path and the light and dark browser captures run only in CI, and no deployed run exists.
     depends_on: [FRK-008, FRK-007, FRK-002]
+    evidence: []
+
+  - id: FRK-010
+    kind: behavior
+    behavior: An artifact records the principal who created it and that principal's display name at creation, every version records its publisher's display name, and the artifact list carries the owner, the last change, the current version number, and view counts, filtered to the caller's own artifacts or to others' artifacts on request.
+    owner: artifact-core
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-010-B, description: "Publish one artifact as the installation token and one as a service key, publish a second version of the first as the service key, and observe the unchanged owner, each version's publisher name, the list's owner, last change, current version number, and 30-day and total views, and owner=me and owner=others from both principals."}
+      failure: {id: FRK-010-F, description: "An unknown owner scope is 422, a principal who only published a later version owns nothing, and a schema-14 database upgrades with each owner taken from its first version's publisher and a null name rather than a guessed one."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server, including the schema-14 upgrade. The Postgres migration 0015 and its owner filter run only in CI with Docker, the D1 columns and filter compile and pass the existing Cloudflare runtime suite but no D1 test asserts the owner or the backfill, and no deployed run exists.
+    depends_on: [FRK-008, PUB-001]
+    evidence: []
+
+  - id: FRK-013
+    kind: behavior
+    behavior: The review application duplicates one exact version into a new private artifact owned by the caller, named "<name> (copy)" with the same tags, by replaying the staged upload pipeline with bytes it has verified against the source manifest.
+    owner: web-application
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-013-B, description: "Duplicate a multi-file version that holds a binary file and observe a new private artifact whose files are byte-identical to the source, named '<name> (copy)', with the same tags, while the source artifact is unchanged."}
+      failure: {id: FRK-013-F, description: "A source file whose bytes do not match the manifest fingerprint aborts the duplicate before commit and creates no artifact."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against SQLite over a real server through the browser helper with real fetch, including idempotent replay and a missing source file. No browser test drives the dialog, and no Postgres or deployed run exists.
+    depends_on: [PUB-001, VER-001, FRK-010]
+    evidence: []
+
+  - id: FRK-014
+    kind: security
+    behavior: An operator with storage access runs artifactserver admin issue-key to create or reuse an active administrator member by email and mint a member key printed once; signing a browser in with that key acts as the administrator directly, while bearer use of the key stays a delegated key.
+    owner: authorization
+    source: {file: ../../docs/fork/RUNBOOK.md, anchor: recover-administrator-access}
+    acceptance:
+      behavior: {id: FRK-014-B, description: "Issue a key twice for one email against a compact installation, reuse the same member, sign the browser in with the key, read a direct human administrator session, admit a member, and issue that member a key over HTTP."}
+      failure: {id: FRK-014-F, description: "A missing installation exits non-zero and creates nothing, an email that belongs to a non-administrator gets no key, and the secret appears once on standard output and never on standard error or in server logs."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a compact SQLite installation through the CLI and a real server. The external-storage path shares the application service but has no Postgres run.
+    depends_on: [AUTH-009, AUTH-029]
+    evidence: []
+
+  - id: FRK-011
+    kind: behavior
+    behavior: A project's activity report counts its live artifacts, public artifacts, uploads, and page views, gives a sparse 365-day daily series of uploads and views and the ten most viewed artifacts of the last 30 days, and one artifact's report gives its 7-day, 30-day, and all-time views with a sparse 30-day series; both are read-only and built from versions and stored view rows.
+    owner: http-api
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-011-B, description: "Publish and view artifacts across three days 400 days apart with a pinned clock, and read the exact totals, the sparse series without the out-of-window day, the uploaded-today and viewed-today counts, the one-decimal average, the most viewed order, and one artifact's three windows and series."}
+      failure: {id: FRK-011-F, description: "A deleted artifact leaves every total, the series, and the ranking, its own report is 404, an artifact read through another project is 404, an empty project reports zeros, and a key without artifact read access is 403 on both reports."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server. The Postgres and D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
+    depends_on: [FRK-008, FRK-010]
+    evidence: []
+
+  - id: FRK-012
+    kind: behavior
+    behavior: A rename changes an artifact's display name and search name without saving a version, with an idempotency key, current-version compare-and-swap, and an action record of kind renamed, over HTTP and an equivalent MCP tool.
+    owner: artifact-core
+    source: {file: ../../docs/fork/SIMPLIFY.md, anchor: 3-ui-for-viewers-and-publishers-ask-3}
+    acceptance:
+      behavior: {id: FRK-012-B, description: "Rename over HTTP with surrounding spaces and over MCP, find the artifact by its new name and not its old one, observe the unchanged current version and two renamed actions, and replay the first key to receive the name it set with replayed true."}
+      failure: {id: FRK-012-F, description: "A stale expected version is 409 ARTIFACT_MUTATION_CONFLICT, a reused key with another name is 409 IDEMPOTENCY_CONFLICT, a blank name and a missing key are 422, a deleted artifact is 404, and none of them changes the name or records an action."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The Postgres migration 0016 and rename, and the D1 table rebuilds and rename, compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
+    depends_on: [FRK-010, ARC-006]
     evidence: []

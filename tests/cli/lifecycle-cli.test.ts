@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import {createServer} from "node:net";
-import {homedir, tmpdir} from "node:os";
+import {tmpdir} from "node:os";
 import path from "node:path";
 import {DatabaseSync} from "node:sqlite";
 
@@ -66,10 +66,7 @@ describe("Artifact Server lifecycle CLI", () => {
       expect((await stat(path.join(dataDirectory, "secrets/api-token"))).mode & 0o777)
         .toBe(0o600);
 
-      const environment = compactEnvironment({
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-configuration-client",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
-      });
+      const environment = compactEnvironment();
       const checked = await runCli([
         "config",
         "check",
@@ -85,7 +82,6 @@ describe("Artifact Server lifecycle CLI", () => {
             apiToken: "generated_file",
           },
           deploymentMode: "compact",
-          interactiveIdentityProvider: "oidc",
           installationId: initialization.installationId,
           stagingCleanup: {
             batchSize: 100,
@@ -99,34 +95,6 @@ describe("Artifact Server lifecycle CLI", () => {
         providers: {status: "ready"},
       });
       expect(checked.output).not.toContain(apiToken);
-      const noIdentityProvider = await runCli([
-        "config",
-        "check",
-        "--mode",
-        "compact",
-        "--data",
-        dataDirectory,
-      ], compactEnvironment());
-      expect(noIdentityProvider.exitCode).toBe(0);
-      expect(JSON.parse(noIdentityProvider.output)).toMatchObject({
-        configuration: {interactiveIdentityProvider: "none", status: "valid"},
-      });
-      const incompleteWorkOs = await runCli([
-        "config",
-        "check",
-        "--mode",
-        "compact",
-        "--data",
-        dataDirectory,
-      ], {
-        ...compactEnvironment(),
-        ARTIFACT_SERVER_WORKOS_API_KEY: "workos-secret-value",
-      });
-      expect(incompleteWorkOs.exitCode).not.toBe(0);
-      expect(incompleteWorkOs.output).toContain(
-        "Hosted WorkOS authentication requires",
-      );
-      expect(incompleteWorkOs.output).not.toContain("workos-secret-value");
       await chmod(path.join(dataDirectory, "secrets/api-token"), 0o644);
       const permissiveSecret = await runCli([
         "config",
@@ -161,70 +129,6 @@ describe("Artifact Server lifecycle CLI", () => {
         field: "ARTIFACT_SERVER_STAGING_CLEANUP",
         reason: "invalid_value",
       });
-      const defaultLinkedFiles = await Effect.runPromise(
-        parseCompactRuntimeConfiguration({
-          dataDirectory,
-          environment,
-          hostname: "127.0.0.1",
-          port: "8787",
-        }),
-      );
-      expect(defaultLinkedFiles.linkedFiles).toBe("off");
-      expect(defaultLinkedFiles.linkRoots).toEqual([homedir()]);
-      const linkedFilesEnabled = await Effect.runPromise(
-        parseCompactRuntimeConfiguration({
-          dataDirectory,
-          environment: {
-            ...environment,
-            ARTIFACT_SERVER_LINKED_FILES: "on",
-            ARTIFACT_SERVER_LINK_ROOTS: "/tmp/workspace-a:/tmp/workspace-b",
-          },
-          hostname: "127.0.0.1",
-          port: "8787",
-        }),
-      );
-      expect(linkedFilesEnabled.linkedFiles).toBe("on");
-      expect(linkedFilesEnabled.linkRoots).toEqual([
-        "/tmp/workspace-a",
-        "/tmp/workspace-b",
-      ]);
-      await expect(Effect.runPromise(parseCompactRuntimeConfiguration({
-        dataDirectory,
-        environment: {
-          ...environment,
-          ARTIFACT_SERVER_LINKED_FILES: "maybe",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_LINKED_FILES",
-        reason: "invalid_value",
-      });
-      await expect(Effect.runPromise(parseCompactRuntimeConfiguration({
-        dataDirectory,
-        environment: {
-          ...environment,
-          ARTIFACT_SERVER_LINK_ROOTS: "relative/path",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_LINK_ROOTS",
-        reason: "invalid_value",
-      });
-      await expect(Effect.runPromise(parseCompactRuntimeConfiguration({
-        dataDirectory,
-        environment: {
-          ...environment,
-          ARTIFACT_SERVER_LINK_ROOTS: "/tmp/workspace-a:",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_LINK_ROOTS",
-        reason: "invalid_value",
-      });
-
       const support = await runCli([
         "support",
         "manifest",
@@ -342,45 +246,6 @@ describe("Artifact Server lifecycle CLI", () => {
           objectStorageSecret: "provider_chain",
         });
       expect(providerChain.objectStorage).not.toHaveProperty("accessKeyId");
-      const gcs = await Effect.runPromise(
-        parseExternalStorageRuntimeConfiguration({
-          environment: {
-            ...externalConfigurationEnvironment(),
-            ARTIFACT_SERVER_GCS_BUCKET: "artifact-server-qualification",
-            ARTIFACT_SERVER_GCS_PROJECT_ID: "artifact-server-qualification",
-            ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER: "gcs",
-          },
-          hostname: "127.0.0.1",
-          port: "8787",
-        }),
-      );
-      expect(summarizeRuntimeConfiguration(gcs)).toMatchObject({
-        credentialSources: {
-          objectStorageAccessKey: "provider_chain",
-          objectStorageSecret: "provider_chain",
-        },
-        objectStorageProvider: "gcs",
-      });
-      const azureBlob = await Effect.runPromise(
-        parseExternalStorageRuntimeConfiguration({
-          environment: {
-            ...externalConfigurationEnvironment(),
-            ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL:
-              "https://artifactserver.blob.core.windows.net",
-            ARTIFACT_SERVER_AZURE_BLOB_CONTAINER: "artifacts",
-            ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER: "azure-blob",
-          },
-          hostname: "127.0.0.1",
-          port: "8787",
-        }),
-      );
-      expect(summarizeRuntimeConfiguration(azureBlob)).toMatchObject({
-        credentialSources: {
-          objectStorageAccessKey: "provider_chain",
-          objectStorageSecret: "provider_chain",
-        },
-        objectStorageProvider: "azure-blob",
-      });
       await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
         environment: {
           ...externalConfigurationEnvironment(),
@@ -390,20 +255,6 @@ describe("Artifact Server lifecycle CLI", () => {
         port: "8787",
       }))).rejects.toMatchObject({
         field: "ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER",
-        reason: "invalid_value",
-      });
-      await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
-        environment: {
-          ...externalConfigurationEnvironment(),
-          ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL:
-            "http://artifactserver.blob.core.windows.net",
-          ARTIFACT_SERVER_AZURE_BLOB_CONTAINER: "artifacts",
-          ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER: "azure-blob",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL",
         reason: "invalid_value",
       });
       await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
@@ -455,28 +306,6 @@ describe("Artifact Server lifecycle CLI", () => {
         field: "ARTIFACT_SERVER_POSTGRES_MAX_CONNECTIONS",
         reason: "invalid_value",
       });
-      await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
-        environment: {
-          ...externalConfigurationEnvironment(),
-          ARTIFACT_SERVER_LINKED_FILES: "on",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_LINKED_FILES",
-        reason: "invalid_value",
-      });
-      await expect(Effect.runPromise(parseExternalStorageRuntimeConfiguration({
-        environment: {
-          ...externalConfigurationEnvironment(),
-          ARTIFACT_SERVER_LINKED_FILES: "maybe",
-        },
-        hostname: "127.0.0.1",
-        port: "8787",
-      }))).rejects.toMatchObject({
-        field: "ARTIFACT_SERVER_LINKED_FILES",
-        reason: "invalid_value",
-      });
     } finally {
       await rm(parent, {force: true, recursive: true});
     }
@@ -496,8 +325,6 @@ describe("Artifact Server lifecycle CLI", () => {
       expect(initialized.exitCode).toBe(0);
       const environment = compactEnvironment({
         ARTIFACT_SERVER_CONTENT_DOMAIN: undefined,
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-configuration-client",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
       });
       const checked = await runCli([
         "config",
@@ -591,8 +418,6 @@ describe("Artifact Server lifecycle CLI", () => {
       expect(initialized.exitCode).toBe(0);
       const port = await availablePort();
       const environment = compactEnvironment({
-        ARTIFACT_SERVER_OIDC_CLIENT_ID: "lifecycle-test-client",
-        ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test",
         ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "300",
         ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: "3000",
       });

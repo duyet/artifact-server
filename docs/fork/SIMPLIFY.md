@@ -54,7 +54,6 @@ PR #6 (`ci/plain-semver-releases`) does this:
 - **External storage (D12).** It is the only migration path off SQLite on NFS. SQLite on NFS is fragile: file locking over NFS is a known source of corruption, and the deployment cannot run two pods. The Helm chart and runbook in this repository also run only this mode. Delete it only when (1) the coordinator confirms the pod runs compact mode, (2) the operator accepts one pod on NFS as the long-term shape, and (3) the chart gains a compact mode (a `PersistentVolumeClaim` and `start` instead of `start-external-storage`) or the deployment repository keeps its own manifests. Until then, Postgres and S3 stay and keep their CI jobs.
 - **Helm chart** (`packaging/helm/artifact-server`, 1,308 lines). `fork-release.yml` packages and pushes it, and `fork-ci.yml:47` checks it.
 - **OCI image** (`packaging/oci/Dockerfile`, 73 lines) and `tests/release/oci-image.test.ts`.
-- **Linked artifacts** (`src/local/linked-source-engine.ts`, `src/application/linked-artifacts.ts`, `src/cli/link-command.ts`, 1,595 lines). It is part of the compact server and off by default (`ARTIFACT_SERVER_LINKED_FILES=off`). Agents can use it from a laptop. Not worth the churn.
 - **The conformance ledger.** It stays, but every deletion PR prunes the requirement IDs and the `deployments` sets it removes. 192 of 308 requirements list all six deployments (local, single_server, kubernetes, cloudflare, aws, gcp). After D1 and D2 the set becomes local, single_server, kubernetes.
 
 ### Size of the change

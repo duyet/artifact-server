@@ -8,6 +8,12 @@ import type {
 export const managedApiKeyCredentialPattern =
   /^as_key_(key_[0-9a-f-]+)_([A-Za-z0-9_-]{32,})$/u;
 
+/**
+ * Issuer recorded on a member key an operator mints outside the application.
+ * Signing a browser in with such a key acts as the member directly.
+ */
+export const installationOperatorPrincipalId = "installation-operator";
+
 /** Installation member lifecycle states. */
 export const memberStatuses = {
   active: "active",
@@ -28,15 +34,6 @@ export interface InstallationMember {
   readonly role: MembershipRole;
   readonly status: MemberStatus;
   readonly updatedAt: string;
-}
-
-/** Identity information returned by a configured interactive-login provider. */
-export interface ExternalIdentity {
-  readonly displayName: string;
-  readonly email: string;
-  readonly emailVerified: boolean;
-  readonly provider: string;
-  readonly subject: string;
 }
 
 /** The one identity a browser session acts as. */

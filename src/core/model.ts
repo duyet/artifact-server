@@ -11,7 +11,6 @@ export type AccessSetting = (typeof accessSettings)[keyof typeof accessSettings]
 
 /** Artifact mutation kinds persisted in the standalone action history. */
 export const artifactActionKinds = {
-  capture: "capture",
   changeAccess: "change_access",
   changeTags: "change_tags",
   commentCreate: "comment_create",
@@ -21,9 +20,9 @@ export const artifactActionKinds = {
   commentResolve: "comment_resolve",
   commentUpdate: "comment_update",
   delete: "delete",
-  link: "link",
+  edited: "edited",
   publish: "publish",
-  relink: "relink",
+  renamed: "renamed",
   restore: "restore",
 } as const;
 
@@ -69,6 +68,16 @@ export interface ProjectRecord {
   readonly name: string;
 }
 
+/** The principal who created an artifact, captured when it was created. */
+export interface ArtifactOwner {
+  /**
+   * The creator's display name at creation. Null for an artifact created
+   * before owners were recorded, whose principal came from its first version.
+   */
+  readonly displayName: string | null;
+  readonly principalId: string;
+}
+
 export interface ArtifactRecord {
   readonly accessSetting: AccessSetting;
   readonly createdAt: string;
@@ -76,6 +85,7 @@ export interface ArtifactRecord {
   readonly deletedAt: string | null;
   readonly id: string;
   readonly name: string;
+  readonly owner: ArtifactOwner;
   /** The readable path claimed at creation, served at `/<path>/` in path mode. */
   readonly path: string | null;
   readonly projectId: string;
@@ -91,30 +101,6 @@ export interface ArtifactPathMatch {
 /** An artifact record whose deletion state is known to be committed. */
 export interface ArtifactTombstone extends ArtifactRecord {
   readonly deletedAt: string;
-}
-
-/** The observed relation between a linked source file and its last capture. */
-export type SourceFreshness = "in-sync" | "modified" | "missing" | "unreadable";
-
-/** Persisted source freshness states, named for storage and projection code. */
-export const sourceFreshnessStates = {
-  inSync: "in-sync",
-  missing: "missing",
-  modified: "modified",
-  unreadable: "unreadable",
-} as const satisfies Record<string, SourceFreshness>;
-
-/** One linked artifact's reference to a source file that stays on disk. */
-export interface SourceBindingRecord {
-  readonly artifactId: string;
-  /** `device:inode:size:mtimeNs:ctimeNs` observed at the last capture or relink. */
-  readonly fingerprint: string;
-  readonly freshness: SourceFreshness;
-  /** Instant the freshness was last observed against the source file. */
-  readonly lastVerifiedAt: string;
-  /** Canonicalized absolute path on the server's own machine. */
-  readonly path: string;
-  readonly projectId: string;
 }
 
 /** Stable keyset position used by bounded artifact and action queries. */
@@ -141,7 +127,27 @@ export interface ArtifactActionRecord {
 /** One active artifact with exact aggregate data needed by list surfaces. */
 export interface ArtifactListItem extends ArtifactRecord {
   readonly commentCount: number;
+  /** The current version's creation time, which is the artifact's last change. */
+  readonly currentVersionCreatedAt: string;
+  readonly currentVersionNumber: number;
   readonly versionCount: number;
+}
+
+/** The views one listed artifact received. */
+export interface ArtifactListViews {
+  readonly last30Days: number;
+  readonly total: number;
+}
+
+/** One listed artifact together with its view counts. */
+export interface ArtifactListItemWithViews extends ArtifactListItem {
+  readonly views: ArtifactListViews;
+}
+
+/** One bounded page of active artifacts with their view counts. */
+export interface ArtifactPageWithViews {
+  readonly items: readonly ArtifactListItemWithViews[];
+  readonly nextCursor: PageCursor | null;
 }
 
 /** One bounded page of active artifacts. */
@@ -175,6 +181,37 @@ export interface ArtifactViewCounts {
   readonly last7Days: number;
   readonly last30Days: number;
   readonly total: number;
+}
+
+/** A count on one UTC day, as `YYYY-MM-DD`. */
+export interface DayCount {
+  readonly count: number;
+  readonly day: string;
+}
+
+/** Counts over one project's live artifacts. */
+export interface ProjectActivityTotals {
+  readonly artifacts: number;
+  /** Live artifacts with at least one view on the given day. */
+  readonly artifactsViewedOnDay: number;
+  readonly pageViews: number;
+  readonly publicArtifacts: number;
+  /** Every version of every live artifact. */
+  readonly uploads: number;
+}
+
+/** One project's sparse daily uploads and views inside a day window. */
+export interface ProjectActivityDays {
+  readonly uploads: readonly DayCount[];
+  readonly views: readonly DayCount[];
+}
+
+/** One live artifact ranked by the views it received inside a window. */
+export interface ViewedArtifact {
+  readonly artifactId: string;
+  readonly name: string;
+  readonly totalViews: number;
+  readonly windowViews: number;
 }
 
 /** A live public artifact with the facts the home page tree shows. */
@@ -235,6 +272,8 @@ export interface VersionRecord {
   readonly id: string;
   readonly manifestDigest: string;
   readonly number: number;
+  /** The publisher's display name at publication; null before it was recorded. */
+  readonly publisherDisplayName: string | null;
   readonly publisherPrincipalId: string;
   readonly projectId: string;
   readonly routingMode: RoutingMode;

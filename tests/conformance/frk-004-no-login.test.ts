@@ -2,18 +2,12 @@ import {mkdtemp, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import path from "node:path";
 
-import {Effect} from "effect";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
-import {z} from "zod";
 
-import type {InteractiveIdentityProvider} from "../../src/application/interactive-login.js";
 import {
   browserLoginKinds,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
-import {IdentityProviderFailure} from "../../src/core/errors.js";
-import {loadOidcConfiguration} from "../../src/cli/oidc-configuration.js";
-import {loadWorkOsConfiguration} from "../../src/cli/workos-configuration.js";
 import {
   createTestInstallation,
   removeTestInstallation,
@@ -23,16 +17,7 @@ import {
 } from "../support/runtime-harness.js";
 import {indexHtml, publishSite} from "../support/same-host-site.js";
 
-const errorBodySchema = z.object({
-  error: z.object({code: z.string(), message: z.string()}),
-});
 const reviewShell = "<!doctype html><title>Review shell</title>";
-
-const unusedProvider: InteractiveIdentityProvider = {
-  complete: () => Effect.fail(new IdentityProviderFailure({message: "unused"})),
-  name: "unused-provider",
-  start: () => Effect.fail(new IdentityProviderFailure({message: "unused"})),
-};
 
 async function redirectOf(
   url: string,
@@ -95,7 +80,7 @@ describe("a server with no browser login provider", () => {
     expect(await shell.text()).toBe(reviewShell);
   });
 
-  test("FRK-004-F: browser login stays unavailable, a Review link cannot choose another route, and a login kind that disagrees with its provider refuses to start", async () => {
+  test("FRK-004-F: browser login stays unavailable and a Review link cannot choose another route", async () => {
     server = await startTestServer(installation, {
       browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
       contentDomain: null,
@@ -104,8 +89,8 @@ describe("a server with no browser login provider", () => {
 
     const login = await fetch(`${server.baseUrl}/auth/login`, {redirect: "manual"});
     expect(login.status).toBe(404);
-    expect(errorBodySchema.parse(await login.json()).error.code)
-      .toBe("INTERACTIVE_LOGIN_UNAVAILABLE");
+    expect(login.headers.get("location")).toBeNull();
+    expect(login.headers.get("set-cookie")).toBeNull();
 
     expect(await redirectOf(`${server.baseUrl}/review?artifact=..%2F..%2Fapi%2Fv1`))
       .toEqual({location: "/artifacts/..%2F..%2Fapi%2Fv1", status: 302});
@@ -121,35 +106,5 @@ describe("a server with no browser login provider", () => {
       {body: reviewShell, status: 200},
       {body: reviewShell, status: 200},
     ]);
-    await server.stop();
-    server = undefined;
-
-    await expect(startTestServer(installation, {
-      browserAccess: privateTeamBrowserAccess(browserLoginKinds.oidc),
-    })).rejects.toThrow("requires exactly one OIDC or WorkOS");
-    await expect(startTestServer(installation, {
-      browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
-      interactiveIdentityProvider: unusedProvider,
-    })).rejects.toThrow("cannot configure a browser-login provider");
-
-    await expect(loadWorkOsConfiguration({
-      ARTIFACT_SERVER_WORKOS_API_KEY: "partial-workos-secret",
-    })).rejects.toThrow("Hosted WorkOS authentication requires");
-    await expect(loadOidcConfiguration({
-      ARTIFACT_SERVER_OIDC_CLIENT_ID: "partial-oidc-client",
-    })).rejects.toThrow("Generic OIDC authentication requires");
-
-    server = await startTestServer(installation, {
-      browserAccess: privateTeamBrowserAccess(browserLoginKinds.oidc),
-      contentDomain: null,
-      interactiveIdentityProvider: unusedProvider,
-      webAssetsRoot,
-    });
-    const withLogin = await fetch(
-      `${server.baseUrl}/review?artifact=art_not-redirected`,
-      {redirect: "manual"},
-    );
-    expect(withLogin.status).toBe(200);
-    expect(await withLogin.text()).toBe(reviewShell);
   });
 });

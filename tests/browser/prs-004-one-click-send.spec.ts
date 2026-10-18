@@ -185,7 +185,7 @@ test.describe("PRS-004 one-click send and undo", () => {
           expect.stringMatching(/^dispatch-default:/u),
           "artifact-review-theme",
         ],
-        sessionStorageKeys: ["artifact-review-return-url"],
+        sessionStorageKeys: [],
       });
     } finally {
       await stopBrowserFixture(fixture);

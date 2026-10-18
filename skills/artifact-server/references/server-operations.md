@@ -7,16 +7,11 @@ restore do not require administrator instructions.
 ## Select the installation and deployment target
 
 Identify the exact installation before changing it. Determine whether it runs
-as a local package, Docker Compose, Kubernetes, Cloudflare, AWS, or Google
-Cloud. Inspect the matching repository guide instead of translating commands
-from another target:
+from a source checkout or on Kubernetes. Inspect the matching repository guide
+instead of translating commands from another target:
 
-- local package: `docs/deployment.md`
-- Docker Compose: `packaging/compose/README.md`
+- source checkout: the "Run it locally" section of `README.md`
 - Kubernetes: `packaging/helm/artifact-server/README.md`
-- Cloudflare: `deploy/cloudflare/README.md`
-- AWS: `deploy/pulumi/aws/README.md`
-- Google Cloud: `deploy/pulumi/gcp/README.md`
 
 Use the target's native tool. Artifact Server does not provide one generic
 `artifactserver deploy` command.
@@ -24,7 +19,7 @@ Use the target's native tool. Artifact Server does not provide one generic
 ## Plan before changing infrastructure
 
 1. Inspect the current release, deployment configuration, storage drivers,
-   identity mode, and health without printing credentials.
+   access mode, and health without printing credentials.
 2. State the proposed change, affected installation, expected interruption,
    rollback path, and any backup or restore consequence.
 3. Confirm that the request authorizes that exact material change. Ask before a
@@ -36,7 +31,7 @@ Use the target's native tool. Artifact Server does not provide one generic
 
 ## Protect data and credentials
 
-- Never paste infrastructure, database, object-storage, OIDC, or Artifact
+- Never paste infrastructure, database, object-storage, or Artifact
   Server credentials into chat or command output.
 - Resolve exact backup objects and destinations before a restore. A server
   backup restore is destructive and is different from making an immutable

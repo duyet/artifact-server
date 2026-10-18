@@ -3,7 +3,6 @@ import {
   type AuthInfo,
   OAuthError,
   OAuthErrorCode,
-  getOAuthProtectedResourceMetadataUrl,
   requireBearerAuth,
   validateHostHeader,
   validateOriginHeader,
@@ -25,8 +24,6 @@ import {
   principalKinds,
 } from "../core/identity.js";
 import type {AccessSetting} from "../core/model.js";
-import type {GitHistoryCapabilityReader} from
-  "../git-history/git-history-capability.js";
 import {
   createArtifactMcpServer,
   type ArtifactMcpServerDependencies,
@@ -62,10 +59,7 @@ export interface McpHttpAdapterDependencies {
   readonly applicationRuntime: ApplicationRuntime;
   readonly contentDomain: string | null;
   readonly defaultAccessSetting: AccessSetting;
-  readonly gitHistory: GitHistoryCapabilityReader;
-  readonly linkedArtifacts?: boolean;
   readonly mode: ArtifactMcpServerDependencies["mode"];
-  readonly oauthResource: string | null;
 }
 
 /** Stateless MCP HTTP adapter mounted by every Artifact Server deployment. */
@@ -89,8 +83,6 @@ export function createMcpHttpAdapter(
         applicationRuntime: dependencies.applicationRuntime,
         contentDomain: dependencies.contentDomain,
         defaultAccessSetting: dependencies.defaultAccessSetting,
-        gitHistory: dependencies.gitHistory.read(),
-        linkedArtifacts: dependencies.linkedArtifacts === true,
         mode: dependencies.mode,
         requestId: requestIdFrom(context.requestInfo),
       };
@@ -113,21 +105,12 @@ export function createMcpHttpAdapter(
       const edgeRejection = validateRequestEdge(request, dependencies);
       if (edgeRejection !== undefined) return edgeRejection;
       const requestId = requestIdFrom(request);
-      let bearerOptions: Parameters<typeof requireBearerAuth>[0] = {
+      const authenticate = requireBearerAuth({
         verifier: {
           verifyAccessToken: (token) =>
             authenticateToken(dependencies, token, requestId),
         },
-      };
-      if (dependencies.oauthResource !== null) {
-        bearerOptions = {
-          ...bearerOptions,
-          resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
-            new URL(dependencies.oauthResource),
-          ),
-        };
-      }
-      const authenticate = requireBearerAuth(bearerOptions);
+      });
       const auth = await authenticate(request);
       if (auth instanceof Response) return auth;
       return handler.fetch(request, {authInfo: auth});
@@ -171,18 +154,13 @@ async function authenticateToken(
     if (
       cause instanceof Error
       && isArtifactServerFailure(cause)
-      && (
-        cause._tag === "IdentityRepositoryFailure" ||
-        cause._tag === "IdentityProviderFailure"
-      )
+      && cause._tag === "IdentityRepositoryFailure"
     ) {
       await runApplicationEffect(
         dependencies.applicationRuntime,
         Effect.logError("mcp.authentication.failed").pipe(
           Effect.annotateLogs({
-            failure_reason: cause._tag === "IdentityRepositoryFailure"
-              ? `identity_repository_${cause.operation}`
-              : cause.message,
+            failure_reason: `identity_repository_${cause.operation}`,
             failure_tag: cause._tag,
             request_id: requestId,
           }),

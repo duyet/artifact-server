@@ -22,12 +22,7 @@ body:
       label: Deployment mode
       options:
         - Local source checkout
-        - Local release package
-        - Docker Compose
         - Kubernetes with Helm
-        - Cloudflare
-        - AWS
-        - Google Cloud
         - Other
     validations:
       required: true

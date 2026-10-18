@@ -2,6 +2,8 @@
 
 Status: partially implemented; client distribution, optional Git, server-operation skill routing, and full cloud release gates remain open
 
+> Superseded in part (2026-10-18): OIDC and WorkOS browser login and MCP OAuth were removed. Private-team servers use API-key sign-in.
+
 This phase turns the working Artifact Server backend into a product that agents
 can use and teams can install in their chosen environment. It covers four
 tracks:
@@ -40,7 +42,7 @@ product-probe contracts; it does not hide infrastructure plans behind an
 `artifactserver deploy` wrapper.
 
 The exact handoff is
-[`cloud-deployment-contract.md`](./cloud-deployment-contract.md).
+`cloud-deployment-contract.md` (removed in this fork).
 
 ### Ship one default managed-container path for AWS and GCP
 
@@ -352,7 +354,7 @@ The provider package grants the application only the database, object, secret,
 and telemetry permissions it needs. The application container uses no static
 cloud access key. Exact shared inputs, provider-specific network inputs,
 runtime configuration, outputs, and secret rules are defined in
-[`cloud-deployment-contract.md`](./cloud-deployment-contract.md).
+`cloud-deployment-contract.md` (removed in this fork).
 
 ### Kubernetes option
 

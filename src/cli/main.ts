@@ -16,26 +16,14 @@ import {
   writeLocalServiceRecord,
 } from "../local/local-service-record.js";
 import {startLocalServer} from "../local/start-local-server.js";
-import {
-  parseLinkRoots,
-  parseLinkedFilesMode,
-} from "../lifecycle/runtime-configuration.js";
-import {loadNodeGitHistoryConfiguration} from
-  "../git-history/node-git-history-configuration.js";
 import {defaultCompletedRequestLogSampleRate} from
   "../observability/application-observability.js";
-import {runCliEffect} from "./run-cli-effect.js";
 import {localOwnerBrowserAccess} from "../core/browser-access.js";
 import {configureLifecycleCommands} from "./lifecycle-commands.js";
 import {configureCliAuthCommands} from "./cli-auth-commands.js";
-import {configureLinkCommand} from "./link-command.js";
-import {configureMcpOnboardingCommands} from "./mcp-onboarding-commands.js";
 import {configurePublishCommand} from "./publish-command.js";
-import {configureGitHistoryCommands} from "./git-history-commands.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
 import {configureOpenManagementCommand} from "./open-management-command.js";
-import {writeGitHistoryConfigurationWarnings} from
-  "./git-history-configuration-warnings.js";
 
 interface StartOptions {
   readonly data: string;
@@ -72,19 +60,9 @@ configureCliAuthCommands(program, {
 configurePublishCommand(program, {
   defaultProfileDirectory: defaultUserDataDirectory,
 });
-configureGitHistoryCommands(program, {
-  defaultProfileDirectory: defaultUserDataDirectory,
-});
-configureLinkCommand(program, {
-  defaultProfileDirectory: defaultUserDataDirectory,
-});
 configureOpenManagementCommand(program, defaultUserDataDirectory);
 configureDirectLocalStart(program);
 configureLifecycleCommands(program, {build: productBuild});
-configureMcpOnboardingCommands(program, {
-  defaultDataDirectory: defaultUserDataDirectory,
-  productVersion: packageMetadata.version,
-});
 
 try {
   await program.parseAsync();
@@ -118,14 +96,7 @@ function configureDirectLocalStart(programToConfigure: Command): void {
         dataDirectory,
         localCredentialFiles.browser,
       );
-      requireLocalOwnerEnvironment(process.env);
       const observability = observabilityEnvironmentSchema.parse(process.env);
-      const gitHistory = await runCliEffect(
-        loadNodeGitHistoryConfiguration(process.env),
-      );
-      writeGitHistoryConfigurationWarnings(gitHistory);
-      const linkedFiles = await runCliEffect(parseLinkedFilesMode(process.env));
-      const linkRoots = await runCliEffect(parseLinkRoots(process.env));
       const developmentProxyCredential =
         process.env["ARTIFACT_SERVER_DEVELOPMENT_PROXY_CREDENTIAL"];
       const localServerConfig = {
@@ -137,9 +108,6 @@ function configureDirectLocalStart(programToConfigure: Command): void {
         completedRequestLogSampleRate:
           observability.ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE,
         dataDirectory,
-        gitHistory,
-        linkedFiles,
-        linkRoots,
         localBootstrapToken: browserBootstrapToken,
         port,
         serviceVersion: packageMetadata.version,
@@ -183,20 +151,6 @@ function configureDirectLocalStart(programToConfigure: Command): void {
         throw error;
       }
     });
-}
-
-function requireLocalOwnerEnvironment(environment: NodeJS.ProcessEnv): void {
-  const remoteIdentityConfigured = Object.entries(environment).some(
-    ([name, value]) => (
-      name.startsWith("ARTIFACT_SERVER_OIDC_")
-      || name.startsWith("ARTIFACT_SERVER_WORKOS_")
-    ) && value !== undefined && value.trim() !== "",
-  );
-  if (remoteIdentityConfigured) {
-    throw new Error(
-      "artifactserver start is local-owner only; use a private-team deployment entrypoint for OIDC or WorkOS.",
-    );
-  }
 }
 
 function parsePort(value: string, allowAutomatic: boolean): number {

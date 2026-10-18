@@ -26,6 +26,7 @@ interface PublishOptions {
   readonly expectedVersion?: string;
   readonly name?: string;
   readonly path?: string;
+  readonly private: boolean;
   readonly public: boolean;
   readonly project?: string;
   readonly profile?: string;
@@ -82,6 +83,11 @@ export function configurePublishCommand(
     )
     .addOption(new Option("--public", "allow the link to open without sign-in").default(false))
     .addOption(
+      new Option("--private", "require sign-in to open the link, even where public is the default")
+        .conflicts("public")
+        .default(false),
+    )
+    .addOption(
       new Option("--tag <tag>", "tag for a new artifact; repeat for more tags")
         .argParser(collectTag)
         .default([]),
@@ -95,7 +101,7 @@ export function configurePublishCommand(
       ),
     )
     .action(async (inputPath: string, options: PublishOptions) => {
-      let connection = await resolveCliServerConnection(options, "publish");
+      const connection = await resolveCliServerConnection(options);
       const intent = publicationCommand(inputPath, options);
       const prepared = await preparePublication(intent);
       const operation = await resumePublicationOperation(
@@ -104,24 +110,11 @@ export function configurePublishCommand(
         prepared.operationScopeDigest,
         prepared.operationDigest,
       );
-      let outcome = await executePublication(
+      const outcome = await executePublication(
         connection,
         operation.idempotencyKey,
         prepared,
       );
-      if (
-        !outcome.success
-        && outcome.error._tag === "FilePublicationProtocolError"
-        && outcome.error.status === 401
-        && connection.profile?.authentication === "oauth"
-      ) {
-        connection = await resolveCliServerConnection(options, "publish", true);
-        outcome = await executePublication(
-          connection,
-          operation.idempotencyKey,
-          prepared,
-        );
-      }
       if (!outcome.success) throw cliPublicationError(outcome.error);
       console.log(JSON.stringify(outcome.result, null, 2));
       await operation.complete();
@@ -153,10 +146,11 @@ function publicationCommand(
       options.name !== undefined
       || options.path !== undefined
       || options.public
+      || options.private
       || options.tag.length > 0
     ) {
       throw new Error(
-        "--name, --path, --public, and --tag apply only when creating a new artifact.",
+        "--name, --path, --public, --private, and --tag apply only when creating a new artifact.",
       );
     }
     return withEntryPath({
@@ -169,7 +163,11 @@ function publicationCommand(
     }, options.entry);
   }
 
-  const access = options.public ? {accessSetting: "public_link" as const} : {};
+  const access = options.public
+    ? {accessSetting: "public_link" as const}
+    : options.private
+      ? {accessSetting: "account_required" as const}
+      : {};
   const named = options.name === undefined
     ? {
       ...access,

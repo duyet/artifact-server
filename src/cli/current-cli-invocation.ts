@@ -6,12 +6,6 @@ export interface CliInvocation {
   readonly prefixArguments: readonly string[];
 }
 
-/** Concrete stdio server registration used by supported AI clients. */
-export interface LocalMcpCommand {
-  readonly args: readonly string[];
-  readonly command: string;
-}
-
 /** Resolve this running CLI without relying on a shell alias or PATH entry. */
 export function currentCliInvocation(): CliInvocation {
   const entrypoint = process.argv[1];
@@ -21,21 +15,5 @@ export function currentCliInvocation(): CliInvocation {
   return {
     command: process.execPath,
     prefixArguments: [...process.execArgv, path.resolve(entrypoint)],
-  };
-}
-
-/** Build the stdio registration command for one local data directory. */
-export function localMcpCommand(
-  invocation: CliInvocation,
-  dataDirectory: string,
-): LocalMcpCommand {
-  return {
-    args: [
-      ...invocation.prefixArguments,
-      "mcp",
-      "--data",
-      path.resolve(dataDirectory),
-    ],
-    command: invocation.command,
   };
 }

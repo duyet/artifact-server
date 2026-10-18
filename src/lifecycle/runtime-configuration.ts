@@ -1,30 +1,17 @@
 import {constants} from "node:fs";
 import {access, readFile, stat} from "node:fs/promises";
-import {homedir} from "node:os";
 import path from "node:path";
 
 import {Effect, Option, Redacted, Schema} from "effect";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
-import {
-  loadNodeGitHistoryConfiguration,
-  type NodeGitHistoryConfiguration,
-} from "../git-history/node-git-history-configuration.js";
-import type {
-  GitHistoryProvider,
-  GitHistoryProviderState,
-} from "../git-history/git-history-capability.js";
 
 import type {
   ObjectStorageProviderFactory,
   ObjectStorageProviderKind,
 } from
   "../storage/object-storage-provider.js";
-import {createAzureBlobObjectStorageProviderFactory} from
-  "../storage/azure-blob-object-storage.js";
-import {createGcsObjectStorageProviderFactory} from
-  "../storage/gcs-object-storage.js";
 import {
   createS3ObjectStorageProviderFactory,
   type S3ObjectStorageProviderConfig,
@@ -54,16 +41,12 @@ const hostnameSchema = Schema.String.check(
 const installationIdSchema = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u),
 );
-const gcpProjectIdSchema = Schema.String.check(
-  Schema.isPattern(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/u),
-);
 const requestLogSampleRateSchema = Schema.NumberFromString.check(
   Schema.isBetween({minimum: 0, maximum: 1}),
 );
 const postgresUrlSchema = Schema.String.check(
   Schema.isPattern(/^postgres(?:ql)?:\/\/[^\s]+$/u),
 );
-const linkedFilesModeSchema = Schema.Literals(["off", "on"]);
 const urlStringSchema = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^\s]+$/u),
 );
@@ -90,10 +73,7 @@ export interface CompactRuntimeConfiguration {
   readonly dataDirectory: string;
   readonly deploymentMode: "compact";
   readonly hostname: string;
-  readonly gitHistory: NodeGitHistoryConfiguration;
   readonly installation: CompactInstallationMetadata;
-  readonly linkedFiles: "off" | "on";
-  readonly linkRoots: readonly string[];
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -114,7 +94,6 @@ export interface ExternalStorageRuntimeConfiguration {
   readonly databaseUrl: Redacted.Redacted;
   readonly deploymentMode: "external-storage";
   readonly hostname: string;
-  readonly gitHistory: NodeGitHistoryConfiguration;
   readonly installationId: string;
   readonly objectStorage: ObjectStorageProviderFactory;
   readonly port: number;
@@ -139,17 +118,7 @@ export interface RuntimeConfigurationSummary {
   readonly dataDirectory: string | null;
   readonly deploymentMode: DeploymentMode;
   readonly hostname: string;
-  readonly gitHistory: {
-    readonly issues: readonly {
-      readonly field: string;
-      readonly message: string;
-      readonly reason: string;
-    }[];
-    readonly provider: GitHistoryProvider | null;
-    readonly providerState: GitHistoryProviderState;
-  };
   readonly installationId: string;
-  readonly interactiveIdentityProvider: "local" | "none" | "oidc" | "workos";
   readonly objectStorageProvider: "filesystem" | ObjectStorageProviderKind;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
@@ -238,11 +207,8 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     contentDomain,
     dataDirectory: layout.dataDirectory,
     deploymentMode: "compact",
-    gitHistory: yield* loadNodeGitHistoryConfiguration(input.environment),
     hostname: yield* parseHostname(input.hostname),
     installation,
-    linkedFiles: yield* parseLinkedFilesMode(input.environment),
-    linkRoots: yield* parseLinkRoots(input.environment),
     port: yield* parsePort(input.port),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
       input.environment,
@@ -277,7 +243,6 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
   );
   const contentDomain = yield* parseContentDomain(environment);
   yield* assertBrowserIsolation(applicationOrigin, contentDomain);
-  yield* assertLinkedFilesAreLocalOnly(yield* parseLinkedFilesMode(environment));
   const configuredObjectStorage = yield* parseObjectStorage(environment);
   const apiToken = yield* readSecret(
     environment,
@@ -308,7 +273,6 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
     },
     databaseUrl: databaseUrl.value,
     deploymentMode: "external-storage",
-    gitHistory: yield* loadNodeGitHistoryConfiguration(environment),
     hostname: yield* parseHostname(input.hostname),
     installationId: yield* parseRequiredEnvironment(
       "ARTIFACT_SERVER_INSTALLATION_ID",
@@ -343,10 +307,6 @@ function parseObjectStorage(
 ): Effect.Effect<ParsedObjectStorage, RuntimeConfigurationError> {
   const provider = environment["ARTIFACT_SERVER_OBJECT_STORAGE_PROVIDER"] ?? "s3";
   switch (provider) {
-    case "azure-blob":
-      return parseAzureBlobObjectStorage(environment);
-    case "gcs":
-      return parseGcsObjectStorage(environment);
     case "s3":
       return parseS3ObjectStorage(environment);
     default:
@@ -356,57 +316,6 @@ function parseObjectStorage(
       );
   }
 }
-
-const parseAzureBlobObjectStorage = Effect.fn("parseAzureBlobObjectStorage")(
-  function*(
-    environment: NodeJS.ProcessEnv,
-  ): Effect.fn.Return<ParsedObjectStorage, RuntimeConfigurationError> {
-    const accountUrl = yield* parseRequiredEnvironment(
-      "ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL",
-      environment["ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL"],
-      urlStringSchema,
-    );
-    yield* assertHttpsServiceUrl(
-      "ARTIFACT_SERVER_AZURE_BLOB_ACCOUNT_URL",
-      accountUrl,
-    );
-    return {
-      accessKeySource: "provider_chain",
-      factory: createAzureBlobObjectStorageProviderFactory({
-        accountUrl,
-        container: yield* parseRequiredEnvironment(
-          "ARTIFACT_SERVER_AZURE_BLOB_CONTAINER",
-          environment["ARTIFACT_SERVER_AZURE_BLOB_CONTAINER"],
-          Schema.NonEmptyString,
-        ),
-      }),
-      secretSource: "provider_chain",
-    };
-  },
-);
-
-const parseGcsObjectStorage = Effect.fn("parseGcsObjectStorage")(
-  function*(
-    environment: NodeJS.ProcessEnv,
-  ): Effect.fn.Return<ParsedObjectStorage, RuntimeConfigurationError> {
-    return {
-      accessKeySource: "provider_chain",
-      factory: createGcsObjectStorageProviderFactory({
-        bucket: yield* parseRequiredEnvironment(
-          "ARTIFACT_SERVER_GCS_BUCKET",
-          environment["ARTIFACT_SERVER_GCS_BUCKET"],
-          Schema.NonEmptyString,
-        ),
-        projectId: yield* parseRequiredEnvironment(
-          "ARTIFACT_SERVER_GCS_PROJECT_ID",
-          environment["ARTIFACT_SERVER_GCS_PROJECT_ID"],
-          gcpProjectIdSchema,
-        ),
-      }),
-      secretSource: "provider_chain",
-    };
-  },
-);
 
 const parseS3ObjectStorage = Effect.fn("parseS3ObjectStorage")(
   function*(
@@ -485,7 +394,6 @@ const parseS3ObjectStorage = Effect.fn("parseS3ObjectStorage")(
 /** Render the safe, stable subset of one parsed runtime configuration. */
 export function summarizeRuntimeConfiguration(
   configuration: CompactRuntimeConfiguration | ExternalStorageRuntimeConfiguration,
-  interactiveIdentityProvider: "local" | "none" | "oidc" | "workos" = "local",
 ): RuntimeConfigurationSummary {
   if (configuration.deploymentMode === "compact") {
     return {
@@ -496,10 +404,8 @@ export function summarizeRuntimeConfiguration(
       },
       dataDirectory: configuration.dataDirectory,
       deploymentMode: configuration.deploymentMode,
-      gitHistory: gitHistorySummary(configuration.gitHistory),
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
-      interactiveIdentityProvider,
       objectStorageProvider: "filesystem",
       port: configuration.port,
       readinessWithdrawalMilliseconds:
@@ -517,10 +423,8 @@ export function summarizeRuntimeConfiguration(
     },
     dataDirectory: null,
     deploymentMode: configuration.deploymentMode,
-    gitHistory: gitHistorySummary(configuration.gitHistory),
     hostname: configuration.hostname,
     installationId: configuration.installationId,
-    interactiveIdentityProvider,
     objectStorageProvider: configuration.objectStorage.kind,
     port: configuration.port,
     readinessWithdrawalMilliseconds:
@@ -528,16 +432,6 @@ export function summarizeRuntimeConfiguration(
     shutdownDeadlineMilliseconds: configuration.shutdownDeadlineMilliseconds,
     stagingCleanup: configuration.stagingCleanupPolicy,
     status: "valid",
-  };
-}
-
-function gitHistorySummary(
-  configuration: NodeGitHistoryConfiguration,
-): RuntimeConfigurationSummary["gitHistory"] {
-  return {
-    issues: configuration.issues,
-    provider: configuration.capability.provider,
-    providerState: configuration.capability.providerState,
   };
 }
 
@@ -713,43 +607,6 @@ function parsePostgresMaxConnections(
   return Effect.succeed(maxConnections);
 }
 
-/** Parse `ARTIFACT_SERVER_LINKED_FILES` for any local-server entry point. */
-export function parseLinkedFilesMode(
-  environment: NodeJS.ProcessEnv,
-): Effect.Effect<"off" | "on", RuntimeConfigurationError> {
-  return parseRequiredEnvironment(
-    "ARTIFACT_SERVER_LINKED_FILES",
-    environment["ARTIFACT_SERVER_LINKED_FILES"] ?? "off",
-    linkedFilesModeSchema,
-  );
-}
-
-function assertLinkedFilesAreLocalOnly(
-  linkedFiles: "off" | "on",
-): Effect.Effect<void, RuntimeConfigurationError> {
-  if (linkedFiles === "off") return Effect.void;
-  return invalidValue(
-    "ARTIFACT_SERVER_LINKED_FILES",
-    "ARTIFACT_SERVER_LINKED_FILES can only be enabled on the local deployment runtime; external-storage deployments must leave it off.",
-  );
-}
-
-/** Parse `ARTIFACT_SERVER_LINK_ROOTS` for any local-server entry point. */
-export function parseLinkRoots(
-  environment: NodeJS.ProcessEnv,
-): Effect.Effect<readonly string[], RuntimeConfigurationError> {
-  const field = "ARTIFACT_SERVER_LINK_ROOTS";
-  const value = environment[field];
-  if (value === undefined || value === "") return Effect.succeed([homedir()]);
-  const roots = value.split(":");
-  return roots.every((root) => root !== "" && path.isAbsolute(root))
-    ? Effect.succeed(roots)
-    : invalidValue(
-      field,
-      `${field} must be a colon-separated list of absolute directory paths.`,
-    );
-}
-
 function parseHostname(
   value: string,
 ): Effect.Effect<string, RuntimeConfigurationError> {
@@ -810,28 +667,6 @@ function assertHttpServiceUrl(
     return invalidValue(
       field,
       `${field} must use HTTP or HTTPS and cannot contain credentials.`,
-    );
-  }
-  return Effect.void;
-}
-
-function assertHttpsServiceUrl(
-  field: string,
-  value: string,
-): Effect.Effect<void, RuntimeConfigurationError> {
-  let serviceUrl: URL;
-  try {
-    serviceUrl = new URL(value);
-  } catch {
-    return invalidValue(field, `${field} must be a valid HTTPS URL.`);
-  }
-  if (
-    serviceUrl.protocol !== "https:" ||
-    serviceUrl.username !== "" || serviceUrl.password !== ""
-  ) {
-    return invalidValue(
-      field,
-      `${field} must use HTTPS and cannot contain credentials.`,
     );
   }
   return Effect.void;

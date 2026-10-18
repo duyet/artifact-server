@@ -13,6 +13,8 @@ artifactserver publish ./report.pdf
 artifactserver publish ./dist --public --name "Product prototype" --tag prototype
 ```
 
+Without `--public` or `--private`, the server picks the access setting: public on a server with browser login off, sign-in required otherwise. `--private` requires sign-in either way.
+
 Publication returns JSON with three browser links:
 
 | Link | Purpose |
@@ -40,10 +42,10 @@ A server with a content domain refuses `--path` with `CAPABILITY_UNAVAILABLE`.
 
 ## Use a remote server
 
-Sign in once, save a named profile, and use it when publishing:
+Save a named profile with an API key from an administrator, and use it when publishing. Pipe the key on standard input so it stays out of shell history:
 
 ```sh
-artifactserver auth login https://artifacts.example.com --name team
+artifactserver auth login https://artifacts.example.com --name team --api-key-stdin < key.txt
 artifactserver publish ./dist --profile team
 ```
 
@@ -57,6 +59,6 @@ artifactserver publish ./dist \
   --expected-version ver_example
 ```
 
-The expected version prevents an old client from replacing a newer current pointer. `--name`, `--path`, `--public`, and `--tag` apply only when creating an artifact, so this command refuses them. A new version keeps the artifact's path.
+The expected version prevents an old client from replacing a newer current pointer. `--name`, `--path`, `--public`, `--private`, and `--tag` apply only when creating an artifact, so this command refuses them. A new version keeps the artifact's path.
 
 Run `artifactserver --help` or `artifactserver <command> --help` for the complete command reference.

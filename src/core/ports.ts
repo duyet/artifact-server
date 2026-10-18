@@ -32,15 +32,16 @@ import type {
   PageCursor,
   PublishedVersion,
   ProjectRecord,
+  ProjectActivityDays,
+  ProjectActivityTotals,
   PublicArtifactSummary,
   RegisteredAgentKind,
   RegisteredAgentPresence,
   RegisteredAgentRecord,
-  SourceBindingRecord,
-  SourceFreshness,
   StagedUpload,
   VersionRecord,
   VersionContent,
+  ViewedArtifact,
 } from "./model.js";
 
 export interface StoredBlob {
@@ -116,6 +117,8 @@ export interface CommitNewArtifact {
   readonly name: string;
   /** A readable path already normalized at the boundary, or null. */
   readonly path: string | null;
+  /** The publisher's display name, recorded as the artifact owner's name. */
+  readonly principalDisplayName: string;
   readonly principalId: string;
   readonly projectId: string;
   readonly authorizedByPrincipalId: string | null;
@@ -124,14 +127,27 @@ export interface CommitNewArtifact {
   readonly versionId: string;
 }
 
+/**
+ * Marks a version commit as an edit: the committed manifest is the base
+ * version's with one entry replaced, so it differs from the staged upload's
+ * manifest, which holds only the replacement file.
+ */
+export interface ArtifactEditCommit {
+  readonly stagedManifestDigest: string;
+}
+
 export interface CommitArtifactVersion {
   readonly artifactId: string;
   readonly contentToken: string;
   readonly createdAt: string;
+  /** Null for an ordinary publish. */
+  readonly edit: ArtifactEditCommit | null;
   readonly expectedCurrentVersionId: string;
   readonly idempotencyKey: string;
   readonly inputDigest: string;
   readonly manifest: CanonicalManifest;
+  /** The publisher's display name, recorded on the new version. */
+  readonly principalDisplayName: string;
   readonly principalId: string;
   readonly projectId: string;
   readonly authorizedByPrincipalId: string | null;
@@ -178,6 +194,20 @@ export interface ChangeArtifactTags {
   readonly tags: readonly string[];
 }
 
+/** Values used to atomically change one artifact's display name. */
+export interface RenameArtifact {
+  readonly artifactId: string;
+  readonly authorizedByPrincipalId: string | null;
+  readonly createdAt: string;
+  readonly expectedCurrentVersionId: string;
+  readonly idempotencyKey: string;
+  readonly inputDigest: string;
+  /** A name already trimmed and length-checked at the boundary. */
+  readonly name: string;
+  readonly principalId: string;
+  readonly projectId: string;
+}
+
 /** Values used to atomically tombstone one artifact. */
 export interface DeleteArtifact {
   readonly artifactId: string;
@@ -190,11 +220,18 @@ export interface DeleteArtifact {
   readonly projectId: string;
 }
 
+/** Which artifacts a listing keeps, judged by the principal who created them. */
+export type ArtifactOwnerFilter =
+  | {readonly kind: "any"}
+  | {readonly kind: "owned_by"; readonly principalId: string}
+  | {readonly kind: "not_owned_by"; readonly principalId: string};
+
 /** Values used to read one bounded page of active artifacts. */
 export interface ListArtifacts {
   readonly comments: "all" | "with" | "without";
   readonly cursor: PageCursor | null;
   readonly limit: number;
+  readonly owner: ArtifactOwnerFilter;
   readonly projectId: string;
   /** Normalized name-substring or exact-tag search, when supplied. */
   readonly search?: string | null;
@@ -365,73 +402,6 @@ export interface CommentRepository {
     versionId: string,
     path: string,
   ): Promise<boolean>;
-}
-
-/** Binding values persisted when linking, capturing, or relinking one source file. */
-export interface SourceBindingWrite {
-  /** `device:inode:size:mtimeNs:ctimeNs` verified on the capturing descriptor. */
-  readonly fingerprint: string;
-  /** Canonicalized absolute path that already passed the section 4.3 ladder. */
-  readonly path: string;
-  readonly verifiedAt: string;
-}
-
-/**
- * Values used to atomically create one linked artifact together with its
- * source binding and its initial captured version.
- */
-export interface CommitLinkedArtifact extends CommitNewArtifact {
-  readonly binding: SourceBindingWrite;
-}
-
-/**
- * Values used to atomically commit one captured version while refreshing the
- * binding's fingerprint and freshness in the same transaction.
- */
-export interface CommitCapturedVersion extends CommitArtifactVersion {
-  readonly binding: SourceBindingWrite;
-}
-
-/** Values used to record one lazily observed source freshness state. */
-export interface RecordSourceFreshness {
-  readonly artifactId: string;
-  readonly freshness: SourceFreshness;
-  readonly projectId: string;
-  readonly verifiedAt: string;
-}
-
-/** Values used to re-point one binding at a moved source file. */
-export interface RelinkSourceBinding {
-  readonly artifactId: string;
-  readonly authorizedByPrincipalId: string | null;
-  readonly binding: SourceBindingWrite;
-  readonly createdAt: string;
-  readonly idempotencyKey: string;
-  readonly inputDigest: string;
-  readonly principalId: string;
-  readonly projectId: string;
-}
-
-/**
- * Persistent linked-artifact binding operations, implemented only by the
- * local SQLite backend. Link and capture commits keep binding state and
- * version state consistent in one transaction; the relink mutation appends
- * its attributed action record in the same transaction; freshness recording
- * is a lazy observation that never touches versions.
- */
-export interface SourceBindingRepository {
-  commitCapturedVersion(
-    command: CommitCapturedVersion,
-  ): Promise<PublishedVersion>;
-  commitLinkedArtifact(command: CommitLinkedArtifact): Promise<PublishedVersion>;
-  findSourceBinding(
-    projectId: string,
-    artifactId: string,
-  ): Promise<SourceBindingRecord | null>;
-  recordSourceFreshness(
-    command: RecordSourceFreshness,
-  ): Promise<SourceBindingRecord>;
-  relinkSource(command: RelinkSourceBinding): Promise<SourceBindingRecord>;
 }
 
 /** Values used to register or refresh one live agent connection. */
@@ -634,6 +604,7 @@ export interface ArtifactRepository {
   commitVersion(command: CommitArtifactVersion): Promise<PublishedVersion>;
   changeAccessSetting(command: ChangeArtifactAccessSetting): Promise<ArtifactState>;
   changeTags(command: ChangeArtifactTags): Promise<ArtifactState>;
+  renameArtifact(command: RenameArtifact): Promise<ArtifactState>;
   deleteArtifact(command: DeleteArtifact): Promise<ArtifactDeletion>;
   findArtifact(projectId: string, artifactId: string): Promise<ArtifactRecord | null>;
   findArtifactForAdministration(
@@ -720,6 +691,38 @@ export interface ArtifactViewRepository {
   recordArtifactViews(
     deltas: readonly ArtifactViewDelta[],
   ): Promise<void>;
+}
+
+/** Values used to read one project's activity inside one inclusive day window. */
+export interface ReadProjectActivityDays {
+  readonly projectId: string;
+  /** Inclusive first day of the window, as `YYYY-MM-DD`. */
+  readonly sinceDay: string;
+  /** Inclusive last day of the window, as `YYYY-MM-DD`. */
+  readonly untilDay: string;
+}
+
+/** Values used to rank one project's most viewed live artifacts. */
+export interface ReadMostViewedArtifacts extends ReadProjectActivityDays {
+  readonly limit: number;
+}
+
+/**
+ * Read-only aggregates over one project's live artifacts, their versions, and
+ * their stored view rows. Deleted artifacts never count.
+ */
+export interface ProjectActivityRepository {
+  readProjectActivityTotals(
+    projectId: string,
+    day: string,
+  ): Promise<ProjectActivityTotals>;
+  readProjectActivityDays(
+    command: ReadProjectActivityDays,
+  ): Promise<ProjectActivityDays>;
+  /** Artifacts with at least one view in the window, most viewed first. */
+  readMostViewedArtifacts(
+    command: ReadMostViewedArtifacts,
+  ): Promise<readonly ViewedArtifact[]>;
 }
 
 /** Persistent capabilities required by private browser content sessions. */

@@ -9,16 +9,7 @@ import {
 } from "../external-storage/create-external-storage-runtime.js";
 import {
   startExternalStorageServer,
-  type ExternalStorageServerConfig,
 } from "../external-storage/start-external-storage-server.js";
-import {
-  createOidcHostedAuthentication,
-  type OidcHostedAuthentication,
-} from "../identity/oidc-hosted-authentication.js";
-import {createOidcIdentityProvider} from
-  "../identity/oidc-identity-provider.js";
-import {createWorkOsHostedAuthentication} from
-  "../identity/workos-hosted-authentication.js";
 import {
   checkCompactIntegrity,
   checkExternalStorageIntegrity,
@@ -45,19 +36,10 @@ import {
 } from "../local/create-local-runtime.js";
 import {
   startLocalServer,
-  type LocalServerConfig,
 } from "../local/start-local-server.js";
 import {PostgresDatabase} from "../storage/postgres-database.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
-import {
-  assertAtMostOneBrowserLoginProvider,
-  loadOidcConfiguration,
-  type OidcConfiguration,
-} from "./oidc-configuration.js";
-import {loadWorkOsConfiguration} from "./workos-configuration.js";
-import {writeGitHistoryConfigurationWarnings} from
-  "./git-history-configuration-warnings.js";
 import {
   browserLoginKinds,
   privateTeamBrowserAccess,
@@ -81,6 +63,14 @@ interface InitOptions {
   readonly data: string;
 }
 
+interface IssueAdministratorKeyOptions extends LifecycleOptions {
+  readonly email: string;
+  readonly expiresAt?: string;
+  readonly name: string;
+}
+
+const operatorKeyLifetimeMilliseconds = 90 * 24 * 60 * 60 * 1_000;
+
 interface CleanupStagingOptions extends LifecycleOptions {
   readonly limit: string;
   readonly once: boolean;
@@ -103,6 +93,7 @@ export function configureLifecycleCommands(
   configureSupportManifest(program, options.build);
   configureIntegrity(program);
   configureMaintenance(program);
+  configureAdministration(program);
   configureExternalStorageStart(program, options.build.productVersion);
 }
 
@@ -132,6 +123,58 @@ function configureMaintenance(program: Command): void {
         );
         console.log(JSON.stringify(report, null, 2));
         if (report.failed > 0) process.exitCode = 2;
+      } finally {
+        await runtime.close();
+      }
+    });
+}
+
+function configureAdministration(program: Command): void {
+  const admin = program
+    .command("admin")
+    .description("Recover administrator access with storage access.");
+  admin
+    .command("issue-key")
+    .description(
+      "Create or reuse an administrator and print a new sign-in key for them once.",
+    )
+    .requiredOption("--email <email>", "administrator email")
+    .requiredOption("--name <name>", "administrator display name")
+    .option(
+      "--expires-at <timestamp>",
+      "key expiry as an ISO timestamp (default: 90 days from now)",
+    )
+    .addOption(modeOption())
+    .addOption(dataOption())
+    .addOption(hostOption())
+    .addOption(portOption())
+    .action(async (options: IssueAdministratorKeyOptions) => {
+      const configuration = await lifecycleConfiguration(options);
+      const runtime = configuration.deploymentMode === "compact"
+        ? await createLocalRuntime(compactMaintenanceConfig(configuration))
+        : await createExternalStorageRuntime(
+          externalMaintenanceConfig(configuration),
+        );
+      try {
+        const {issued, member} = await runtime.issueOperatorAdministratorKey({
+          displayName: options.name,
+          email: options.email,
+          expiresAt: options.expiresAt ?? new Date(
+            Date.now() + operatorKeyLifetimeMilliseconds,
+          ).toISOString(),
+        });
+        console.log(JSON.stringify({
+          apiKey: {
+            expiresAt: issued.apiKey.expiresAt,
+            id: issued.apiKey.id,
+          },
+          member: {
+            displayName: member.displayName,
+            email: member.email,
+            id: member.id,
+          },
+          token: issued.token,
+        }, null, 2));
       } finally {
         await runtime.close();
       }
@@ -198,7 +241,7 @@ function configureConfigurationInspection(program: Command): void {
       const configuration = await lifecycleConfiguration(options);
       const providers = await inspectRuntimeConfiguration(configuration);
       console.log(JSON.stringify({
-        configuration: await summarizeConfiguration(configuration),
+        configuration: summarizeRuntimeConfiguration(configuration),
         providers,
       }, null, 2));
       if (providers.status !== "ready") process.exitCode = 2;
@@ -266,7 +309,7 @@ function configureSupportManifest(
       const providers = await inspectRuntimeConfiguration(configuration);
       console.log(JSON.stringify(createSupportManifest(
         build,
-        await summarizeConfiguration(configuration),
+        summarizeRuntimeConfiguration(configuration),
         providers,
       ), null, 2));
     });
@@ -306,30 +349,14 @@ function configureExternalStorageStart(
     .addOption(portOption())
     .action(async (options: StartExternalStorageOptions) => {
       const parsed = await parseExternalConfiguration(options.host, options.port);
-      writeGitHistoryConfigurationWarnings(parsed.gitHistory);
-      assertAtMostOneBrowserLoginProvider(process.env);
-      const workOs = await loadWorkOsConfiguration(process.env);
-      const oidc = await loadOidcConfiguration(process.env);
-      const hostedAuthentication = workOs === null
-        ? null
-        : await createWorkOsHostedAuthentication(workOs);
-      const oidcAuthentication = oidc === null
-        ? null
-        : await oidcAuthenticationOrBrowserOnly(oidc);
-      const browserAccess = hostedAuthentication !== null
-        ? privateTeamBrowserAccess(browserLoginKinds.workOs)
-        : oidc !== null
-        ? privateTeamBrowserAccess(browserLoginKinds.oidc)
-        : privateTeamBrowserAccess(browserLoginKinds.none);
-      let serverConfig: ExternalStorageServerConfig = {
+      const server = await startExternalStorageServer({
         apiToken: parsed.apiToken,
         applicationOrigin: parsed.applicationOrigin,
         bootstrapAdministratorEmail: parsed.bootstrapAdministratorEmail,
-        browserAccess,
+        browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
         completedRequestLogSampleRate: parsed.completedRequestLogSampleRate,
         contentDomain: parsed.contentDomain,
         databaseUrl: parsed.databaseUrl,
-        gitHistory: parsed.gitHistory,
         hostname: parsed.hostname,
         installationId: parsed.installationId,
         objectStorage: parsed.objectStorage,
@@ -339,20 +366,7 @@ function configureExternalStorageStart(
         serviceVersion: productVersion,
         shutdownDeadlineMilliseconds: parsed.shutdownDeadlineMilliseconds,
         stagingCleanupPolicy: parsed.stagingCleanupPolicy,
-      };
-      if (hostedAuthentication !== null) {
-        serverConfig = {
-          ...serverConfig,
-          ...hostedAuthentication,
-        };
-      }
-      if (oidcAuthentication !== null) {
-        serverConfig = {
-          ...serverConfig,
-          ...oidcAuthentication,
-        };
-      }
-      const server = await startExternalStorageServer(serverConfig);
+      });
       const displayHostname = options.host === "0.0.0.0"
         ? "localhost"
         : server.hostname;
@@ -367,83 +381,23 @@ async function startCompactServer(
   configuration: CompactRuntimeConfiguration,
   productVersion: string,
 ) {
-  writeGitHistoryConfigurationWarnings(configuration.gitHistory);
-  assertAtMostOneBrowserLoginProvider(process.env);
-  const workOs = await loadWorkOsConfiguration({
-    ...process.env,
-    ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL:
-      configuration.bootstrapAdministratorEmail,
-    ARTIFACT_SERVER_ORIGIN: configuration.applicationOrigin,
-  });
-  const oidc = await loadOidcConfiguration({
-    ...process.env,
-    ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL:
-      configuration.bootstrapAdministratorEmail,
-    ARTIFACT_SERVER_ORIGIN: configuration.applicationOrigin,
-  });
-  const hostedAuthentication = workOs === null
-    ? null
-    : await createWorkOsHostedAuthentication(workOs);
-  const oidcAuthentication = oidc === null
-    ? null
-    : await oidcAuthenticationOrBrowserOnly(oidc);
-  const browserAccess = hostedAuthentication !== null
-    ? privateTeamBrowserAccess(browserLoginKinds.workOs)
-    : oidc !== null
-    ? privateTeamBrowserAccess(browserLoginKinds.oidc)
-    : privateTeamBrowserAccess(browserLoginKinds.none);
-  let serverConfig: LocalServerConfig = {
+  return startLocalServer({
     apiToken: Redacted.value(configuration.apiToken),
     applicationOrigin: configuration.applicationOrigin,
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
-    browserAccess,
+    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
     completedRequestLogSampleRate: configuration.completedRequestLogSampleRate,
     contentDomain: configuration.contentDomain,
     dataDirectory: configuration.dataDirectory,
-    gitHistory: configuration.gitHistory,
     hostname: configuration.hostname,
     installationId: configuration.installation.installationId,
-    linkedFiles: configuration.linkedFiles,
-    linkRoots: configuration.linkRoots,
     port: configuration.port,
     readinessWithdrawalMilliseconds:
       configuration.readinessWithdrawalMilliseconds,
     serviceVersion: productVersion,
     shutdownDeadlineMilliseconds: configuration.shutdownDeadlineMilliseconds,
     stagingCleanupPolicy: configuration.stagingCleanupPolicy,
-  };
-  if (hostedAuthentication !== null) {
-    serverConfig = {
-      ...serverConfig,
-      ...hostedAuthentication,
-    };
-  }
-  if (oidcAuthentication !== null) {
-    serverConfig = {
-      ...serverConfig,
-      ...oidcAuthentication,
-    };
-  }
-  return startLocalServer(serverConfig);
-}
-
-type OidcServerAuthentication =
-  | OidcHostedAuthentication
-  | Pick<OidcHostedAuthentication, "interactiveIdentityProvider">;
-
-/** MCP OAuth needs the issuer at startup; browser login must survive it being down. */
-async function oidcAuthenticationOrBrowserOnly(
-  oidc: OidcConfiguration,
-): Promise<OidcServerAuthentication> {
-  try {
-    return await createOidcHostedAuthentication(oidc);
-  } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : "the request failed";
-    process.stderr.write(
-      `OIDC configuration warning (discovery_failed): MCP OAuth stays off for ${oidc.issuer}: ${reason}\n`,
-    );
-    return {interactiveIdentityProvider: createOidcIdentityProvider(oidc)};
-  }
+  });
 }
 
 async function lifecycleConfiguration(
@@ -466,11 +420,10 @@ function compactMaintenanceConfig(
     apiToken: Redacted.value(configuration.apiToken),
     applicationOrigin: configuration.applicationOrigin,
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
-    browserAccess: privateTeamBrowserAccess(browserLoginKinds.oidc),
+    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
     completedRequestLogSampleRate: 0,
     contentDomain: configuration.contentDomain,
     dataDirectory: configuration.dataDirectory,
-    gitHistory: configuration.gitHistory,
     installationId: configuration.installation.installationId,
     observability: true,
     stagingCleanupPolicy: {
@@ -487,11 +440,10 @@ function externalMaintenanceConfig(
     apiToken: configuration.apiToken,
     applicationOrigin: configuration.applicationOrigin,
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
-    browserAccess: privateTeamBrowserAccess(browserLoginKinds.oidc),
+    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
     completedRequestLogSampleRate: 0,
     contentDomain: configuration.contentDomain,
     databaseUrl: configuration.databaseUrl,
-    gitHistory: configuration.gitHistory,
     installationId: configuration.installationId,
     objectStorage: configuration.objectStorage,
     postgresMaxConnections: configuration.postgresMaxConnections,
@@ -508,28 +460,6 @@ function parseCleanupLimit(value: string): number {
     throw new Error("The cleanup limit must be an integer from 1 through 1000.");
   }
   return limit;
-}
-
-async function summarizeConfiguration(
-  configuration: CompactRuntimeConfiguration | ExternalStorageRuntimeConfiguration,
-) {
-  assertAtMostOneBrowserLoginProvider(process.env);
-  const workOs = await loadWorkOsConfiguration({
-    ...process.env,
-    ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL:
-      configuration.bootstrapAdministratorEmail,
-    ARTIFACT_SERVER_ORIGIN: configuration.applicationOrigin,
-  });
-  const oidc = await loadOidcConfiguration({
-    ...process.env,
-    ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL:
-      configuration.bootstrapAdministratorEmail,
-    ARTIFACT_SERVER_ORIGIN: configuration.applicationOrigin,
-  });
-  return summarizeRuntimeConfiguration(
-    configuration,
-    workOs !== null ? "workos" : oidc !== null ? "oidc" : "none",
-  );
 }
 
 function parseExternalConfiguration(

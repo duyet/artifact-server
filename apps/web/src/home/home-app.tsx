@@ -1,4 +1,42 @@
 import {
+  IconChevronRight,
+  IconFileText,
+  IconFolder,
+  IconFolderOpen,
+  IconInfoCircle,
+} from "@tabler/icons-react";
+import {Bar, BarChart, CartesianGrid, XAxis} from "recharts";
+
+import {Alert, AlertDescription} from "@/components/ui/alert";
+import {Badge} from "@/components/ui/badge";
+import {Button, ButtonLink} from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+
+import {
   buildPublicArtifactTree,
   densifyDailySeries,
   sparklineBars,
@@ -10,10 +48,13 @@ import {
 } from "./home-tree.js";
 import type {PublicCatalog} from "./home-client.js";
 
+const viewsChartConfig = {
+  views: {color: "var(--chart-2)", label: "Views"},
+} satisfies ChartConfig;
+
 /**
- * The home page. Structure comes from 1px hairlines and tabular numbers, the
- * way https://html.duyet.net/ does it, and every colour is a semantic token so
- * the application's theme reaches this page without an edit here.
+ * The home page. Every colour is a semantic token, so the application's theme
+ * reaches this page without an edit here.
  */
 export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
   const now = Date.now();
@@ -31,77 +72,70 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
   return (
     // One `main` landmark, so a screen reader can jump past the heading and
     // straight to the catalog.
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-10">
-      <header className="flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">
             Artifact Server
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {artifactCount(catalog.artifacts.length)}
           </p>
         </div>
-        <nav className="flex gap-4 text-sm">
-          <a className="text-muted-foreground hover:text-foreground" href="/review">
-            Workbench
-          </a>
+        <nav aria-label="Primary">
+          <ButtonLink href="/review" variant="outline">Workbench</ButtonLink>
         </nav>
       </header>
 
-      <section aria-labelledby="home-totals" className="grid grid-cols-3 border">
+      <section aria-labelledby="home-totals" className="grid grid-cols-3 gap-4">
         <h2 className="sr-only" id="home-totals">View totals</h2>
-        <TotalCell label="Last 7 days" value={totals.last7Days} />
-        <TotalCell label="Last 30 days" value={totals.last30Days} />
-        <TotalCell label="All time" value={totals.total} />
+        <TotalCard label="Last 7 days" value={totals.last7Days} />
+        <TotalCard label="Last 30 days" value={totals.last30Days} />
+        <TotalCard label="All time" value={totals.total} />
       </section>
 
-      <section aria-labelledby="home-chart" className="flex flex-col gap-3 border p-5">
-        <h2
-          className="text-xs font-semibold tracking-widest text-muted-foreground uppercase"
-          id="home-chart"
-        >
-          Views per day
-        </h2>
-        <DailyChart
-          days={days}
-          values={densifyDailySeries(sumDailySeries(catalog.artifacts), days)}
-        />
-      </section>
+      <DailyChart
+        days={days}
+        values={densifyDailySeries(sumDailySeries(catalog.artifacts), days)}
+      />
 
-      {catalog.truncated ? (
-        <p className="border border-dashed p-4 text-sm text-muted-foreground">
-          This installation holds more public artifacts than this page shows.
-        </p>
-      ) : null}
+      {catalog.truncated
+        ? (
+          <Alert>
+            <IconInfoCircle />
+            <AlertDescription>
+              This installation holds more public artifacts than this page shows.
+            </AlertDescription>
+          </Alert>
+        )
+        : null}
 
       {catalog.artifacts.length === 0
         ? <EmptyCatalog />
         : (
-          <div className="flex flex-col gap-8">
-            {tree.folders.map((folder) => (
-              <Folder key={folder.path} days={days} folder={folder} now={now} />
-            ))}
-            {tree.ungrouped.length === 0 ? null : (
-              <section aria-labelledby="home-ungrouped" className="flex flex-col gap-3">
-                <h2
-                  className="text-xs font-semibold tracking-widest text-muted-foreground uppercase"
-                  id="home-ungrouped"
-                >
-                  Without a path
-                </h2>
-                <ul className="flex flex-col border">
+          <Card>
+            <CardHeader>
+              <CardTitle>Artifacts</CardTitle>
+              <CardDescription>Shared by link, newest first.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-1">
+              {tree.folders.map((folder) => (
+                <FolderNode key={folder.path} days={days} folder={folder} now={now} />
+              ))}
+              {tree.ungrouped.length === 0 ? null : (
+                <TreeFolder id="home-ungrouped" name="Without a path">
                   {tree.ungrouped.map((artifact) => (
-                    <ArtifactRow
+                    <ArtifactNode
                       key={artifact.url}
                       artifact={artifact}
                       days={days}
                       now={now}
                     />
                   ))}
-                </ul>
-              </section>
-            )}
-          </div>
+                </TreeFolder>
+              )}
+            </CardContent>
+          </Card>
         )}
     </main>
   );
@@ -109,36 +143,31 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
 
 function EmptyCatalog() {
   return (
-    <section className="border p-6">
-      <h2 className="font-heading text-lg font-semibold">Nothing published yet</h2>
-      <p className="mt-2 text-sm text-muted-foreground">
-        No artifact on this server is shared by link. Publish one with a public link
-        and it appears here.
-      </p>
-    </section>
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><IconFolderOpen /></EmptyMedia>
+        <EmptyTitle>Nothing published yet</EmptyTitle>
+        <EmptyDescription>
+          No artifact on this server is shared by link. Publish one with a public
+          link and it appears here.
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 
-function TotalCell({label, value}: {readonly label: string; readonly value: number}) {
+function TotalCard({label, value}: {readonly label: string; readonly value: number}) {
   return (
-    <div className="border-r px-5 py-4 last:border-r-0">
-      <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-        {label}
-      </p>
-      <p className="mt-1 font-heading text-3xl font-semibold tabular-nums">
-        {formatCount(value)}
-      </p>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-3xl tabular-nums">{formatCount(value)}</CardTitle>
+      </CardHeader>
+    </Card>
   );
 }
 
-const pageChartBox = {gap: 2, height: 72, width: 640} as const;
-
-/**
- * One bar per day, summed across every public artifact. The bars are the only
- * markup: no chart library, no layout measurement, and nothing a reader has to
- * download to see a shape made of thirty rectangles.
- */
+/** One bar per day, summed across every public artifact. */
 function DailyChart({
   days,
   values,
@@ -146,36 +175,75 @@ function DailyChart({
   readonly days: readonly string[];
   readonly values: readonly number[];
 }) {
-  const bars = sparklineBars(values, pageChartBox);
+  const data = days.map((day, index) => ({day, views: values[index] ?? 0}));
   return (
-    <figure className="flex flex-col gap-2">
-      <svg
-        aria-hidden="true"
-        className="h-[72px] w-full text-chart-2"
-        preserveAspectRatio="none"
-        role="presentation"
-        viewBox={`0 0 ${pageChartBox.width} ${pageChartBox.height}`}
-      >
-        {bars.map((bar, index) => (
-          <rect
-            className="fill-current"
-            height={bar.height}
-            key={days[index]}
-            width={bar.width}
-            x={bar.x}
-            y={pageChartBox.height - bar.height}
-          />
-        ))}
-      </svg>
-      <figcaption className="flex justify-between text-xs text-muted-foreground tabular-nums">
-        <span>{days[0] ?? ""}</span>
-        <span>{days[days.length - 1] ?? ""}</span>
-      </figcaption>
-    </figure>
+    <Card>
+      <CardHeader>
+        <CardTitle>Views per day</CardTitle>
+        <CardDescription>Across every public artifact.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <ChartContainer className="aspect-auto h-32 w-full" config={viewsChartConfig}>
+          <BarChart accessibilityLayer data={data}>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="day" hide />
+            <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
+            <Bar dataKey="views" fill="var(--color-views)" isAnimationActive={false} radius={2} />
+          </BarChart>
+        </ChartContainer>
+        <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+          <span>{days[0] ?? ""}</span>
+          <span>{days[days.length - 1] ?? ""}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function Folder({
+/**
+ * A folder row in the file-tree pattern: a Collapsible whose trigger is a
+ * Button. The row is a heading so a reader can jump between folders.
+ */
+function TreeFolder({
+  children,
+  id,
+  name,
+  prefix = "",
+}: {
+  readonly children: React.ReactNode;
+  readonly id: string;
+  readonly name: string;
+  /** The path above `name`, spoken but not drawn: the indent already shows it. */
+  readonly prefix?: string;
+}) {
+  return (
+    <Collapsible defaultOpen>
+      <h2 id={id}>
+        <CollapsibleTrigger
+          // One name for the whole path: a visually hidden prefix element
+          // would be read as a separate word ("2026/ 10").
+          aria-label={prefix + name}
+          render={
+            <Button
+              className="w-full justify-start font-normal aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+              size="sm"
+              variant="ghost"
+            />
+          }
+        >
+          <IconChevronRight className="transition-transform group-data-panel-open/button:rotate-90" />
+          <IconFolder />
+          {name}
+        </CollapsibleTrigger>
+      </h2>
+      <CollapsibleContent>
+        <div className="ml-4 flex flex-col border-l pl-1">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function FolderNode({
   days,
   folder,
   now,
@@ -185,35 +253,22 @@ function Folder({
   readonly now: number;
 }) {
   return (
-    <section aria-labelledby={`folder-${folder.path}`} className="flex flex-col gap-3">
-      <h2
-        className="font-mono text-xs font-semibold tracking-widest text-muted-foreground uppercase"
-        id={`folder-${folder.path}`}
-      >
-        {folder.path}
-      </h2>
-      <ul className="flex flex-col border">
-        {folder.artifacts.map((artifact) => (
-          <ArtifactRow
-            key={artifact.url}
-            artifact={artifact}
-            days={days}
-            now={now}
-          />
-        ))}
-        {folder.folders.map((child) => (
-          <li className="border-b last:border-b-0" key={child.path}>
-            <div className="border-l pl-4">
-              <Folder days={days} folder={child} now={now} />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <TreeFolder
+      id={`folder-${folder.path}`}
+      name={folder.label}
+      prefix={folder.path.slice(0, folder.path.length - folder.label.length)}
+    >
+      {folder.artifacts.map((artifact) => (
+        <ArtifactNode key={artifact.url} artifact={artifact} days={days} now={now} />
+      ))}
+      {folder.folders.map((child) => (
+        <FolderNode key={child.path} days={days} folder={child} now={now} />
+      ))}
+    </TreeFolder>
   );
 }
 
-function ArtifactRow({
+function ArtifactNode({
   artifact,
   days,
   now,
@@ -225,21 +280,24 @@ function ArtifactRow({
   const counts = densifyDailySeries(artifact.series, days);
   const bars = sparklineBars(counts, sparklineBox);
   return (
-    <li className="flex items-center gap-4 border-b px-5 py-3 last:border-b-0 hover:bg-accent/40">
-      <a
-        className="min-w-0 flex-1 truncate font-medium hover:underline"
+    <div className="flex items-center gap-3 rounded-lg pr-2 hover:bg-muted/50">
+      <ButtonLink
+        className="min-w-0 flex-1 justify-start font-normal"
         href={artifact.url}
+        size="sm"
+        variant="ghost"
       >
-        {artifact.name}
-      </a>
-      <span className="w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+        <IconFileText />
+        <span className="truncate">{artifact.name}</span>
+      </ButtonLink>
+      <span className="hidden w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
         {artifact.views.last7Days} / 7d
       </span>
-      <span className="shrink-0">
-        <span className="sr-only">
-          {`${artifact.views.last30Days} views over ${counts.length} days, ` +
-            `${artifact.views.total} in all`}
-        </span>
+      <span className="sr-only">
+        {`${artifact.views.last30Days} views over ${counts.length} days, ` +
+          `${artifact.views.total} in all`}
+      </span>
+      <span className="hidden shrink-0 sm:block">
         <svg
           aria-hidden="true"
           className="block text-chart-3"
@@ -252,7 +310,7 @@ function ArtifactRow({
             <rect
               className="fill-current"
               height={bar.height}
-              key={counts[index]}
+              key={days[index]}
               width={bar.width}
               x={bar.x}
               y={sparklineBox.height - bar.height}
@@ -260,16 +318,16 @@ function ArtifactRow({
           ))}
         </svg>
       </span>
-      <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums">
+      <Badge className="tabular-nums" variant="secondary">
         {formatCount(artifact.views.total)}
-      </span>
+      </Badge>
       <time
-        className="hidden w-40 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block"
+        className="hidden w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums md:block"
         dateTime={artifact.updatedAt}
       >
         {formatUpdated(artifact.updatedAt, now)}
       </time>
-    </li>
+    </div>
   );
 }
 

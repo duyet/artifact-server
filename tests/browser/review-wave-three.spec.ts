@@ -3,6 +3,8 @@ import {z} from "zod";
 
 import {publishNew, publishVersion} from "../support/publishing.js";
 import {
+  artifactPreview,
+  artifactSidebar,
   localLogin,
   startBrowserFixture,
   stopBrowserFixture,
@@ -31,14 +33,16 @@ test.describe("Artifact Server Review wave three", () => {
         first.body.artifact.id,
         first.body.version.id,
       ));
-      const preview = fixture.page.frameLocator(".as-artifact-frame").frameLocator("iframe");
+      const preview = artifactPreview(fixture.page);
       await expect(preview.getByRole("heading", {name: "Historical review stays open"}))
         .toBeVisible();
 
       await fixture.page.getByRole("tab", {name: /Versions/u}).click();
-      const firstRow = fixture.page.locator(".as-version-list li").filter({hasText: "Version 1"});
+      const versionRows = fixture.page.getByRole("complementary", {name: "Artifact inspector"})
+        .getByRole("listitem");
+      const firstRow = versionRows.filter({hasText: "Version 1"});
       await firstRow.getByRole("button", {name: "Make current"}).click();
-      const confirmation = fixture.page.getByRole("dialog", {
+      const confirmation = fixture.page.getByRole("alertdialog", {
         name: "Make Version 1 current?",
       });
       await expect(confirmation).toContainText("No saved version is changed or duplicated.");
@@ -49,7 +53,7 @@ test.describe("Artifact Server Review wave three", () => {
       expect(new URL(fixture.page.url()).searchParams.get("version"))
         .toBe(first.body.version.id);
 
-      const secondRow = fixture.page.locator(".as-version-list li").filter({hasText: "Version 2"});
+      const secondRow = versionRows.filter({hasText: "Version 2"});
       await secondRow.getByRole("button", {name: "Make current"}).click();
       const third = await publishVersion(fixture.server, fixture.installation, {
         artifactId: first.body.artifact.id,
@@ -57,9 +61,9 @@ test.describe("Artifact Server Review wave three", () => {
         expectedCurrentVersionId: first.body.version.id,
         idempotencyKey: "review-make-current-v3",
       });
-      await fixture.page.getByRole("dialog", {name: "Make Version 2 current?"})
+      await fixture.page.getByRole("alertdialog", {name: "Make Version 2 current?"})
         .getByRole("button", {name: "Make current"}).click();
-      await expect(fixture.page.getByRole("dialog", {name: "Make Version 2 current?"}))
+      await expect(fixture.page.getByRole("alertdialog", {name: "Make Version 2 current?"}))
         .toHaveCount(0);
       await expect(fixture.page.getByText(/current version changed/u)).toBeVisible();
       await expect(preview.getByRole("heading", {name: "Historical review stays open"}))
@@ -114,11 +118,11 @@ test.describe("Artifact Server Review wave three", () => {
       await expect(conversation.getByText("Agent reply already in this conversation"))
         .toBeVisible();
       await expect(conversation.getByText("1 reply", {exact: true})).toBeVisible();
-      await expect(conversation.locator(".as-comment-card__meta")).toContainText("Updated");
-      await expect(conversation.locator(".as-comment-card__meta")).toContainText("Whole version");
+      await expect(conversation.getByText(/Updated/u)).toBeVisible();
+      await expect(conversation.getByText("Whole version")).toBeVisible();
       await expect(conversation.getByRole("textbox", {exact: true, name: "Reply"}))
         .toHaveCount(0);
-      const agentReply = conversation.locator(".as-comment-replies li")
+      const agentReply = conversation.getByRole("listitem")
         .filter({hasText: "Agent reply already in this conversation"});
       await expect(agentReply.getByRole("button", {name: "Edit"})).toHaveCount(0);
 
@@ -132,7 +136,7 @@ test.describe("Artifact Server Review wave three", () => {
       await postReply.click();
       await expect(conversation.getByText("Human follow-up", {exact: true})).toBeVisible();
       await expect(conversation.getByText("2 replies", {exact: true})).toBeVisible();
-      const humanReply = conversation.locator(".as-comment-replies li")
+      const humanReply = conversation.getByRole("listitem")
         .filter({hasText: "Human follow-up"});
       await humanReply.getByRole("button", {name: "Edit"}).click();
       await humanReply.getByLabel("Edit reply").fill("Human follow-up, revised");
@@ -193,31 +197,45 @@ test.describe("Artifact Server Review wave three", () => {
           response,
         });
       });
-      await fixture.page.goto(reviewUrl(
+      // The loaded catalog page leaves the historical plan out, so finding it
+      // proves the search reaches the whole project, while the viewer keeps
+      // the exact artifact and version it opened.
+      const selectedUrl = reviewUrl(
         fixture.server.baseUrl,
         selected.body.artifact.id,
         selected.body.version.id,
-      ));
-      const preview = fixture.page.frameLocator(".as-artifact-frame").frameLocator("iframe");
+      );
+      await fixture.page.goto(selectedUrl);
+      const preview = artifactPreview(fixture.page);
+      const tree = artifactSidebar(fixture.page);
       await expect(preview.getByRole("heading", {name: "Selected preview remains"}))
         .toBeVisible();
-
-      const search = fixture.page.getByRole("searchbox", {name: "Search artifacts"});
-      await search.fill("  DECISION   BOARD ");
-      await expect(fixture.page.getByRole("button", {name: /Decision Board Result/u}))
+      await expect(tree.getByRole("link", {exact: true, name: "Decision Board Result"}))
         .toBeVisible();
-      await expect(fixture.page.getByRole("button", {name: /Selected historical plan/u}))
+      await expect(tree.getByRole("link", {exact: true, name: "Selected historical plan"}))
+        .toHaveCount(0);
+
+      const search = tree.getByRole("searchbox", {name: "Search artifacts"});
+      await search.fill("  DECISION   BOARD ");
+      await expect(tree.getByRole("link", {exact: true, name: "Decision Board Result"}))
+        .toBeVisible();
+      await expect(tree.getByRole("link", {exact: true, name: "Selected historical plan"}))
         .toHaveCount(0);
       await expect(preview.getByRole("heading", {name: "Selected preview remains"}))
         .toBeVisible();
 
       await search.fill("HIDDEN-TARGET");
-      await expect(fixture.page.getByRole("button", {name: /Selected historical plan/u}))
+      await expect(tree.getByRole("link", {exact: true, name: "Selected historical plan"}))
         .toBeVisible();
+      await expect(tree.getByRole("link", {exact: true, name: "Decision Board Result"}))
+        .toHaveCount(0);
       await search.fill("hidden");
-      await expect(fixture.page.getByText("No matching artifacts", {exact: true})).toBeVisible();
+      await expect(tree.getByText("No matching artifacts", {exact: true})).toBeVisible();
       await expect(preview.getByRole("heading", {name: "Selected preview remains"}))
         .toBeVisible();
+      const location = new URL(fixture.page.url()).searchParams;
+      expect(location.get("artifact")).toBe(selected.body.artifact.id);
+      expect(location.get("version")).toBe(selected.body.version.id);
       expect(result.body.artifact.id).not.toBe(selected.body.artifact.id);
     } finally {
       await stopBrowserFixture(fixture);

@@ -3,6 +3,7 @@ import {expect, test} from "@playwright/test";
 import {publishNew} from "../support/publishing.js";
 import {
   localLogin,
+  reviewFrame,
   startBrowserFixture,
   stopBrowserFixture,
 } from "./browser-fixture.js";
@@ -64,14 +65,13 @@ test.describe("Review sandbox isolation", () => {
         `${fixture.server.baseUrl}/review?project=prj_default&artifact=${published.body.artifact.id}&version=${published.body.version.id}`,
       );
 
-      const reviewFrame = fixture.page.frameLocator(".as-artifact-frame");
-      const sandboxElement = reviewFrame.locator("iframe");
+      const sandboxElement = reviewFrame(fixture.page).locator("iframe");
       await expect(sandboxElement).toHaveAttribute("sandbox", "allow-scripts");
       await expect(sandboxElement).not.toHaveAttribute("sandbox", /allow-same-origin/u);
       await expect(sandboxElement).not.toHaveAttribute("sandbox", /allow-forms/u);
       await expect(sandboxElement).not.toHaveAttribute("sandbox", /allow-top-navigation/u);
 
-      const artifactFrame = reviewFrame.frameLocator("iframe");
+      const artifactFrame = reviewFrame(fixture.page).frameLocator("iframe");
       await expect(artifactFrame.locator("#probe-parent")).toHaveText("parent:blocked");
       await expect(artifactFrame.locator("#probe-cookie")).toHaveText("cookie:blocked");
       await expect(artifactFrame.locator("#probe-fetch")).toHaveText("fetch:blocked");

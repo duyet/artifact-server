@@ -15,6 +15,7 @@ import {
   startTestServer,
 } from "../support/runtime-harness.js";
 import {
+  artifactPreview,
   localLogin,
   startBrowserFixture,
   stopBrowserFixture,
@@ -122,14 +123,13 @@ test.describe("Review send-all", () => {
       await expect(page.getByRole("button", {
         name: "Send all open (101) to builder",
       })).toBeVisible();
-      await expect(page.locator(".as-comment-card")).toHaveCount(101);
-      const preview = page.frameLocator(".as-artifact-frame")
-        .frameLocator("iframe");
+      await expect(page.getByRole("article")).toHaveCount(101);
+      const preview = artifactPreview(page);
       await expect(preview.locator("button[data-plannotator-marker]")).toHaveCount(1);
 
       await page.getByRole("button", {name: "Send all open (101) to builder"}).click();
       await expect(page.getByText("Sent 101 threads to builder")).toBeVisible();
-      await expect(page.locator(".as-comment-card")).toHaveCount(0);
+      await expect(page.getByRole("article")).toHaveCount(0);
       await expect(preview.locator("button[data-plannotator-marker]")).toHaveCount(0);
 
       const owner = new ApiClient(fixture.server, fixture.installation.apiToken);
@@ -140,7 +140,7 @@ test.describe("Review send-all", () => {
       expect(dispatches.flatMap((dispatch) => dispatch.threadIds)).toHaveLength(101);
 
       await page.getByRole("button", {name: "Sent (101)"}).click();
-      await expect(page.locator(".as-comment-card")).toHaveCount(101);
+      await expect(page.getByRole("article")).toHaveCount(101);
       await expect(page.getByText("Queued", {exact: true})).toHaveCount(101);
 
       const claimedResponse = await agent.client.claim(agent.agentId, 1);
@@ -161,12 +161,12 @@ test.describe("Review send-all", () => {
       const queuedThreadId = queued.threadIds[0];
       const queuedThread = seeded.find((thread) => thread.id === queuedThreadId);
       if (queuedThread === undefined) throw new Error("The queued thread is missing.");
-      const queuedCard = page.locator(".as-comment-card").filter({
+      const queuedCard = page.getByRole("article").filter({
         hasText: queuedThread.body,
       });
       await queuedCard.getByRole("button", {name: "Cancel send"}).click();
       await page.getByRole("button", {exact: true, name: "Open"}).click();
-      await expect(page.locator(".as-comment-card")).toHaveCount(1);
+      await expect(page.getByRole("article")).toHaveCount(1);
       await expect(page.getByText(queuedThread.body)).toBeVisible();
       await expect(page.getByRole("button", {
         name: "Send all open (1) to builder",

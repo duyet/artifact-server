@@ -23,7 +23,6 @@ import {
 import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import type {
   AdmitMemberRecord,
-  BindExternalIdentityRecord,
   BootstrapManagedApiKeyRepository,
   CreateApplicationSessionRecord,
 } from "../core/identity-ports.js";
@@ -233,62 +232,6 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
       WHERE installation_id = ? AND email = ? AND status = ?
     `).get(installationId, email, memberStatuses.active);
     return row === undefined ? null : memberRowSchema.parse(row);
-  }
-
-  async findActiveMemberByExternalIdentity(
-    installationId: string,
-    provider: string,
-    subject: string,
-  ): Promise<InstallationMember | null> {
-    const row = this.#database.prepare(`
-      SELECT
-        member.id,
-        member.installation_id AS installationId,
-        member.email,
-        member.display_name AS displayName,
-        member.role,
-        member.status,
-        member.created_at AS createdAt,
-        member.updated_at AS updatedAt
-      FROM external_identities AS external
-      JOIN installation_members AS member ON member.id = external.member_id
-      WHERE
-        member.installation_id = ? AND external.provider = ? AND
-        external.subject = ? AND member.status = ?
-    `).get(installationId, provider, subject, memberStatuses.active);
-    return row === undefined ? null : memberRowSchema.parse(row);
-  }
-
-  async bindExternalIdentity(command: BindExternalIdentityRecord): Promise<void> {
-    try {
-      const result = this.#database.prepare(`
-        INSERT INTO external_identities (
-          provider, subject, member_id, email, bound_at
-        ) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(provider, subject) DO UPDATE SET
-          email = excluded.email,
-          bound_at = excluded.bound_at
-        WHERE external_identities.member_id = excluded.member_id
-      `).run(
-        command.provider,
-        command.subject,
-        command.memberId,
-        command.email,
-        command.boundAt,
-      );
-      if (result.changes !== 1) {
-        throw new IdentityConflict({
-          message: "That external identity is already bound to another member.",
-        });
-      }
-    } catch (cause) {
-      if (isSqliteConstraint(cause)) {
-        throw new IdentityConflict({
-          message: "That external identity is already bound to another member.",
-        });
-      }
-      throw cause;
-    }
   }
 
   async deactivateMember(
@@ -767,15 +710,7 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         UNIQUE (installation_id, email)
       );
 
-      CREATE TABLE IF NOT EXISTS external_identities (
-        provider TEXT NOT NULL,
-        subject TEXT NOT NULL,
-        member_id TEXT NOT NULL REFERENCES installation_members(id),
-        email TEXT NOT NULL,
-        bound_at TEXT NOT NULL,
-        PRIMARY KEY (provider, subject),
-        UNIQUE (provider, member_id)
-      );
+      DROP TABLE IF EXISTS external_identities;
 
       CREATE TABLE IF NOT EXISTS application_sessions (
         id TEXT PRIMARY KEY,
@@ -830,23 +765,6 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         expires_at TEXT NOT NULL,
         consumed_at TEXT
       );
-
-      CREATE TABLE IF NOT EXISTS git_history_provider_identity (
-        installation_id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL CHECK (provider = 'cloudflare-artifacts'),
-        account_id TEXT NOT NULL,
-        namespace TEXT NOT NULL,
-        activated_at TEXT NOT NULL,
-        UNIQUE (provider, account_id, namespace)
-      ) STRICT;
-
-      CREATE TABLE IF NOT EXISTS git_history_project_settings (
-        project_id TEXT PRIMARY KEY REFERENCES projects(id),
-        installation_id TEXT NOT NULL,
-        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-        updated_by_principal_id TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      ) STRICT;
     `);
     this.#addLoginAttemptNonceIfMissing();
     this.#database.exec(`PRAGMA user_version = ${requiredSqliteSchemaVersion};`);

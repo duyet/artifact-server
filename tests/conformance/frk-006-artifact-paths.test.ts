@@ -42,7 +42,7 @@ const mcpUploadSchema = z.object({
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const mcpProtocolVersion = "2026-07-28";
 const newVersionGuard =
-  "--name, --path, --public, and --tag apply only when creating a new artifact.";
+  "--name, --path, --public, --private, and --tag apply only when creating a new artifact.";
 
 type CommitTarget =
   | {

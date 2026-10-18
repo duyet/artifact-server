@@ -10,7 +10,6 @@ import {
 } from "../core/errors.js";
 import type {
   AdmitMemberRecord,
-  BindExternalIdentityRecord,
   BootstrapManagedApiKeyRepository,
   CreateApplicationSessionRecord,
 } from "../core/identity-ports.js";
@@ -193,63 +192,6 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
       ), [installationId, email, memberStatuses.active]);
       return memberRowSchema.nullable().parse(rows[0] ?? null);
     }));
-  }
-
-  async findActiveMemberByExternalIdentity(
-    installationId: string,
-    provider: string,
-    subject: string,
-  ): Promise<InstallationMember | null> {
-    this.#assertInstallationScope(installationId);
-    return this.#database.run(Effect.gen({self: this}, function*() {
-      const sql = yield* SqlClient;
-      const rows = yield* sql.unsafe<object>(
-        `SELECT member.id, member.installation_id AS "installationId",
-          member.email, member.display_name AS "displayName", member.role,
-          member.status, member.created_at AS "createdAt",
-          member.updated_at AS "updatedAt"
-         FROM external_identities AS external
-         JOIN installation_members AS member
-           ON member.installation_id = external.installation_id
-          AND member.id = external.member_id
-         WHERE member.installation_id = $1 AND external.provider = $2
-           AND external.subject = $3 AND member.status = $4`,
-        [installationId, provider, subject, memberStatuses.active],
-      );
-      return memberRowSchema.nullable().parse(rows[0] ?? null);
-    }));
-  }
-
-  async bindExternalIdentity(command: BindExternalIdentityRecord): Promise<void> {
-    const installationId = this.#installationId;
-    const existingMember = await this.findMember(
-      installationId,
-      command.memberId,
-    );
-    if (existingMember === null) {
-      throw new IdentityConflict({message: "The member does not exist."});
-    }
-    try {
-      const changed = await this.#database.run(Effect.gen({self: this}, function*() {
-        const sql = yield* SqlClient;
-        return yield* sql`INSERT INTO external_identities (
-          installation_id, provider, subject, member_id, email, bound_at
-        ) VALUES (
-          ${installationId}, ${command.provider}, ${command.subject},
-          ${command.memberId}, ${command.email}, ${command.boundAt}
-        )
-        ON CONFLICT (installation_id, provider, subject) DO UPDATE SET
-          email = EXCLUDED.email,
-          bound_at = EXCLUDED.bound_at
-        WHERE external_identities.member_id = EXCLUDED.member_id
-        RETURNING member_id`;
-      }));
-      if (changed.length !== 1) throw identityBindingConflict();
-    } catch (cause) {
-      if (cause instanceof IdentityConflict) throw cause;
-      if (isConstraintFailure(cause)) throw identityBindingConflict();
-      throw cause;
-    }
   }
 
   async deactivateMember(
@@ -766,11 +708,6 @@ function withoutSecretDigest(key: StoredManagedApiKey): ManagedApiKey {
   return metadata;
 }
 
-function identityBindingConflict(): IdentityConflict {
-  return new IdentityConflict({
-    message: "That external identity is already bound to another member.",
-  });
-}
 
 function isConstraintFailure(cause: unknown): boolean {
   if (isSqlError(cause)) {

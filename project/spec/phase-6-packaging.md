@@ -2,6 +2,8 @@
 
 Status: direct package, OCI, Compose, and Helm foundations implemented; transfer, signing, and public-release gates remain open
 
+> Superseded in part (2026-10-18): OIDC and WorkOS browser login were removed. Private-team servers use API-key sign-in, and the Helm chart has no `identity` values.
+
 This phase turns the working local and external-storage runtimes into installable,
 upgradable, recoverable release packages. It does not change artifact, version,
 HTTP, MCP, authentication, or authorization behavior.

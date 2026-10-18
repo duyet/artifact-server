@@ -22,16 +22,10 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
       return {code: errorCodes.artifactPathTaken, message: failure.message, status: 409};
     case "AuthenticationRequired":
       return {code: errorCodes.authenticationRequired, message: failure.message, status: 401};
-    case "IdentityAdmissionDenied":
-      return {code: errorCodes.identityAdmissionDenied, message: failure.message, status: 403};
     case "IdentityConflict":
       return {code: errorCodes.identityConflict, message: failure.message, status: 409};
     case "IdentityNotFound":
       return {code: errorCodes.identityNotFound, message: failure.message, status: 404};
-    case "IdentityProviderFailure":
-      return {code: errorCodes.identityProviderFailure, message: failure.message, status: 502};
-    case "InteractiveLoginUnavailable":
-      return {code: errorCodes.interactiveLoginUnavailable, message: failure.message, status: 404};
     case "LoginAttemptRejected":
       return {code: errorCodes.authenticationRequired, message: failure.message, status: 401};
     case "AuthorizationDenied":
@@ -47,6 +41,7 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
     case "ContentSessionRequired":
     case "ContentNotPublic":
       return {code: errorCodes.contentNotPublic, message: failure.message, status: 401};
+    case "InvalidArtifactEdit":
     case "InvalidArtifactName":
     case "InvalidArtifactPath":
     case "InvalidProjectName":
@@ -88,18 +83,6 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
       return {code: errorCodes.uploadNotFound, message: failure.message, status: 404};
     case "VersionNotFound":
       return {code: errorCodes.versionNotFound, message: failure.message, status: 404};
-    case "InvalidLinkPath":
-      return {code: errorCodes.invalidLinkPath, message: failure.message, status: 422};
-    case "LinkPathOutsideRoots":
-      return {code: errorCodes.linkPathOutsideRoots, message: failure.message, status: 403};
-    case "LinkPathProtected":
-      return {code: errorCodes.linkPathProtected, message: failure.message, status: 403};
-    case "SourceDrifted":
-      return {code: errorCodes.sourceDrifted, message: failure.message, status: 409};
-    case "SourceMissing":
-      return {code: errorCodes.sourceMissing, message: failure.message, status: 409};
-    case "SourceUnreadable":
-      return {code: errorCodes.sourceUnreadable, message: failure.message, status: 409};
     case "CapabilityUnavailable":
       return {
         code: errorCodes.capabilityUnavailable,

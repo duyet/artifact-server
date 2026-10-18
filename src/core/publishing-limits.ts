@@ -4,6 +4,9 @@ export const maximumDeclaredFiles = 10_000;
 /** Maximum JSON bytes accepted for a file-upload plan or MCP request. */
 export const maximumUploadPlanRequestBytes = 16 * 1_024 * 1_024;
 
+/** Largest text file one edit commit may replace, in bytes. */
+export const maximumEditableTextBytes = 1_048_576;
+
 /** Maximum characters accepted in one comment thread or reply body. */
 export const maximumCommentBodyCharacters = 8_192;
 

@@ -3,12 +3,9 @@ import { Context, type Effect, type Redacted } from "effect";
 import type {
   AuthenticationRequired,
   AuthorizationDenied,
-  IdentityAdmissionDenied,
   IdentityConflict,
-  IdentityProviderFailure,
   IdentityRepositoryFailure,
 } from "../core/errors.js";
-import type { ExternalIdentity } from "../core/installation-identity.js";
 import type { Principal } from "../core/identity.js";
 
 /** Browser-session verification result required by the HTTP security boundary. */
@@ -22,39 +19,10 @@ export interface AuthenticatedApplicationSession {
 export type AuthenticationFailure =
   | AuthenticationRequired
   | AuthorizationDenied
-  | IdentityAdmissionDenied
   | IdentityConflict
-  | IdentityProviderFailure
   | IdentityRepositoryFailure;
 
-/** Provider-neutral claims verified from one external MCP access token. */
-export interface VerifiedExternalMcpBearer {
-  readonly clientId: string | null;
-  readonly expiresAt: number;
-  readonly provider: string;
-  readonly scopes: readonly string[];
-  readonly subject: string;
-}
-
-/** External MCP token verification and first-use identity resolution. */
-export interface ExternalMcpBearerVerifier {
-  /** The credential travels along so a provider can read the profile it carries. */
-  readonly resolveIdentity: (
-    verified: VerifiedExternalMcpBearer,
-    credential: Redacted.Redacted,
-  ) => Effect.Effect<
-    ExternalIdentity,
-    AuthenticationRequired | IdentityProviderFailure
-  >;
-  readonly verify: (
-    credential: Redacted.Redacted,
-  ) => Effect.Effect<
-    VerifiedExternalMcpBearer,
-    AuthenticationRequired | IdentityProviderFailure
-  >;
-}
-
-/** Principal and OAuth facts attached to one authenticated MCP request. */
+/** Principal and MCP auth facts attached to one authenticated MCP request. */
 export interface AuthenticatedMcpBearer {
   readonly clientId: string;
   readonly expiresAt: number;

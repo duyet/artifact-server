@@ -54,10 +54,6 @@ configuration:
     bucket: artifact-server-team-example
     region: us-east-1
 
-identity:
-  oidcClientId: artifact-server
-  oidcIssuer: https://idp.example.com/realms/main
-
 secret:
   name: artifact-server-runtime
   rolloutChecksum: secret-version-1
@@ -162,49 +158,17 @@ names empty, add the provider annotations under `serviceAccount.annotations`,
 and set `serviceAccount.automountServiceAccountToken` only when that identity
 mechanism requires the projected Kubernetes token.
 
-## WorkOS authentication
+## Browser sign-in
 
-A browser identity provider is optional, and an installation has at most one. To
-use WorkOS, set `identity.workosClientId`, `identity.workosIssuer`, and
-`secret.keys.workosApiKey`. `identity.workosIssuer` is the exact HTTPS AuthKit
-origin for this environment, and `secret.keys.workosApiKey` names a key in the
-existing Kubernetes Secret. The chart rejects a partial WorkOS configuration.
-
-## OIDC authentication
-
-An installation that already runs its own OpenID Connect provider can use it for
-browser login instead of WorkOS. Set `identity.oidcIssuer` to the exact issuer
-URL and `identity.oidcClientId` to the registered client. The issuer must be an
-HTTPS URL with no query or fragment. The redirect URI to register with the
-provider is `configuration.applicationOrigin` followed by `/auth/callback`.
-
-`secret.keys.oidcClientSecret` is optional, because a public client using PKCE
-alone is valid; when set, it names a key in the existing Kubernetes Secret and
-the chart mounts it as a file. `identity.oidcScopes` overrides the default
-`openid email profile`. The chart rejects a partial OIDC configuration, and an
-OIDC client secret or scope list without an issuer and client.
-
-The same issuer also protects the MCP endpoint: agents may present an end-user
-access token instead of an API key, and the server binds each call to the person
-who obtained it. Such a token must name `configuration.applicationOrigin`
-followed by `/mcp` in `aud`, which the provider produces from an audience mapper
-or an RFC 8707 resource indicator.
-
-One installation has one browser-login provider. The chart rejects values that
-configure WorkOS and OIDC together.
-
-## No identity provider
-
-Leave every `identity` value and `secret.keys.workosApiKey` and
-`secret.keys.oidcClientSecret` empty to run without browser login. Browser login
-is then off, and people publish with the API key from the `api-token` Secret
-value. All publishers share that one key.
+A team deployment signs browsers in with a managed API key (`POST /auth/api-key`).
+The bootstrap key comes from the Secret key named by `secret.keys.apiToken`
+(default `api-token`).
 
 ## NetworkPolicy
 
 NetworkPolicy is disabled by default. Standard Kubernetes policies cannot allow
 external services by DNS name, so the chart cannot safely invent rules for a
-managed database, bucket, WorkOS, or an OTLP collector. Operators can enable the
+managed database, bucket, or an OTLP collector. Operators can enable the
 template and provide exact native `ingress` and `egress` rules for their CNI and
 network. An empty enabled rule set is default-deny. An S3 server on a custom port
 needs an egress rule for that port.

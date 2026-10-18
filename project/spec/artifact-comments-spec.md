@@ -299,8 +299,8 @@ catalog cards continue to show total comment history.
 
 The review route owns the viewport instead of rendering inside the management
 application shell. One compact viewer bar identifies the artifact and exact
-version and exposes back, comments, version navigation, linked-source state,
-sharing, and focus controls. The artifact is the only open surface by default.
+version and exposes back, comments, version navigation, sharing, and focus
+controls. The artifact is the only open surface by default.
 Comments and version navigation open deliberately, dock beside the artifact on
 wide screens, and overlay it on narrow screens. Focus mode removes both the bar
 and side surfaces while keeping an explicit visible control that restores them.
@@ -423,7 +423,7 @@ Module `artifact-comments` (new entry in `allowed_modules`). Deployments `*all`.
 | CMT-012 | behavior | The HTTP API, MCP tools, and web application expose the same operations with the same authorization; `?since=` and cursor paging return every change at least once for a poller that resumes from the time its previous pass started. | MCP and HTTP produce identical results for the same principal; a poll resuming from the previous pass start misses no update. |
 | CMT-013 | security | The version file route serves exact manifest-entry bytes to artifact-read principals with non-renderable headers on the app origin, and never on the content domain. | Anonymous, public-link, and read-incapable-key requests are denied; the response cannot render as a document on the app origin; unknown paths 404 without disclosure. |
 | CMT-014 | security | The review viewer executes artifact HTML only inside an opaque-origin sandboxed document that holds no credential; comment writes happen only in the signed-in app document. | Hostile artifact JavaScript cannot reach the app origin, the comment API, cookies, or storage from inside the viewer. |
-| CMT-015 | behavior | Review routes use the dedicated artifact-first viewport shell, with comments and version navigation closed by default, compact version and linked-source context, responsive on-demand surfaces, sharing, and reversible focus mode. | Management chrome or a permanently open side surface cannot displace the artifact, narrow screens cannot make a docked panel crush the artifact, and focus mode cannot leave the viewer without a visible way back. |
+| CMT-015 | behavior | Review routes use the dedicated artifact-first viewport shell, with comments and version navigation closed by default, compact version context, responsive on-demand surfaces, sharing, and reversible focus mode. | Management chrome or a permanently open side surface cannot displace the artifact, narrow screens cannot make a docked panel crush the artifact, and focus mode cannot leave the viewer without a visible way back. |
 | CMT-021 | behavior | Review downloads one original file or a path-preserving ZIP of the selected immutable version in standard and full-screen modes. | Unauthorized or mismatched artifact, project, and version requests return no archive; downloading cannot open comments, change the selected version, or leave full-screen mode. |
 
 `SCP-003` is edited to keep notifications and workspace collaboration excluded. `PLN-003` moves comments and replies to Artifact Server's column and its acceptance tests are rewritten. `AUD-001` gains the six comment action kinds in its behavior test.

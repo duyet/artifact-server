@@ -7,7 +7,6 @@
     "image",
     "configuration",
     "secret",
-    "identity",
     "serviceAccount",
     "podSecurityContext",
     "securityContext",
@@ -111,31 +110,15 @@
             "apiToken",
             "databaseUrl",
             "s3AccessKeyId",
-            "s3SecretAccessKey",
-            "workosApiKey",
-            "oidcClientSecret"
+            "s3SecretAccessKey"
           ],
           "properties": {
             "apiToken": {"type": "string", "minLength": 1},
             "databaseUrl": {"type": "string", "minLength": 1},
             "s3AccessKeyId": {"type": "string"},
-            "s3SecretAccessKey": {"type": "string"},
-            "workosApiKey": {"type": "string"},
-            "oidcClientSecret": {"type": "string"}
+            "s3SecretAccessKey": {"type": "string"}
           }
         }
-      }
-    },
-    "identity": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["workosClientId", "workosIssuer", "oidcClientId", "oidcIssuer", "oidcScopes"],
-      "properties": {
-        "workosClientId": {"type": "string"},
-        "workosIssuer": {"type": "string"},
-        "oidcClientId": {"type": "string"},
-        "oidcIssuer": {"type": "string"},
-        "oidcScopes": {"type": "string"}
       }
     },
     "serviceAccount": {

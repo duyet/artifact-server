@@ -1,9 +1,3 @@
-import {
-  buildOAuthProtectedResourceMetadata,
-  getOAuthProtectedResourceMetadataUrl,
-  oauthMetadataResponse,
-  type OAuthMetadata,
-} from "@modelcontextprotocol/server";
 import {Clock, Effect, Exit, Redacted, type Tracer} from "effect";
 import { type Context, Hono } from "hono";
 import {getConnInfo} from "@hono/node-server/conninfo";
@@ -24,15 +18,7 @@ import {
   identitySecretsEqual,
   InstallationAccessService,
 } from "../application/installation-access.js";
-import { InteractiveLoginService } from "../application/interactive-login.js";
 import { ProjectManagementService } from "../application/project-management.js";
-import {ProjectGitHistoryService} from
-  "../application/project-git-history.js";
-import {
-  defaultGitCloneCredentialTtlSeconds,
-  GitHistoryAccessService,
-  maximumGitCloneCredentialTtlSeconds,
-} from "../application/git-history-access.js";
 import {
   AgentDispatchService,
   type ConnectedRegisteredAgent,
@@ -62,17 +48,9 @@ import {
   isPreviewLeaseToken,
 } from "../application/content-access.js";
 import {
-  isLiveContentToken,
-  LinkedArtifactService,
-  type LinkedPublication,
-  liveContentToken,
-  type LiveReadGrant,
-} from "../application/linked-artifacts.js";
-import {
   AuthenticationRequired,
   AuthorizationDenied,
   type ArtifactServerFailure,
-  CapabilityUnavailable,
   ContentBootstrapRejected,
   errorCodes,
   InvalidPagination,
@@ -102,7 +80,7 @@ import {
   commentClearScopes,
   type ArtifactActionPage,
   type ArtifactDeletion,
-  type ArtifactPage,
+  type ArtifactPageWithViews,
   type ArtifactState,
   type ArtifactVersion,
   commentThreadStates,
@@ -114,16 +92,10 @@ import {
   type PageCursor,
   type PublishedVersion,
   type RegisteredAgentRecord,
-  type SourceBindingRecord,
   type VersionContent,
   type VersionRecord,
 } from "../core/model.js";
 import type { BlobStore, Clock as WallClock } from "../core/ports.js";
-import {
-  disabledGitHistoryCapability,
-  fixedGitHistoryCapabilityReader,
-  type GitHistoryCapabilityReader,
-} from "../git-history/git-history-capability.js";
 import {
   decideByteRange,
   ifRangeAllowsPartialResponse,
@@ -132,6 +104,7 @@ import {permitsSpaEntryFallback} from "./spa-navigation.js";
 import {
   maximumCommentPageSize,
   maximumDeclaredFiles,
+  maximumEditableTextBytes,
   maximumUploadPlanRequestBytes,
 } from "../core/publishing-limits.js";
 import {
@@ -166,6 +139,7 @@ import {
   PublicArtifactCatalogService,
   publicCatalogLimit,
 } from "../application/public-artifact-catalog.js";
+import {ProjectAnalyticsService} from "../application/project-analytics.js";
 import type {ArtifactViewRecorder} from
   "../application/artifact-view-recorder.js";
 import {observeHttpRequest} from "../observability/application-observability.js";
@@ -191,13 +165,6 @@ const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
 }).strict();
 const renameProjectSchema = createProjectSchema;
-const setProjectGitHistorySchema = z.discriminatedUnion("enabled", [
-  z.object({enabled: z.literal(false)}).strict(),
-  z.object({
-    confirmEstimate: z.literal(true),
-    enabled: z.literal(true),
-  }).strict(),
-]);
 const declaredFileSchema = z.object({
   mediaType: z.string().trim().min(1).max(200),
   path: z.string().min(1).max(1_024),
@@ -224,6 +191,13 @@ const commitUploadSchema = z.object({
       expectedCurrentVersionId: z.string().min(1).max(200),
       kind: z.literal("new_version"),
     }).strict(),
+    z.object({
+      artifactId: z.string().min(1).max(200),
+      baseVersionId: z.string().min(1).max(200),
+      expectedCurrentVersionId: z.string().min(1).max(200),
+      kind: z.literal("edit"),
+      path: z.string().min(1).max(1_024),
+    }).strict(),
   ]),
 }).strict();
 const contentTokenSchema = z
@@ -243,18 +217,6 @@ const contentSessionTokenSchema = z
 const contentBootstrapQueryParameter = "__artifact_bootstrap";
 const contentSessionCookieName = "__Host-artifact_content";
 const loopbackContentSessionCookieName = "artifact_content";
-const linkArtifactSchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
-  path: z.string().min(1).max(4_096),
-  projectId: projectIdSchema.optional(),
-}).strict();
-const captureArtifactSchema = z.object({
-  expectedCurrentVersionId: z.string().min(1).max(200),
-}).strict();
-const relinkArtifactSchema = z.object({
-  expectedSha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  path: z.string().min(1).max(4_096),
-}).strict();
 const restoreVersionSchema = z.object({
   expectedCurrentVersionId: z.string().min(1).max(200),
   versionId: z.string().min(1).max(200),
@@ -263,6 +225,10 @@ const changeAccessSchema = z.object({
   accessSetting: accessSettingSchema,
   expectedCurrentVersionId: z.string().min(1).max(200),
 });
+const renameArtifactSchema = z.object({
+  expectedCurrentVersionId: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+}).strict();
 const changeTagsSchema = z.object({
   expectedCurrentVersionId: z.string().min(1).max(200),
   tags: artifactTagsSchema,
@@ -398,6 +364,7 @@ const pageQuerySchema = z.object({
 });
 const artifactPageQuerySchema = pageQuerySchema.extend({
   comments: z.enum(["all", "with", "without"]).default("all"),
+  owner: z.enum(["all", "me", "others"]).default("all"),
   sort: z.enum(["comments", "newest"]).default("newest"),
   tags: z.array(z.string().max(200)).max(20).default([]),
 });
@@ -407,10 +374,6 @@ const makePublicLinkPrivateItemSchema = z.object({
   expectedCurrentVersionId: z.string().min(1).max(200),
   idempotencyKey: z.string().min(16).max(200),
   projectId: projectIdSchema,
-}).strict();
-const issueGitCloneCredentialSchema = z.object({
-  ttlSeconds: z.number().int().min(1).max(maximumGitCloneCredentialTtlSeconds)
-    .default(defaultGitCloneCredentialTtlSeconds),
 }).strict();
 const makePublicLinksPrivateSchema = z.object({
   items: z.array(makePublicLinkPrivateItemSchema).min(1).max(100),
@@ -469,23 +432,13 @@ const apiKeySignInSchema = z.object({
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
-const interactiveLoginQuerySchema = z.object({
-  returnTo: z.string().max(1_024).default("/api/v1/session"),
-});
-const interactiveCallbackSchema = z.object({
-  code: z.string().min(1).max(4_096),
-  state: z.string().min(16).max(4_096),
-});
 const sessionTokenSchema = z.string().min(32).max(200)
   .regex(/^[A-Za-z0-9_-]+$/u);
 const csrfTokenSchema = sessionTokenSchema;
 const applicationSessionCookie = "artifact_session";
 const applicationCsrfCookie = "artifact_csrf";
-const loginHandshakeCookie = "artifact_login";
 const secureApplicationSessionCookie = "__Host-artifact_session";
 const secureApplicationCsrfCookie = "__Host-artifact_csrf";
-const secureLoginHandshakeCookie = "__Host-artifact_login";
-const loginHandshakeMaxAgeSeconds = 10 * 60;
 /** Upper bound on one held claim poll, per the dispatch transport contract. */
 const maximumClaimWaitSeconds = 25;
 /** Spacing of the bounded re-checks inside one held claim poll. */
@@ -503,7 +456,6 @@ interface HttpEnvironment {
 }
 
 export interface HttpAppDependencies {
-  readonly apiOAuthResource?: ApiOAuthResourceConfiguration;
   readonly applicationRuntime: ApplicationRuntime;
   /**
    * Buffered entry-document counter. Absent, no view is ever recorded, which
@@ -518,31 +470,10 @@ export interface HttpAppDependencies {
   readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
-  /** Secret-free optional Git state exposed through authenticated discovery. */
-  readonly gitHistory?: GitHistoryCapabilityReader;
-  /**
-   * Advertises the linked-artifact capability (local deployment with
-   * `ARTIFACT_SERVER_LINKED_FILES=on`). The enabled application service is
-   * the enforcing guard; this flag only shapes discovery and fast gating.
-   */
-  readonly linkedArtifacts?: boolean;
-  readonly mcpOAuthResource?: McpOAuthResourceConfiguration;
   readonly readiness?: ReadinessProbe;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly trustedApplicationOrigin: string | null;
   readonly webAssets?: WebAssetStore;
-}
-
-/** RFC 9728 metadata for the separately audience-bound HTTP API resource. */
-export interface ApiOAuthResourceConfiguration {
-  readonly authorizationServers: readonly [string, ...string[]];
-  readonly resource: string;
-}
-
-/** WorkOS metadata and exact audience for the hosted MCP protected resource. */
-export interface McpOAuthResourceConfiguration {
-  readonly authorizationServerMetadata: OAuthMetadata;
-  readonly resource: string;
 }
 
 /** Machine-readable result of one declared runtime dependency probe. */
@@ -584,9 +515,6 @@ export function createHttpApp(
   const mcpAllowedHostnames = applicationHostname === null
     ? ["localhost", "127.0.0.1", "[::1]"]
     : [applicationHostname];
-  const gitHistory = dependencies.gitHistory ?? fixedGitHistoryCapabilityReader(
-    disabledGitHistoryCapability(),
-  );
   const mcp = createMcpHttpAdapter({
     allowedHostnames: mcpAllowedHostnames,
     allowedOriginHostnames: mcpAllowedHostnames,
@@ -594,10 +522,7 @@ export function createHttpApp(
     applicationRuntime: dependencies.applicationRuntime,
     contentDomain: dependencies.contentDomain,
     defaultAccessSetting: defaultAccessSetting(dependencies.browserAccess),
-    gitHistory,
-    linkedArtifacts: dependencies.linkedArtifacts === true,
     mode: dependencies.trustedApplicationOrigin === null ? "local" : "remote",
-    oauthResource: dependencies.mcpOAuthResource?.resource ?? null,
   });
   const boundedJsonBody = bodyLimit({
     maxSize: maximumJsonRequestBytes,
@@ -653,48 +578,6 @@ export function createHttpApp(
         },
         413,
       ),
-  });
-
-  if (dependencies.mcpOAuthResource !== undefined) {
-    const resourceServerUrl = new URL(
-      dependencies.mcpOAuthResource.resource,
-    );
-    const metadataOptions = {
-      oauthMetadata:
-        dependencies.mcpOAuthResource.authorizationServerMetadata,
-      resourceName: "Artifact Server MCP",
-      resourceServerUrl,
-    };
-    const protectedMetadata = {
-      ...buildOAuthProtectedResourceMetadata(metadataOptions),
-      bearer_methods_supported: ["header"],
-    };
-    const protectedMetadataPath = new URL(
-      getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
-    ).pathname;
-    app.get(
-      protectedMetadataPath,
-      (context) => context.json(protectedMetadata),
-    );
-  }
-
-  app.use("*", async (context, next) => {
-    if (dependencies.mcpOAuthResource !== undefined) {
-      const response = oauthMetadataResponse(
-        context.req.raw,
-        {
-          oauthMetadata:
-            dependencies.mcpOAuthResource.authorizationServerMetadata,
-          resourceName: "Artifact Server MCP",
-          resourceServerUrl: new URL(dependencies.mcpOAuthResource.resource),
-        },
-      );
-      if (response !== undefined) {
-        context.res = response;
-        return;
-      }
-    }
-    await next();
   });
 
   app.use("*", async (context, next) => {
@@ -806,18 +689,6 @@ export function createHttpApp(
           context,
           requestUrl,
           contentToken,
-          dependencies,
-        );
-      }
-      // A live-origin host is artifact-scoped: it streams a linked source's
-      // current bytes to authenticated local members and never serves any
-      // immutable version route. Everywhere the capability is absent the
-      // application service answers the stable capability-unavailable shape.
-      if (isLiveContentToken(contentToken)) {
-        return serveLiveContent(
-          context,
-          contentToken,
-          context.req.header("cookie"),
           dependencies,
         );
       }
@@ -974,16 +845,6 @@ export function createHttpApp(
   app.get("/health", (context) =>
     context.json({status: "ok" as const}),
   );
-
-  app.get("/.well-known/oauth-protected-resource/api", (context) => {
-    if (dependencies.apiOAuthResource === undefined) return context.notFound();
-    return context.json({
-      authorization_servers: dependencies.apiOAuthResource.authorizationServers,
-      bearer_methods_supported: ["header"],
-      resource: dependencies.apiOAuthResource.resource,
-      scopes_supported: ["artifactserver"],
-    });
-  });
 
   app.get("/ready", async (context) => {
     const lifecycle = dependencies.runtimeLifecycle?.current() ?? "ready";
@@ -1169,44 +1030,11 @@ export function createHttpApp(
     return context.redirect("/", 303);
   });
 
-  app.get("/auth/login", async (context) => {
-    const query = interactiveLoginQuerySchema.parse(context.req.query());
-    const started = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      InteractiveLoginService.use((login) => login.start(query.returnTo)),
-    );
-    setLoginHandshakeCookie(context, dependencies, started.handshake);
-    context.header("Cache-Control", "private, no-store");
-    return context.redirect(started.authorizationUrl, 302);
-  });
-
-  app.get("/auth/callback", async (context) => {
-    const query = interactiveCallbackSchema.parse(context.req.query());
-    const handshake = getCookie(
-      context,
-      applicationCookieNames(dependencies).handshake,
-    ) ?? null;
-    const completed = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      InteractiveLoginService.use((login) =>
-        login.complete({...query, handshake})
-      ),
-    );
-    clearLoginHandshakeCookie(context, dependencies);
-    setApplicationSessionCookies(context, dependencies, completed.issued);
-    context.header("Cache-Control", "private, no-store");
-    context.header("Referrer-Policy", "no-referrer");
-    return context.redirect(completed.returnTo, 303);
-  });
-
   app.get("/api/v1/session", (context) =>
     context.json({
       authenticationMethod: context.get("authenticationMethod"),
       capabilities: {
-        gitHistory: gitHistory.read(),
-        linkedArtifacts: dependencies.linkedArtifacts === true,
+        editing: {maximumTextFileBytes: maximumEditableTextBytes},
       },
       principal: context.get("principal"),
     }));
@@ -1676,81 +1504,6 @@ export function createHttpApp(
     return context.json({project});
   });
 
-  app.get("/api/v1/projects/:projectId/git-history", async (context) => {
-    const projectGitHistory = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      ProjectGitHistoryService.use((service) => service.read({
-        principal: context.get("principal"),
-        projectId: projectIdSchema.parse(context.req.param("projectId")),
-      })),
-    );
-    return context.json({gitHistory: projectGitHistory});
-  });
-
-  app.post(
-    "/api/v1/projects/:projectId/git-history/estimate",
-    async (context) => {
-      const estimate = await runHttpApplicationEffect(
-        context,
-        dependencies,
-        ProjectGitHistoryService.use((service) => service.estimate({
-          principal: context.get("principal"),
-          projectId: projectIdSchema.parse(context.req.param("projectId")),
-        })),
-      );
-      return context.json({estimate});
-    },
-  );
-
-  app.put(
-    "/api/v1/projects/:projectId/git-history",
-    boundedJsonBody,
-    async (context) => {
-      const body = setProjectGitHistorySchema.parse(await context.req.json());
-      const command = body.enabled
-        ? {
-          confirmEstimate: true as const,
-          enabled: true as const,
-          principal: context.get("principal"),
-          projectId: projectIdSchema.parse(context.req.param("projectId")),
-        }
-        : {
-          enabled: false as const,
-          principal: context.get("principal"),
-          projectId: projectIdSchema.parse(context.req.param("projectId")),
-        };
-      const projectGitHistory = await runHttpApplicationEffect(
-        context,
-        dependencies,
-        ProjectGitHistoryService.use((service) => service.set(command)),
-      );
-      return context.json({gitHistory: projectGitHistory});
-    },
-  );
-
-  app.post(
-    "/api/v1/projects/:projectId/artifacts/:artifactId/history/clone-token",
-    boundedJsonBody,
-    async (context) => {
-      const body = issueGitCloneCredentialSchema.parse(
-        await context.req.json().catch(() => ({})),
-      );
-      const clone = await runHttpApplicationEffect(
-        context,
-        dependencies,
-        GitHistoryAccessService.use((service) => service.issueCloneCredential({
-          artifactId: context.req.param("artifactId"),
-          principal: context.get("principal"),
-          projectId: projectIdSchema.parse(context.req.param("projectId")),
-          ttlSeconds: body.ttlSeconds,
-        })),
-      );
-      context.header("Cache-Control", "private, no-store");
-      return context.json(clone, 201);
-    },
-  );
-
   app.post("/api/v1/artifacts", (context) => {
     context.header("Allow", "GET");
     return context.json({
@@ -1774,6 +1527,7 @@ export function createHttpApp(
           comments: query.comments,
           cursor: decodePageCursor(query.cursor),
           limit: query.limit,
+          owner: query.owner,
           principal: context.get("principal"),
           projectId: requestedProjectId(context),
           search: query.search ?? null,
@@ -1790,43 +1544,22 @@ export function createHttpApp(
   });
 
   app.get("/api/v1/artifacts/:artifactId", async (context) => {
-    const read = await runHttpApplicationEffect(
+    const details = await runHttpApplicationEffect(
       context,
       dependencies,
-      Effect.gen(function*() {
-        const management = yield* ArtifactManagementService;
-        const details = yield* management.getArtifact({
+      ArtifactManagementService.use((management) =>
+        management.getArtifact({
           artifactId: context.req.param("artifactId"),
           principal: context.get("principal"),
           projectId: requestedProjectId(context),
-        });
-        // The binding observation is a lazy local-deployment decoration;
-        // everywhere else the disabled service answers null and the read
-        // shape stays exactly what it is today.
-        const linked = yield* LinkedArtifactService;
-        const binding = dependencies.linkedArtifacts === true
-          ? yield* linked.observeBinding({
-            artifactId: details.artifact.id,
-            principal: context.get("principal"),
-            projectId: details.artifact.projectId,
-          })
-          : null;
-        return {binding, details};
-      }),
+        })
+      ),
     );
-    const requestUrl = responseApplicationUrl(context, dependencies);
-    const response = artifactDetailsResponse(
-      requestUrl,
+    return context.json(artifactDetailsResponse(
+      responseApplicationUrl(context, dependencies),
       dependencies.contentDomain,
-      read.details,
-    );
-    if (read.binding === null) return context.json(response);
-    const live = liveLink(requestUrl, dependencies, read.details.artifact.id);
-    return context.json({
-      ...response,
-      links: live === null ? response.links : {...response.links, live},
-      sourceBinding: sourceBindingResponse(read.binding),
-    });
+      details,
+    ));
   });
 
   app.get("/api/v1/artifacts/:artifactId/versions", async (context) => {
@@ -1850,6 +1583,35 @@ export function createHttpApp(
         version,
       )),
     });
+  });
+
+  app.get("/api/v1/analytics", async (context) => {
+    const report = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ProjectAnalyticsService.use((analytics) =>
+        analytics.readProjectActivity({
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json(report);
+  });
+
+  app.get("/api/v1/artifacts/:artifactId/analytics", async (context) => {
+    const report = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ProjectAnalyticsService.use((analytics) =>
+        analytics.readArtifactActivity({
+          artifactId: context.req.param("artifactId"),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json(report);
   });
 
   app.get("/api/v1/artifacts/:artifactId/actions", async (context) => {
@@ -2307,6 +2069,35 @@ export function createHttpApp(
     },
   );
 
+  app.patch(
+    "/api/v1/artifacts/:artifactId/name",
+    boundedJsonBody,
+    async (context) => {
+      const body = renameArtifactSchema.parse(await context.req.json());
+      const state = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ArtifactManagementService.use((management) =>
+          management.renameArtifact({
+            artifactId: context.req.param("artifactId"),
+            expectedCurrentVersionId: body.expectedCurrentVersionId,
+            idempotencyKey: requiredIdempotencyKey(
+              context.req.header("idempotency-key"),
+            ),
+            name: body.name,
+            principal: context.get("principal"),
+            projectId: requestedProjectId(context),
+          })
+        ),
+      );
+      return context.json(artifactStateResponse(
+        responseApplicationUrl(context, dependencies),
+        dependencies.contentDomain,
+        state,
+      ));
+    },
+  );
+
   app.delete(
     "/api/v1/artifacts/:artifactId",
     boundedJsonBody,
@@ -2538,104 +2329,6 @@ export function createHttpApp(
     },
   );
 
-  app.post("/api/v1/artifacts/link", boundedJsonBody, async (context) => {
-    requireLinkedRequest(context, dependencies);
-    const body = linkArtifactSchema.parse(await context.req.json());
-    let linkCommand: Parameters<
-      LinkedArtifactService["Service"]["linkArtifact"]
-    >[0] = {
-      idempotencyKey: requiredIdempotencyKey(
-        context.req.header("idempotency-key"),
-      ),
-      path: body.path,
-      principal: context.get("principal"),
-      projectId: body.projectId ?? requestedProjectId(context),
-    };
-    if (body.name !== undefined) {
-      linkCommand = {...linkCommand, name: body.name};
-    }
-    const linkedPublication = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      LinkedArtifactService.use((linked) => linked.linkArtifact(linkCommand)),
-    );
-    return context.json(
-      linkedPublicationResponse(context, dependencies, linkedPublication),
-      201,
-    );
-  });
-
-  app.post("/api/v1/artifacts/:artifactId/capture", boundedJsonBody, async (context) => {
-    requireLinkedRequest(context, dependencies);
-    const body = captureArtifactSchema.parse(await context.req.json());
-    const linkedPublication = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      LinkedArtifactService.use((linked) =>
-        linked.captureArtifact({
-          artifactId: context.req.param("artifactId"),
-          expectedCurrentVersionId: body.expectedCurrentVersionId,
-          idempotencyKey: requiredIdempotencyKey(
-            context.req.header("idempotency-key"),
-          ),
-          principal: context.get("principal"),
-          projectId: requestedProjectId(context),
-        })
-      ),
-    );
-    return context.json(
-      linkedPublicationResponse(context, dependencies, linkedPublication),
-      201,
-    );
-  });
-
-  app.put("/api/v1/artifacts/:artifactId/source", boundedJsonBody, async (context) => {
-    requireLinkedRequest(context, dependencies);
-    const body = relinkArtifactSchema.parse(await context.req.json());
-    const binding = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      LinkedArtifactService.use((linked) =>
-        linked.relinkArtifact({
-          artifactId: context.req.param("artifactId"),
-          expectedSha256: body.expectedSha256,
-          idempotencyKey: requiredIdempotencyKey(
-            context.req.header("idempotency-key"),
-          ),
-          path: body.path,
-          principal: context.get("principal"),
-          projectId: requestedProjectId(context),
-        })
-      ),
-    );
-    return context.json({sourceBinding: sourceBindingResponse(binding)});
-  });
-
-  app.post("/api/v1/artifacts/:artifactId/live-sessions", async (context) => {
-    assertCookieSessionsAvailable(dependencies.contentDomain);
-    requireLinkedRequest(context, dependencies);
-    const issued = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      LinkedArtifactService.use((linked) =>
-        linked.issueLiveBootstrap({
-          artifactId: context.req.param("artifactId"),
-          principal: context.get("principal"),
-          projectId: requestedProjectId(context),
-        })
-      ),
-    );
-    return context.json({
-      bootstrapUrl: contentBootstrapBrowserUrl(
-        responseApplicationUrl(context, dependencies),
-        dependencies.contentDomain,
-        issued.contentToken,
-        Redacted.value(issued.token),
-      ),
-      expiresAt: issued.expiresAt,
-    }, 201);
-  });
-
   app.get("/artifacts/:artifactId", async (context) => {
     const current = await runHttpApplicationEffect(
       context,
@@ -2683,10 +2376,7 @@ export function createHttpApp(
         headers.set("Cache-Control", "private, no-store");
       }
       if (error._tag === "AuthenticationRequired") {
-        headers.set(
-          "WWW-Authenticate",
-          apiBearerChallenge(context, dependencies),
-        );
+        headers.set("WWW-Authenticate", "Bearer");
       }
       return Response.json(
         {error: {code: response.code, message: response.message}},
@@ -2733,21 +2423,6 @@ export function createHttpApp(
   return app;
 }
 
-function apiBearerChallenge(
-  context: {readonly req: {readonly path: string}},
-  dependencies: HttpAppDependencies,
-): string {
-  if (
-    dependencies.apiOAuthResource === undefined
-    || !context.req.path.startsWith("/api/")
-  ) return "Bearer";
-  const metadata = new URL(
-    "/.well-known/oauth-protected-resource/api",
-    dependencies.apiOAuthResource.resource,
-  );
-  return `Bearer resource_metadata="${metadata.toString()}" scope="artifactserver"`;
-}
-
 function setApplicationSessionCookies(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
@@ -2772,30 +2447,6 @@ function setApplicationSessionCookies(
   });
 }
 
-function setLoginHandshakeCookie(
-  context: Context<HttpEnvironment>,
-  dependencies: HttpAppDependencies,
-  handshake: string,
-): void {
-  setCookie(context, applicationCookieNames(dependencies).handshake, handshake, {
-    httpOnly: true,
-    maxAge: loginHandshakeMaxAgeSeconds,
-    path: "/",
-    sameSite: "Lax",
-    secure: usesSecureApplicationCookies(dependencies),
-  });
-}
-
-function clearLoginHandshakeCookie(
-  context: Context<HttpEnvironment>,
-  dependencies: HttpAppDependencies,
-): void {
-  deleteCookie(context, applicationCookieNames(dependencies).handshake, {
-    path: "/",
-    secure: usesSecureApplicationCookies(dependencies),
-  });
-}
-
 function clearApplicationSessionCookies(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
@@ -2810,18 +2461,15 @@ function applicationCookieNames(
   dependencies: HttpAppDependencies,
 ): {
   readonly csrf: string;
-  readonly handshake: string;
   readonly session: string;
 } {
   return usesSecureApplicationCookies(dependencies)
     ? {
       csrf: secureApplicationCsrfCookie,
-      handshake: secureLoginHandshakeCookie,
       session: secureApplicationSessionCookie,
     }
     : {
       csrf: applicationCsrfCookie,
-      handshake: loginHandshakeCookie,
       session: applicationSessionCookie,
     };
 }
@@ -3067,65 +2715,6 @@ function publishResponse(
   };
 }
 
-/**
- * Fast deployment gate for linked-artifact routes: the capability exists
- * only on a local deployment (loopback application origin) that enabled it.
- * The application service enforces the same boundary; this check just keeps
- * the stable capability-unavailable answer cheap and origin-checked.
- */
-function requireLinkedRequest(
-  context: Context<HttpEnvironment>,
-  dependencies: HttpAppDependencies,
-): void {
-  const hostname = new URL(context.req.url).hostname;
-  if (dependencies.linkedArtifacts !== true || !isLoopbackHostname(hostname)) {
-    throw new CapabilityUnavailable({
-      message: "Linked artifacts are not available on this deployment.",
-    });
-  }
-}
-
-function sourceBindingResponse(binding: SourceBindingRecord) {
-  return {
-    lastVerifiedAt: binding.lastVerifiedAt,
-    path: binding.path,
-    status: binding.freshness,
-  };
-}
-
-function liveLink(
-  requestUrl: URL,
-  dependencies: HttpAppDependencies,
-  artifactId: string,
-): string | null {
-  const token = liveContentToken(artifactId);
-  if (token === null) return null;
-  return versionBrowserUrl(requestUrl, dependencies.contentDomain, token);
-}
-
-function linkedPublicationResponse(
-  context: Context<HttpEnvironment>,
-  dependencies: HttpAppDependencies,
-  linkedPublication: LinkedPublication,
-) {
-  const requestUrl = responseApplicationUrl(context, dependencies);
-  const response = publishResponse(
-    requestUrl,
-    dependencies.contentDomain,
-    linkedPublication.published,
-  );
-  const live = liveLink(
-    requestUrl,
-    dependencies,
-    linkedPublication.published.artifact.id,
-  );
-  return {
-    ...response,
-    links: live === null ? response.links : {...response.links, live},
-    sourceBinding: sourceBindingResponse(linkedPublication.binding),
-  };
-}
-
 function artifactDetailsResponse(
   requestUrl: URL,
   contentDomain: string | null,
@@ -3151,12 +2740,20 @@ function artifactDetailsResponse(
 function artifactPageResponse(
   requestUrl: URL,
   contentDomain: string | null,
-  page: ArtifactPage,
+  page: ArtifactPageWithViews,
 ) {
   return {
-    artifacts: page.items.map(({commentCount, versionCount, ...artifact}) => ({
+    artifacts: page.items.map(({
+      commentCount,
+      currentVersionCreatedAt,
+      currentVersionNumber,
+      versionCount,
+      views,
+      ...artifact
+    }) => ({
       artifact,
       commentCount,
+      currentVersionNumber,
       links: {
         artifact: artifactBrowserUrl(requestUrl, contentDomain, artifact),
         management: new URL(
@@ -3164,7 +2761,10 @@ function artifactPageResponse(
           requestUrl,
         ).toString(),
       },
+      owner: artifact.owner,
+      updatedAt: currentVersionCreatedAt,
       versionCount,
+      views,
     })),
     nextCursor: encodePageCursor(page.nextCursor),
   };
@@ -3572,80 +3172,6 @@ function comparisonResponse(
       ),
     },
   };
-}
-
-/**
- * Serve one live-origin read: the linked source's current bytes for an
- * authorized local member, or the last captured version's bytes when the
- * source is unavailable. Live responses are never cached; the immutable
- * caching story belongs exclusively to version-scoped origins.
- */
-async function serveLiveContent(
-  context: Context<HttpEnvironment>,
-  liveToken: string,
-  cookieHeader: string | undefined,
-  dependencies: HttpAppDependencies,
-): Promise<Response> {
-  const method = context.req.method;
-  if (method !== "GET" && method !== "HEAD") {
-    return Response.json(
-      {error: {code: errorCodes.methodNotAllowed, message: "Only GET and HEAD are supported."}},
-      {status: 405, headers: {Allow: "GET, HEAD"}},
-    );
-  }
-  const grant: LiveReadGrant = await runHttpApplicationEffect(
-    context,
-    dependencies,
-    LinkedArtifactService.use((linked) =>
-      linked.authorizeLiveRead({
-        liveToken,
-        sessionToken: contentSessionToken(cookieHeader),
-      })
-    ),
-  );
-  if (grant.kind === "captured") {
-    const headers = liveContentHeaders(
-      grant.entry.mediaType,
-      grant.entry.size,
-      grant.freshness,
-      grant.entry.disposition,
-    );
-    if (method === "HEAD") return new Response(null, {headers, status: 200});
-    const blob = await dependencies.blobs.open(grant.entry.sha256);
-    if (blob.size !== grant.entry.size) {
-      await blob.body.cancel();
-      assertBlobSize(blob.size, grant.entry.size, grant.entry.sha256);
-    }
-    return new Response(blob.body, {headers, status: 200});
-  }
-  const headers = liveContentHeaders(
-    grant.mediaType,
-    grant.source.size,
-    grant.freshness,
-    "inline",
-  );
-  if (method === "HEAD") {
-    await grant.source.close();
-    return new Response(null, {headers, status: 200});
-  }
-  return new Response(grant.source.stream(), {headers, status: 200});
-}
-
-function liveContentHeaders(
-  mediaType: string,
-  size: number,
-  freshness: string,
-  disposition: string,
-): Headers {
-  return new Headers({
-    "Artifact-Source-Freshness": freshness,
-    "Cache-Control": "private, no-store",
-    "Content-Disposition": disposition,
-    "Content-Length": String(size),
-    "Content-Type": mediaType,
-    "X-Content-Type-Options": "nosniff",
-    "X-Robots-Tag": "noindex, nofollow",
-  });
 }
 
 async function serveVersionContent(

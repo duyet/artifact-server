@@ -1,9 +1,17 @@
 import type { ReactNode } from "react";
 
 import { ApiError } from "@/api/client";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
 import { errorMessage } from "@/lib/presentation";
 
 /** Primary heading and actions for a management screen. */
@@ -19,18 +27,18 @@ export function PageHeader({
   readonly title: string;
 }) {
   return (
-    <header className="flex flex-col gap-5 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
-      <div className="min-w-0">
+    <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-1.5">
         {eyebrow === undefined ? null : (
-          <p className="mb-2 font-mono text-xs font-semibold tracking-widest text-primary uppercase">
+          <p className="font-mono text-xs font-medium tracking-widest text-muted-foreground uppercase">
             {eyebrow}
           </p>
         )}
-        <h1 className="font-heading text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl">
+        <h1 className="font-heading text-2xl leading-tight font-semibold tracking-tight text-balance">
           {title}
         </h1>
         {description === undefined ? null : (
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground text-pretty">
             {description}
           </p>
         )}
@@ -53,13 +61,13 @@ export function StatePanel({
   readonly title: string;
 }) {
   return (
-    <section className="flex min-h-56 flex-col items-start justify-center border p-6 sm:p-8">
-      <h2 className="font-heading text-lg font-semibold">{title}</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-        {description}
-      </p>
-      {action === undefined ? null : <div className="mt-5">{action}</div>}
-    </section>
+    <Empty className="min-h-56 border">
+      <EmptyHeader>
+        <EmptyTitle aria-level={2} role="heading">{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      {action === undefined ? null : <EmptyContent>{action}</EmptyContent>}
+    </Empty>
   );
 }
 
@@ -82,17 +90,17 @@ export function ErrorPanel({
       ? "Artifact changed"
       : "Request failed";
   return (
-    <StatePanel
-      action={onRetry === undefined
-        ? undefined
-        : (
-          <Button onClick={onRetry} type="button" variant="outline">
+    <Alert variant="destructive">
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>
+        <p>{errorMessage(error)}</p>
+        {onRetry === undefined ? null : (
+          <Button className="mt-2" onClick={onRetry} size="sm" type="button" variant="outline">
             {conflict ? "Reload artifact" : "Try again"}
           </Button>
         )}
-      description={errorMessage(error)}
-      title={title}
-    />
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -105,13 +113,7 @@ export function StatusBadge({
   readonly tone?: "danger" | "neutral" | "primary";
 }) {
   return (
-    <Badge
-      className={cn(
-        tone === "primary" && "text-primary",
-        tone === "danger" && "text-destructive",
-      )}
-      variant={tone === "danger" ? "destructive" : "secondary"}
-    >
+    <Badge variant={tone === "danger" ? "destructive" : tone === "primary" ? "default" : "secondary"}>
       {children}
     </Badge>
   );
@@ -127,10 +129,15 @@ export function MetadataRow({
 }) {
   return (
     <div className="grid gap-1 border-b py-3 last:border-b-0 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-      <dt className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+      <dt className="text-sm text-muted-foreground">
         {label}
       </dt>
       <dd className="min-w-0 break-words text-sm">{children}</dd>
     </div>
   );
+}
+
+/** Inline-start spinner for a pending button; hidden so it never changes the button's accessible name. */
+export function ButtonSpinner() {
+  return <Spinner aria-hidden="true" data-icon="inline-start" role="presentation" />;
 }

@@ -15,25 +15,16 @@ export const errorCodes = {
   contentBootstrapRejected: "CONTENT_BOOTSTRAP_REJECTED",
   contentNotPublic: "CONTENT_NOT_PUBLIC",
   idempotencyConflict: "IDEMPOTENCY_CONFLICT",
-  identityAdmissionDenied: "IDENTITY_ADMISSION_DENIED",
   identityConflict: "IDENTITY_CONFLICT",
   identityNotFound: "IDENTITY_NOT_FOUND",
-  identityProviderFailure: "IDENTITY_PROVIDER_FAILURE",
-  interactiveLoginUnavailable: "INTERACTIVE_LOGIN_UNAVAILABLE",
   invalidComment: "INVALID_COMMENT",
   invalidDispatch: "INVALID_DISPATCH",
   invalidInput: "INVALID_INPUT",
-  invalidLinkPath: "INVALID_LINK_PATH",
   invalidManifestPath: "INVALID_MANIFEST_PATH",
-  linkPathOutsideRoots: "LINK_PATH_OUTSIDE_ROOTS",
-  linkPathProtected: "LINK_PATH_PROTECTED",
   methodNotAllowed: "METHOD_NOT_ALLOWED",
   mediaPreviewContextRequired: "MEDIA_PREVIEW_CONTEXT_REQUIRED",
   mediaPreviewTypeUnsupported: "MEDIA_PREVIEW_TYPE_UNSUPPORTED",
   capabilityUnavailable: "CAPABILITY_UNAVAILABLE",
-  sourceDrifted: "SOURCE_DRIFTED",
-  sourceMissing: "SOURCE_MISSING",
-  sourceUnreadable: "SOURCE_UNREADABLE",
   publishConflict: "PUBLISH_CONFLICT",
   rateLimited: "RATE_LIMITED",
   projectArchived: "PROJECT_ARCHIVED",
@@ -77,12 +68,6 @@ export class AuthenticationRequired extends Schema.TaggedError<AuthenticationReq
   messageField,
 ) {}
 
-/** A verified external identity is not admitted to this installation. */
-export class IdentityAdmissionDenied extends Schema.TaggedError<IdentityAdmissionDenied>()(
-  "IdentityAdmissionDenied",
-  messageField,
-) {}
-
 /** An identity-management command conflicts with current installation state. */
 export class IdentityConflict extends Schema.TaggedError<IdentityConflict>()(
   "IdentityConflict",
@@ -95,19 +80,7 @@ export class IdentityNotFound extends Schema.TaggedError<IdentityNotFound>()(
   messageField,
 ) {}
 
-/** Interactive browser login is not configured for this installation. */
-export class InteractiveLoginUnavailable extends Schema.TaggedError<InteractiveLoginUnavailable>()(
-  "InteractiveLoginUnavailable",
-  messageField,
-) {}
-
-/** A configured external identity provider could not complete its operation. */
-export class IdentityProviderFailure extends Schema.TaggedError<IdentityProviderFailure>()(
-  "IdentityProviderFailure",
-  messageField,
-) {}
-
-/** An interactive login attempt is invalid, expired, or already consumed. */
+/** A local browser login attempt is invalid, expired, or already consumed. */
 export class LoginAttemptRejected extends Schema.TaggedError<LoginAttemptRejected>()(
   "LoginAttemptRejected",
   messageField,
@@ -182,6 +155,12 @@ export class VersionNotFound extends Schema.TaggedError<VersionNotFound>()(
 /** An artifact name cannot be parsed into the supported domain value. */
 export class InvalidArtifactName extends Schema.TaggedError<InvalidArtifactName>()(
   "InvalidArtifactName",
+  messageField,
+) {}
+
+/** An edit commit does not name one editable text file of its base version. */
+export class InvalidArtifactEdit extends Schema.TaggedError<InvalidArtifactEdit>()(
+  "InvalidArtifactEdit",
   messageField,
 ) {}
 
@@ -317,46 +296,6 @@ export class ContentNotPublic extends Schema.TaggedError<ContentNotPublic>()(
   messageField,
 ) {}
 
-/**
- * A presented link path cannot become a source binding. Messages never carry
- * the path itself, so surfaced or logged failures disclose no filesystem
- * layout.
- */
-export class InvalidLinkPath extends Schema.TaggedError<InvalidLinkPath>()(
-  "InvalidLinkPath",
-  messageField,
-) {}
-
-/** A canonicalized link path resolves outside every configured link root. */
-export class LinkPathOutsideRoots extends Schema.TaggedError<LinkPathOutsideRoots>()(
-  "LinkPathOutsideRoots",
-  messageField,
-) {}
-
-/** A canonicalized link path selects Artifact Server's own durable state. */
-export class LinkPathProtected extends Schema.TaggedError<LinkPathProtected>()(
-  "LinkPathProtected",
-  messageField,
-) {}
-
-/** A linked source changed while its bytes were being read; retry the read. */
-export class SourceDrifted extends Schema.TaggedError<SourceDrifted>()(
-  "SourceDrifted",
-  messageField,
-) {}
-
-/** A linked source file no longer exists at its bound canonical path. */
-export class SourceMissing extends Schema.TaggedError<SourceMissing>()(
-  "SourceMissing",
-  messageField,
-) {}
-
-/** A linked source file exists but cannot be opened as the bound regular file. */
-export class SourceUnreadable extends Schema.TaggedError<SourceUnreadable>()(
-  "SourceUnreadable",
-  messageField,
-) {}
-
 /** A deployment-gated capability is not available on this installation. */
 export class CapabilityUnavailable extends Schema.TaggedError<CapabilityUnavailable>()(
   "CapabilityUnavailable",
@@ -384,7 +323,6 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "createPreviewLease",
       "createStagedUpload",
       "exchangeContentBootstrap",
-      "linkedSource",
       "deleteCommentReply",
       "deleteCommentThread",
       "disconnectRegisteredAgent",
@@ -392,7 +330,6 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "findArtifact",
       "findArtifactByPath",
       "findArtifactForAdministration",
-      "findGitHistoryRepository",
       "findVersionRecord",
       "findCommentThread",
       "findRegisteredAgent",
@@ -427,17 +364,17 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "updateCommentThread",
       "versionContainsPath",
       "createProject",
-      "estimateProjectGitHistory",
       "findProject",
       "listProjects",
-      "readProjectGitHistorySetting",
-      "readProjectGitHistoryProgress",
       "readArtifactViewDays",
+      "readMostViewedArtifacts",
+      "readProjectActivityDays",
+      "readProjectActivityTotals",
+      "renameArtifact",
       "readArtifactViewTotals",
       "recordArtifactViews",
       "renameProject",
       "setProjectArchive",
-      "storeProjectGitHistorySetting",
     ]),
   },
 ) {}
@@ -449,14 +386,12 @@ export class IdentityRepositoryFailure extends Schema.TaggedError<IdentityReposi
     cause: Schema.Defect(),
     operation: Schema.Literals([
       "admitMember",
-      "bindExternalIdentity",
       "consumeLoginAttempt",
       "createApiKey",
       "createApplicationSession",
       "createLoginAttempt",
       "deactivateMember",
       "findActiveMemberByEmail",
-      "findActiveMemberByExternalIdentity",
       "findMember",
       "findApiKey",
       "findApplicationSession",
@@ -500,15 +435,13 @@ const artifactServerFailureSchema = Schema.Union([
   DispatchStateConflict,
   InvalidComment,
   InvalidDispatch,
-  IdentityAdmissionDenied,
   IdentityConflict,
   IdentityNotFound,
-  IdentityProviderFailure,
-  InteractiveLoginUnavailable,
   LoginAttemptRejected,
   AuthorizationDenied,
   ContentBootstrapRejected,
   ContentSessionRequired,
+  InvalidArtifactEdit,
   InvalidArtifactName,
   InvalidArtifactPath,
   InvalidProjectName,
@@ -533,12 +466,6 @@ const artifactServerFailureSchema = Schema.Union([
   UploadNotFound,
   VersionNotFound,
   ContentNotPublic,
-  InvalidLinkPath,
-  LinkPathOutsideRoots,
-  LinkPathProtected,
-  SourceDrifted,
-  SourceMissing,
-  SourceUnreadable,
   CapabilityUnavailable,
   ArtifactRepositoryFailure,
   IdentityRepositoryFailure,

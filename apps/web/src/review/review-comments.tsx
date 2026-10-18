@@ -29,6 +29,31 @@ import {
   useCommentListOwnership,
   useCommentPoll,
 } from "@/components/comments/comment-poll";
+import {Alert, AlertDescription} from "@/components/ui/alert";
+import {Avatar, AvatarFallback} from "@/components/ui/avatar";
+import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
+import {Empty, EmptyHeader, EmptyTitle} from "@/components/ui/empty";
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+  MessageFooter,
+  MessageGroup,
+  MessageHeader,
+} from "@/components/ui/message";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  useMessageScroller,
+} from "@/components/ui/message-scroller";
+import {Skeleton} from "@/components/ui/skeleton";
+import {Spinner} from "@/components/ui/spinner";
+import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 import {formatTimestamp} from "@/lib/presentation";
 import {bundleOfThreads} from "@/components/dispatch/dispatch-bundle";
 import {loadDispatchIndex} from "@/components/dispatch/dispatch-index";
@@ -497,20 +522,21 @@ function ReplyComposer({
 
   if (!expanded) {
     return (
-      <div className="as-comment-reply-composer" data-expanded="false">
-        <button
-          className="as-button as-comment-reply-trigger"
+      <div data-expanded="false">
+        <Button
           onClick={() => setExpanded(true)}
+          size="xs"
           type="button"
+          variant="outline"
         >
           Reply
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="as-comment-reply-composer" data-expanded="true">
+    <div data-expanded="true">
       <CommentComposer
         cancelLabel="Cancel"
         draftRestored={draft.restored}
@@ -542,7 +568,40 @@ function ReplyComposer({
   );
 }
 
-type CommentView = "all" | "open" | "resolved" | "sent";
+const commentViews = ["open", "all", "resolved", "sent"] as const;
+type CommentView = (typeof commentViews)[number];
+
+function isCommentView(value: string): value is CommentView {
+  return commentViews.some((view) => view === value);
+}
+
+/** MessageAvatar is built for bottom-aligned chat bubbles; threads read top-down. */
+const topAlignedAvatar =
+  "min-w-0 self-start bg-transparent group-has-data-[slot=message-footer]/message:translate-y-0";
+
+function initialsOf(name: string): string {
+  const letters = name.trim().split(/\s+/u).slice(0, 2).flatMap((part) =>
+    Array.from(part).slice(0, 1)
+  );
+  return letters.join("").toUpperCase() || "?";
+}
+
+function AuthorAvatar({name}: {readonly name: string}) {
+  return (
+    <Avatar size="sm">
+      <AvatarFallback>{initialsOf(name)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
+/** Brings the annotation clicked in the preview into view in the thread list. */
+function ScrollToSelectedThread({threadId}: {readonly threadId: string | null}) {
+  const {scrollToMessage} = useMessageScroller();
+  useEffect(() => {
+    if (threadId !== null) scrollToMessage(threadId, {align: "nearest", behavior: "smooth"});
+  }, [scrollToMessage, threadId]);
+  return null;
+}
 
 export interface ReviewCommentsInspectorHandle {
   readonly reload: () => Promise<void>;
@@ -663,215 +722,269 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
   };
 
   return (
-    <div className="as-comments">
+    <MessageScrollerProvider defaultScrollPosition="start">
       {dispatchUndo.element}
-      <div className="as-comments__agents">
-        <div>
-          <strong>Agents</strong>
-          <span>{agentPresenceSummary(agents)}</span>
-        </div>
-        <div aria-label="Agent presence" role="group">
-          {agents?.map((agent) => (
-            <PresenceAvatar agent={agent} key={agent.id} now={now} />
-          ))}
-        </div>
-      </div>
-      {agentError === null ? null : (
-        <p className="as-comments__agent-error">{agentError.message}</p>
-      )}
-      {canComment ? (
-        <div className="as-comments__send-all">
-          <SendToAgentControl
-            agents={agents}
-            buttonSize="xs"
-            buttonVariant="default"
-            feedback={dispatchUndo.feedback}
-            label={`Send all open (${openThreads.length})…`}
-            onSent={onSent}
-            oneAgentLabel={(name) => `Send all open (${openThreads.length}) to ${name}`}
-            openCount={openThreads.length}
-            principalId={principalId}
-            projectId={session.projectId}
-            resolveBundle={() => Promise.resolve(bundleOfThreads(openThreads))}
-          />
-        </div>
-      ) : null}
-      {canComment ? null : (
-        <p className="as-comments__read-only">
-          Comments are read-only for this account or archived project.
-        </p>
-      )}
-      {session.error === null ? null : (
-        <p className="as-comments__error" role="alert">{session.error.message}</p>
-      )}
-      {sentError === null ? null : (
-        <p className="as-comments__error" role="alert">{sentError.message}</p>
-      )}
-      <nav aria-label="Comment filters" className="as-comments__filters">
-        {(["open", "all", "resolved", "sent"] as const).map((candidate) => (
-          <button
-            aria-pressed={view === candidate}
-            className="as-button"
-            key={candidate}
-            onClick={() => setView(candidate)}
-            type="button"
-          >
-            {candidate === "all"
-              ? "All"
-              : candidate === "sent"
-                ? `Sent (${sentThreads.length})`
-                : `${candidate[0]?.toUpperCase()}${candidate.slice(1)}`}
-          </button>
-        ))}
-      </nav>
-      {canComment && versionId !== null && session.artifactId !== null ? (
-        <NewThreadComposer
-          artifactId={session.artifactId}
-          key={`${session.artifactId}-${versionId}`}
-          principalId={principalId}
-          session={session}
-          versionId={versionId}
-        />
-      ) : null}
-      {loadingVisible && visibleThreads.length === 0 ? (
-        <p className="as-inspector-empty">Loading comments…</p>
-      ) : null}
-      {!loadingVisible && visibleThreads.length === 0 ? (
-        <p className="as-inspector-empty">
-          {view === "all"
-            ? "No comments on this version yet."
-            : view === "sent"
-              ? "No sent comments on this version."
-              : view === "open" && resolvedThreads.length > 0
-                ? "All comments on this version are resolved."
-                : `No ${view} comments on this version.`}
-        </p>
-      ) : null}
-      <ol className="as-comment-list">
-        {visibleThreads.map((thread) => {
-          const sentDispatch = view === "sent" ? dispatchByThread.get(thread.id) : undefined;
-          const replies = visibleReplies.get(thread.id) ?? [];
-          return (
-            <li key={thread.id}>
-              <article
-                aria-current={session.selectedThreadId === thread.id ? "true" : undefined}
-                className="as-comment-card"
-                data-selected={session.selectedThreadId === thread.id}
-              >
-                <header>
-                  <strong>{thread.author.displayName}</strong>
-                  {sentDispatch === undefined
-                    ? <span data-state={thread.state}>{thread.state}</span>
-                    : <DispatchStateChip state={sentDispatch.state} />}
-                </header>
-                <div className="as-comment-card__body">
-                  <p>{thread.body}</p>
-                  <footer>
-                    <div className="as-comment-card__meta">
-                      <span>
-                        Updated <time dateTime={thread.updatedAt}>
-                          {formatTimestamp(thread.updatedAt)}
-                        </time>
-                      </span>
-                      <span>
-                        {thread.path === null ? "Whole version" : (
-                          <>Page <code>{thread.path}</code></>
-                        )}
-                      </span>
-                    </div>
-                    {view !== "sent" && unanchored.has(thread.id) ? (
-                      <small>Location unavailable in this version</small>
-                    ) : null}
-                    <div className="as-comment-card__actions">
-                      {view === "sent" ? (
-                        sentDispatch !== undefined && dispatchIsCancelable(sentDispatch.state) ? (
-                          <button
-                            className="as-button"
-                            onClick={() => void cancelDispatch(sentDispatch)}
-                            type="button"
-                          >
-                            Cancel send
-                          </button>
-                        ) : null
-                      ) : (
-                        <>
-                          {canComment && thread.state === "open" ? (
-                            <SendToAgentControl
-                              agents={agents}
-                              buttonSize="xs"
-                              buttonVariant="outline"
-                              feedback={dispatchUndo.feedback}
-                              label="Send…"
-                              onSent={onSent}
-                              oneAgentLabel={(name) => `Send to ${name}`}
-                              openCount={1}
-                              principalId={principalId}
-                              projectId={session.projectId}
-                              reasonDisplay="hidden"
-                              resolveBundle={() => Promise.resolve(bundleOfThreads([thread]))}
-                            />
-                          ) : null}
-                          {thread.path === null ? null : (
-                            <button
-                              className="as-button"
-                              onClick={() => session.selectThread(thread.id)}
-                              type="button"
-                            >
-                              Show in page
-                            </button>
-                          )}
-                          {canComment ? (
-                            <button
-                              className="as-button"
-                              onClick={() => void session.changeState(thread)}
-                              type="button"
-                            >
-                              {thread.state === "open" ? "Resolve" : "Reopen"}
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                  </footer>
+      <MessageScroller>
+        <MessageScrollerViewport aria-label="Review comments">
+          <MessageScrollerContent className="gap-3 p-3" role="presentation">
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-col text-xs">
+                  <strong className="font-medium">Agents</strong>
+                  <span className="truncate text-muted-foreground">
+                    {agentPresenceSummary(agents)}
+                  </span>
                 </div>
-                {replies.length === 0 ? null : (
-                  <section
-                    aria-label={`${replies.length} ${replies.length === 1 ? "reply" : "replies"}`}
-                    className="as-comment-card__conversation"
+                <div
+                  aria-label="Agent presence"
+                  className="flex shrink-0 items-center gap-1"
+                  role="group"
+                >
+                  {agents?.map((agent) => (
+                    <PresenceAvatar agent={agent} key={agent.id} now={now} />
+                  ))}
+                </div>
+              </div>
+              {agentError === null ? null : (
+                <Alert variant="destructive">
+                  <AlertDescription>{agentError.message}</AlertDescription>
+                </Alert>
+              )}
+              {canComment ? (
+                <SendToAgentControl
+                  agents={agents}
+                  buttonSize="xs"
+                  buttonVariant="default"
+                  feedback={dispatchUndo.feedback}
+                  label={`Send all open (${openThreads.length})…`}
+                  onSent={onSent}
+                  oneAgentLabel={(name) => `Send all open (${openThreads.length}) to ${name}`}
+                  openCount={openThreads.length}
+                  principalId={principalId}
+                  projectId={session.projectId}
+                  resolveBundle={() => Promise.resolve(bundleOfThreads(openThreads))}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Comments are read-only for this account or archived project.
+                </p>
+              )}
+              {session.error === null ? null : (
+                <Alert variant="destructive">
+                  <AlertDescription>{session.error.message}</AlertDescription>
+                </Alert>
+              )}
+              {sentError === null ? null : (
+                <Alert variant="destructive">
+                  <AlertDescription>{sentError.message}</AlertDescription>
+                </Alert>
+              )}
+              <ToggleGroup
+                aria-label="Comment filters"
+                className="w-full"
+                onValueChange={(next) => {
+                  const [candidate] = next;
+                  if (candidate !== undefined && isCommentView(candidate)) setView(candidate);
+                }}
+                size="sm"
+                value={[view]}
+                variant="outline"
+              >
+                {commentViews.map((candidate) => (
+                  <ToggleGroupItem className="flex-1" key={candidate} value={candidate}>
+                    {candidate === "all"
+                      ? "All"
+                      : candidate === "sent"
+                        ? `Sent (${sentThreads.length})`
+                        : `${candidate[0]?.toUpperCase()}${candidate.slice(1)}`}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              {canComment && versionId !== null && session.artifactId !== null ? (
+                <NewThreadComposer
+                  artifactId={session.artifactId}
+                  key={`${session.artifactId}-${versionId}`}
+                  principalId={principalId}
+                  session={session}
+                  versionId={versionId}
+                />
+              ) : null}
+            </div>
+            {loadingVisible && visibleThreads.length === 0 ? (
+              <div aria-busy="true" className="flex flex-col gap-3">
+                <span className="sr-only" role="status">Loading comments…</span>
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            ) : null}
+            {!loadingVisible && visibleThreads.length === 0 ? (
+              <Empty className="flex-none border">
+                <EmptyHeader>
+                  <EmptyTitle>
+                    {view === "all"
+                      ? "No comments on this version yet."
+                      : view === "sent"
+                        ? "No sent comments on this version."
+                        : view === "open" && resolvedThreads.length > 0
+                          ? "All comments on this version are resolved."
+                          : `No ${view} comments on this version.`}
+                  </EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            ) : null}
+            {visibleThreads.map((thread) => {
+              const sentDispatch = view === "sent"
+                ? dispatchByThread.get(thread.id)
+                : undefined;
+              const replies = visibleReplies.get(thread.id) ?? [];
+              const selected = session.selectedThreadId === thread.id;
+              return (
+                <MessageScrollerItem key={thread.id} messageId={thread.id}>
+                  <article
+                    aria-current={selected ? "true" : undefined}
+                    className="flex flex-col gap-3 rounded-lg border bg-card p-3 text-card-foreground transition-colors data-[selected=true]:border-ring data-[selected=true]:bg-muted/50"
+                    data-selected={selected}
                   >
-                    <p className="as-comment-card__conversation-label">
-                      {replies.length} {replies.length === 1 ? "reply" : "replies"}
-                    </p>
-                    <ol className="as-comment-replies">
-                      {replies.map((reply) => (
-                        <ReviewReply
-                          canDeleteAny={canDeleteAny}
-                          canMutate={canComment}
-                          key={reply.id}
-                          onDelete={session.deleteReply}
-                          onUpdate={session.updateReply}
-                          principalId={principalId}
-                          reply={reply}
-                        />
-                      ))}
-                    </ol>
-                  </section>
-                )}
-                {view !== "sent" && canComment && thread.state === "open"
-                    && session.artifactId !== null ? (
-                  <ReplyComposer
-                    artifactId={session.artifactId}
-                    principalId={principalId}
-                    session={session}
-                    thread={thread}
-                  />
-                ) : null}
-              </article>
-            </li>
-          );
-        })}
-      </ol>
-    </div>
+                    <Message>
+                      <MessageAvatar className={topAlignedAvatar}>
+                        <AuthorAvatar name={thread.author.displayName} />
+                      </MessageAvatar>
+                      <MessageContent>
+                        <MessageHeader className="gap-2 px-0">
+                          <strong className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                            {thread.author.displayName}
+                          </strong>
+                          {sentDispatch === undefined
+                            ? (
+                              <Badge
+                                className="capitalize"
+                                data-state={thread.state}
+                                variant={thread.state === "open" ? "outline" : "secondary"}
+                              >
+                                {thread.state}
+                              </Badge>
+                            )
+                            : <DispatchStateChip state={sentDispatch.state} />}
+                        </MessageHeader>
+                        <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground">
+                          {thread.body}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                          <span>
+                            Updated <time dateTime={thread.updatedAt}>
+                              {formatTimestamp(thread.updatedAt)}
+                            </time>
+                          </span>
+                          <span>
+                            {thread.path === null ? "Whole version" : (
+                              <>Page <code className="font-mono">{thread.path}</code></>
+                            )}
+                          </span>
+                        </div>
+                        {view !== "sent" && unanchored.has(thread.id) ? (
+                          <p className="text-xs text-muted-foreground">
+                            Location unavailable in this version
+                          </p>
+                        ) : null}
+                        <MessageFooter className="flex-wrap gap-1 px-0">
+                          {view === "sent" ? (
+                            sentDispatch !== undefined
+                              && dispatchIsCancelable(sentDispatch.state) ? (
+                                <Button
+                                  onClick={() => void cancelDispatch(sentDispatch)}
+                                  size="xs"
+                                  type="button"
+                                  variant="outline"
+                                >
+                                  Cancel send
+                                </Button>
+                              ) : null
+                          ) : (
+                            <>
+                              {canComment && thread.state === "open" ? (
+                                <SendToAgentControl
+                                  agents={agents}
+                                  buttonSize="xs"
+                                  buttonVariant="outline"
+                                  feedback={dispatchUndo.feedback}
+                                  label="Send…"
+                                  onSent={onSent}
+                                  oneAgentLabel={(name) => `Send to ${name}`}
+                                  openCount={1}
+                                  principalId={principalId}
+                                  projectId={session.projectId}
+                                  reasonDisplay="hidden"
+                                  resolveBundle={() =>
+                                    Promise.resolve(bundleOfThreads([thread]))}
+                                />
+                              ) : null}
+                              {thread.path === null ? null : (
+                                <Button
+                                  onClick={() => session.selectThread(thread.id)}
+                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  Show in page
+                                </Button>
+                              )}
+                              {canComment ? (
+                                <Button
+                                  onClick={() => void session.changeState(thread)}
+                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  {thread.state === "open" ? "Resolve" : "Reopen"}
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
+                        </MessageFooter>
+                      </MessageContent>
+                    </Message>
+                    {replies.length === 0 ? null : (
+                      <section
+                        aria-label={`${replies.length} ${replies.length === 1 ? "reply" : "replies"}`}
+                        className="flex flex-col gap-3 border-t pt-3"
+                      >
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {replies.length} {replies.length === 1 ? "reply" : "replies"}
+                        </p>
+                        <MessageGroup className="gap-3" role="list">
+                          {replies.map((reply) => (
+                            <ReviewReply
+                              canDeleteAny={canDeleteAny}
+                              canMutate={canComment}
+                              key={reply.id}
+                              onDelete={session.deleteReply}
+                              onUpdate={session.updateReply}
+                              principalId={principalId}
+                              reply={reply}
+                            />
+                          ))}
+                        </MessageGroup>
+                      </section>
+                    )}
+                    {view !== "sent" && canComment && thread.state === "open"
+                        && session.artifactId !== null ? (
+                      <ReplyComposer
+                        artifactId={session.artifactId}
+                        principalId={principalId}
+                        session={session}
+                        thread={thread}
+                      />
+                    ) : null}
+                  </article>
+                </MessageScrollerItem>
+              );
+            })}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+      <ScrollToSelectedThread threadId={session.selectedThreadId} />
+    </MessageScrollerProvider>
   );
 });
 
@@ -900,44 +1013,57 @@ function ReviewReply({
     setDeleting(false);
   };
   return (
-    <li>
-      <header>
-        <strong>{reply.author.displayName}</strong>
-        <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
-      </header>
-      {editing ? (
-        <CommentComposer
-          cancelLabel="Cancel"
-          initialBody={reply.body}
-          inputId={editorId}
-          label="Edit reply"
-          maximumCharacters={maximumCommentBodyCharacters}
-          onCancel={() => setEditing(false)}
-          onSubmit={async (body) => {
-            const changed = await onUpdate(reply, body);
-            if (changed) setEditing(false);
-            return changed;
-          }}
-          submitLabel="Save reply"
-        />
-      ) : <p>{reply.body}</p>}
-      {!canMutate || editing || (!ownReply && !canDeleteAny) ? null : (
-        <div className="as-comment-reply__actions">
-          {ownReply ? (
-            <button className="as-button" onClick={() => setEditing(true)} type="button">
-              Edit
-            </button>
-          ) : null}
-          <button
-            className="as-button"
-            disabled={deleting}
-            onClick={() => void remove()}
-            type="button"
-          >
-            {deleting ? "Deleting…" : "Delete"}
-          </button>
-        </div>
-      )}
-    </li>
+    <Message role="listitem">
+      <MessageAvatar className={topAlignedAvatar}>
+        <AuthorAvatar name={reply.author.displayName} />
+      </MessageAvatar>
+      <MessageContent className="gap-1.5">
+        <MessageHeader className="flex-wrap items-baseline gap-x-2 px-0">
+          <strong className="text-xs font-medium text-foreground">
+            {reply.author.displayName}
+          </strong>
+          <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
+        </MessageHeader>
+        {editing ? (
+          <CommentComposer
+            cancelLabel="Cancel"
+            initialBody={reply.body}
+            inputId={editorId}
+            label="Edit reply"
+            maximumCharacters={maximumCommentBodyCharacters}
+            onCancel={() => setEditing(false)}
+            onSubmit={async (body) => {
+              const changed = await onUpdate(reply, body);
+              if (changed) setEditing(false);
+              return changed;
+            }}
+            submitLabel="Save reply"
+          />
+        ) : (
+          <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground">
+            {reply.body}
+          </p>
+        )}
+        {!canMutate || editing || (!ownReply && !canDeleteAny) ? null : (
+          <MessageFooter className="gap-1 px-0">
+            {ownReply ? (
+              <Button onClick={() => setEditing(true)} size="xs" type="button" variant="ghost">
+                Edit
+              </Button>
+            ) : null}
+            <Button
+              disabled={deleting}
+              onClick={() => void remove()}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              {deleting ? <Spinner aria-hidden data-icon="inline-start" /> : null}
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </MessageFooter>
+        )}
+      </MessageContent>
+    </Message>
   );
 }

@@ -28,20 +28,7 @@ import {
 import {ArtifactManagementService} from "../application/artifact-management.js";
 import {CompareArtifactService} from "../application/compare-artifact.js";
 import {ContentAccessService} from "../application/content-access.js";
-import {
-  LinkedArtifactService,
-  liveContentToken,
-  type LinkArtifactCommand,
-  type LinkedPublication,
-} from "../application/linked-artifacts.js";
 import {ProjectManagementService} from "../application/project-management.js";
-import {ProjectGitHistoryService} from
-  "../application/project-git-history.js";
-import {
-  defaultGitCloneCredentialTtlSeconds,
-  GitHistoryAccessService,
-  maximumGitCloneCredentialTtlSeconds,
-} from "../application/git-history-access.js";
 import {StagedUploadService} from "../application/staged-upload.js";
 import {
   accessSettings,
@@ -59,15 +46,9 @@ import {
   type PublishedVersion,
   type ProjectRecord,
   type RegisteredAgentRecord,
-  type SourceBindingRecord,
   type StagedUpload,
 } from "../core/model.js";
 import {principalKinds, type Principal} from "../core/identity.js";
-import {
-  gitHistoryProviders,
-  gitHistoryProviderStates,
-  type GitHistoryCapability,
-} from "../git-history/git-history-capability.js";
 import {
   maximumCommentAnchorBytes,
   maximumCommentBodyCharacters,
@@ -76,6 +57,7 @@ import {
   maximumDispatchBundleSize,
   maximumDispatchFailureReasonCharacters,
   maximumDispatchNoteCharacters,
+  maximumEditableTextBytes,
   maximumUploadPlanRequestBytes,
 } from "../core/publishing-limits.js";
 import {
@@ -84,8 +66,6 @@ import {
   InvalidDispatch,
   InvalidPagination,
   isArtifactServerFailure,
-  PublishConflict,
-  SourceDrifted,
 } from "../core/errors.js";
 import {
   artifactBrowserUrl,
@@ -131,6 +111,10 @@ const declaredFileSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 }).strict();
+const artifactOwnerSchema = z.object({
+  displayName: z.string().nullable(),
+  principalId: z.string(),
+}).strict();
 const artifactRecordSchema = z.object({
   accessSetting: accessSettingSchema,
   createdAt: z.string(),
@@ -138,6 +122,7 @@ const artifactRecordSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  owner: artifactOwnerSchema,
   path: z.string().nullable(),
   projectId: z.string(),
   tags: z.array(z.string()),
@@ -150,6 +135,7 @@ const versionRecordSchema = z.object({
   id: z.string(),
   manifestDigest: z.string(),
   number: z.number().int().positive(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: z.enum(["static", "spa"]),
@@ -159,27 +145,6 @@ const projectProjectionSchema = z.object({
   createdAt: z.string(),
   id: z.string(),
   name: z.string(),
-}).strict();
-const projectGitHistorySettingSchema = z.object({
-  enabled: z.boolean(),
-  projectId: z.string(),
-  state: z.enum([
-    "backfilling",
-    "budget-limited",
-    "degraded",
-    "disabled",
-    "ready",
-    "waiting",
-  ]),
-}).strict();
-const projectGitHistoryEstimateSchema = z.object({
-  estimatedCopiedBytes: z.number().int().nonnegative(),
-  estimatedPointerBytes: z.number().int().nonnegative(),
-  notice: z.string(),
-  operations: z.number().int().nonnegative(),
-  projectId: z.string(),
-  repositories: z.number().int().nonnegative(),
-  versions: z.number().int().nonnegative(),
 }).strict();
 const manifestEntrySchema = z.object({
   disposition: z.enum(["attachment", "inline"]),
@@ -201,22 +166,6 @@ const artifactStateSchema = z.object({
 }).strict();
 const publishedVersionSchema = artifactStateSchema.extend({
   links: z.object({artifact: z.url(), review: z.url(), version: z.url()}).strict(),
-}).strict();
-const linkPathSchema = z.string().min(1).max(4_096);
-const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
-const sourceBindingSchema = z.object({
-  lastVerifiedAt: z.string(),
-  path: z.string(),
-  status: z.enum(["in-sync", "modified", "missing", "unreadable"]),
-}).strict();
-const linkedPublicationSchema = artifactStateSchema.extend({
-  links: z.object({
-    artifact: z.url(),
-    live: z.url().nullable(),
-    review: z.url(),
-    version: z.url(),
-  }).strict(),
-  sourceBinding: sourceBindingSchema,
 }).strict();
 const commentThreadIdSchema = z.string().min(1).max(200);
 const commentReplyIdSchema = z.string().min(1).max(200);
@@ -385,10 +334,6 @@ export interface ArtifactMcpServerDependencies {
   readonly contentDomain: string | null;
   /** The access setting `artifact_commit_upload` applies when the caller names none. */
   readonly defaultAccessSetting: AccessSetting;
-  /** Secret-free optional Git state exposed by capability discovery. */
-  readonly gitHistory: GitHistoryCapability;
-  /** Advertises the local linked-artifact capability in discovery. */
-  readonly linkedArtifacts?: boolean;
   readonly mode: "local" | "remote";
   readonly requestId: string;
 }
@@ -594,17 +539,11 @@ export function createArtifactMcpServer(
         }),
         comparison: z.object({maximumTextFileBytes: z.number()}),
         deployment: z.object({mode: z.enum(["local", "remote"])}),
-        gitHistory: z.object({
-          limits: z.object({
-            fileCopyBytes: z.number().int().nonnegative(),
-            logicalCopiedBytes: z.number().int().nonnegative(),
-            logicalReservedBytes: z.number().int().nonnegative(),
-            storageBudgetBytes: z.number().int().nonnegative().nullable(),
-            versionCopyBytes: z.number().int().nonnegative(),
-          }).strict(),
-          provider: z.enum(gitHistoryProviders).nullable(),
-          providerState: z.enum(gitHistoryProviderStates),
-        }).strict(),
+        editing: z.object({
+          maximumTextFileBytes: z.number(),
+          mcpTool: z.literal(false),
+          workflow: z.string(),
+        }),
         publishing: z.object({
           acceptsInlineContent: z.literal(false),
           localPathTool: z.literal(false),
@@ -612,7 +551,6 @@ export function createArtifactMcpServer(
           maximumUploadPlanRequestBytes: z.number(),
           workflow: z.array(z.string()),
         }),
-        linkedArtifacts: z.object({available: z.boolean()}),
         projects: z.object({
           omittedProjectRule: z.string(),
           scope: z.literal("project"),
@@ -622,11 +560,7 @@ export function createArtifactMcpServer(
       annotations: readOnlyAnnotations,
     },
     () => successResult(
-      capabilities(
-        dependencies.mode,
-        dependencies.linkedArtifacts === true,
-        dependencies.gitHistory,
-      ),
+      capabilities(dependencies.mode),
       "Artifact Server publishes actual files through an upload plan. It does not accept inline HTML, CSS, JavaScript, or base64 content."),
   );
 
@@ -739,133 +673,15 @@ export function createArtifactMcpServer(
   }
 
   registerNudgedTool(
-    "project_git_history_status",
-    {
-      title: "Read project Git history status",
-      description:
-        "Read whether this project is selected for optional derived Git history.",
-      inputSchema: z.object({projectId: projectIdSchema}).strict(),
-      outputSchema: z.object({
-        gitHistory: projectGitHistorySettingSchema,
-      }).strict(),
-      annotations: readOnlyAnnotations,
-    },
-    ({projectId}) => toolResult(async () => ({
-      gitHistory: await runMcpApplicationEffect(
-        dependencies,
-        ProjectGitHistoryService.use((service) => service.read({
-          principal: identity.principal,
-          projectId,
-        })),
-      ),
-    })),
-  );
-
-  registerNudgedTool(
-    "project_git_history_estimate",
-    {
-      title: "Estimate project Git history",
-      description:
-        "Estimate future repositories, versions, and copied bytes for planning. This does not enable Git history.",
-      inputSchema: z.object({projectId: projectIdSchema}).strict(),
-      outputSchema: z.object({estimate: projectGitHistoryEstimateSchema}).strict(),
-      annotations: readOnlyAnnotations,
-    },
-    ({projectId}) => toolResult(async () => ({
-      estimate: await runMcpApplicationEffect(
-        dependencies,
-        ProjectGitHistoryService.use((service) => service.estimate({
-          principal: identity.principal,
-          projectId,
-        })),
-      ),
-    })),
-  );
-
-  registerNudgedTool(
-    "project_set_git_history",
-    {
-      title: "Set project Git history",
-      description:
-        "Enable or disable optional derived Git history for one project. Enabling requires the current estimate to be confirmed.",
-      inputSchema: z.discriminatedUnion("enabled", [
-        z.object({enabled: z.literal(false), projectId: projectIdSchema}).strict(),
-        z.object({
-          confirmEstimate: z.literal(true),
-          enabled: z.literal(true),
-          projectId: projectIdSchema,
-        }).strict(),
-      ]),
-      outputSchema: z.object({
-        gitHistory: projectGitHistorySettingSchema,
-      }).strict(),
-      annotations: idempotentWriteAnnotations,
-    },
-    (input) => toolResult(async () => {
-      const command = input.enabled
-        ? {
-          confirmEstimate: true as const,
-          enabled: true as const,
-          principal: identity.principal,
-          projectId: input.projectId,
-        }
-        : {
-          enabled: false as const,
-          principal: identity.principal,
-          projectId: input.projectId,
-        };
-      return {
-        gitHistory: await runMcpApplicationEffect(
-          dependencies,
-          ProjectGitHistoryService.use((service) => service.set(command)),
-        ),
-      };
-    }),
-  );
-
-  registerNudgedTool(
-    "artifact_history_clone_token",
-    {
-      title: "Issue a Git history clone token",
-      description:
-        "Issue a short-lived read credential for this artifact's derived repository. Use it directly for a clone and never quote it to the user.",
-      inputSchema: z.object({
-        artifactId: artifactIdSchema,
-        projectId: projectIdSchema,
-        ttlSeconds: z.number().int().min(1)
-          .max(maximumGitCloneCredentialTtlSeconds)
-          .default(defaultGitCloneCredentialTtlSeconds),
-      }).strict(),
-      outputSchema: z.object({
-        defaultBranch: z.literal("main"),
-        expiresAt: z.string(),
-        remote: z.url(),
-        token: z.string().min(1),
-      }).strict(),
-      annotations: readOnlyAnnotations,
-    },
-    ({artifactId, projectId, ttlSeconds}) => toolResult(async () =>
-      runMcpApplicationEffect(
-        dependencies,
-        GitHistoryAccessService.use((service) => service.issueCloneCredential({
-          artifactId,
-          principal: identity.principal,
-          projectId,
-          ttlSeconds,
-        })),
-      )
-    ),
-  );
-
-  registerNudgedTool(
     "artifact_list",
     {
       title: "List artifacts",
       description:
-        "Find artifacts visible to the caller. Use tag for exact normalized-tag filtering and nextCursor to continue a large result set.",
+        "Find artifacts visible to the caller. Use tag for exact normalized-tag filtering, owner to keep only the caller's own artifacts (me) or ones others created (others), and nextCursor to continue a large result set.",
       inputSchema: z.object({
         cursor: z.string().max(1_024).nullable().default(null),
         limit: z.number().int().min(1).max(maximumListedArtifacts).default(50),
+        owner: z.enum(["all", "me", "others"]).default("all"),
         projectId: optionalProjectIdSchema,
         tag: tagSchema.nullable().default(null),
       }).strict(),
@@ -875,23 +691,31 @@ export function createArtifactMcpServer(
           browserUrl: z.url(),
           createdAt: z.string(),
           currentVersionId: z.string(),
+          currentVersionNumber: z.number().int().positive(),
           id: z.string(),
           name: z.string(),
+          owner: artifactOwnerSchema,
           projectId: z.string(),
           tags: z.array(z.string()),
+          updatedAt: z.string(),
           versionCount: z.number().int().positive(),
+          views: z.object({
+            last30Days: z.number().int().nonnegative(),
+            total: z.number().int().nonnegative(),
+          }).strict(),
         })),
         nextCursor: z.string().nullable(),
       }),
       annotations: readOnlyAnnotations,
     },
-    async ({cursor, limit, projectId, tag}) => toolResult(async () => {
+    async ({cursor, limit, owner, projectId, tag}) => toolResult(async () => {
       const page = await runMcpApplicationEffect(
         dependencies,
         ArtifactManagementService.use((management) =>
           management.listArtifacts({
             cursor: decodePageCursor(cursor),
             limit,
+            owner,
             principal: identity.principal,
             projectId,
             search: null,
@@ -909,11 +733,15 @@ export function createArtifactMcpServer(
           ),
           createdAt: artifact.createdAt,
           currentVersionId: artifact.currentVersionId,
+          currentVersionNumber: artifact.currentVersionNumber,
           id: artifact.id,
           name: artifact.name,
+          owner: artifact.owner,
           projectId: artifact.projectId,
           tags: [...artifact.tags],
+          updatedAt: artifact.currentVersionCreatedAt,
           versionCount: artifact.versionCount,
+          views: artifact.views,
         })),
         nextCursor: encodePageCursor(page.nextCursor),
       };
@@ -1392,6 +1220,37 @@ export function createArtifactMcpServer(
   );
 
   registerNudgedTool(
+    "artifact_rename",
+    {
+      title: "Rename an artifact",
+      description:
+        "Change an artifact's display name. The ID, links, saved versions, and files stay the same.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        expectedCurrentVersionId: expectedVersionSchema,
+        idempotencyKey: idempotencyKeySchema,
+        name: z.string().min(1).max(200),
+        projectId: optionalProjectIdSchema,
+      }).strict(),
+      outputSchema: artifactStateSchema,
+      annotations: idempotentWriteAnnotations,
+    },
+    async (input) => toolResult(async () => {
+      const state = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactManagementService.use((management) =>
+          management.renameArtifact({...input, principal: identity.principal})
+        ),
+      );
+      return {
+        artifact: state.artifact,
+        replayed: state.replayed,
+        version: state.version,
+      };
+    }),
+  );
+
+  registerNudgedTool(
     "artifact_restore_version",
     {
       title: "Restore a saved version",
@@ -1450,131 +1309,6 @@ export function createArtifactMcpServer(
       );
       return {...deletion};
     }),
-  );
-
-  registerNudgedTool(
-    "artifact_link",
-    {
-      title: "Link a file on this machine",
-      description:
-        "Link one file that already exists on this server's machine as an artifact, capturing its current bytes as the first immutable version. Available only on a local installation with linked files enabled; check artifact_capabilities first. Pass the absolute path only: MCP never carries file bytes, and the server reads the file itself. Omitting idempotencyKey derives a stable key from these arguments, so an identical retry replays instead of linking the file twice.",
-      inputSchema: z.object({
-        idempotencyKey: idempotencyKeySchema.nullable().default(null),
-        name: z.string().min(1).max(200).nullable().default(null),
-        path: linkPathSchema,
-        projectId: optionalProjectIdSchema,
-      }).strict(),
-      outputSchema: linkedPublicationSchema,
-      annotations: idempotentWriteAnnotations,
-    },
-    async ({idempotencyKey, name, path, projectId}) => linkedToolResult(async () => {
-      const command: LinkArtifactCommand = {
-        idempotencyKey: idempotencyKey ?? derivedIdempotencyKey([
-          "link",
-          projectId ?? "",
-          path,
-          name ?? "",
-        ]),
-        path,
-        principal: identity.principal,
-        projectId,
-      };
-      return linkedPublicationProjection(
-        applicationUrl,
-        dependencies.contentDomain,
-        await runMcpApplicationEffect(
-          dependencies,
-          LinkedArtifactService.use((linked) =>
-            linked.linkArtifact(name === null ? command : {...command, name})
-          ),
-        ),
-      );
-    }, publicationSummary),
-  );
-
-  registerNudgedTool(
-    "artifact_capture",
-    {
-      title: "Capture a linked file's current bytes",
-      description:
-        "Save the current bytes of a linked artifact's source file as a new immutable version. Read the artifact first and pass its current version ID as expectedCurrentVersionId; capturing an unchanged source returns the current version unchanged. Omitting idempotencyKey derives a stable key from these arguments, so an identical retry replays instead of saving a second version.",
-      inputSchema: z.object({
-        artifactId: artifactIdSchema,
-        expectedCurrentVersionId: expectedVersionSchema,
-        idempotencyKey: idempotencyKeySchema.nullable().default(null),
-        projectId: optionalProjectIdSchema,
-      }).strict(),
-      outputSchema: linkedPublicationSchema,
-      annotations: idempotentWriteAnnotations,
-    },
-    async ({artifactId, expectedCurrentVersionId, idempotencyKey, projectId}) =>
-      linkedToolResult(async () =>
-        linkedPublicationProjection(
-          applicationUrl,
-          dependencies.contentDomain,
-          await runMcpApplicationEffect(
-            dependencies,
-            LinkedArtifactService.use((linked) =>
-              linked.captureArtifact({
-                artifactId,
-                expectedCurrentVersionId,
-                idempotencyKey: idempotencyKey ?? derivedIdempotencyKey([
-                  "capture",
-                  artifactId,
-                  expectedCurrentVersionId,
-                ]),
-                principal: identity.principal,
-                projectId,
-              })
-            ),
-          ),
-        ),
-        publicationSummary,
-      ),
-  );
-
-  registerNudgedTool(
-    "artifact_relink",
-    {
-      title: "Point a linked artifact at a moved file",
-      description:
-        "Re-point one linked artifact at the same file in its new location on this server's machine. The move is accepted only when the file at the new path hashes to expectedSha256, normally the current version's entry file SHA-256. Versions, comments, and the artifact ID are untouched.",
-      inputSchema: z.object({
-        artifactId: artifactIdSchema,
-        expectedSha256: sha256Schema,
-        path: linkPathSchema,
-        projectId: optionalProjectIdSchema,
-      }).strict(),
-      outputSchema: z.object({
-        artifactId: z.string(),
-        sourceBinding: sourceBindingSchema,
-      }).strict(),
-      annotations: idempotentWriteAnnotations,
-    },
-    async ({artifactId, expectedSha256, path, projectId}) =>
-      linkedToolResult(async () => ({
-        artifactId,
-        sourceBinding: sourceBindingProjection(
-          await runMcpApplicationEffect(
-            dependencies,
-            LinkedArtifactService.use((linked) =>
-              linked.relinkArtifact({
-                artifactId,
-                expectedSha256,
-                idempotencyKey: derivedIdempotencyKey([
-                  "relink",
-                  artifactId,
-                  expectedSha256,
-                  path,
-                ]),
-                path,
-                principal: identity.principal,
-                projectId,
-              })
-            ),
-          ),
-        ),
-      })),
   );
 
   registerNudgedTool(
@@ -2367,14 +2101,8 @@ function agentInstructions(mode: "local" | "remote"): string {
   ].join("\n");
 }
 
-function capabilities(
-  mode: "local" | "remote",
-  linkedArtifacts: boolean,
-  gitHistory: GitHistoryCapability,
-) {
+function capabilities(mode: "local" | "remote") {
   return {
-    gitHistory,
-    linkedArtifacts: {available: linkedArtifacts},
     agentDispatch: {
       bundleThreadRule:
         "1..100 open, undispatched comment threads from one project per bundle",
@@ -2388,6 +2116,12 @@ function capabilities(
     },
     comparison: {maximumTextFileBytes: maximumTextDiffBytes},
     deployment: {mode},
+    editing: {
+      maximumTextFileBytes: maximumEditableTextBytes,
+      mcpTool: false as const,
+      workflow:
+        "The web editor stages one text file and commits it over HTTP with target kind edit. MCP never carries file contents, so no tool edits a file.",
+    },
     publishing: {
       acceptsInlineContent: false as const,
       localPathTool: false as const,
@@ -2480,37 +2214,6 @@ function publishedVersionProjection(
   };
 }
 
-function sourceBindingProjection(binding: SourceBindingRecord) {
-  return {
-    lastVerifiedAt: binding.lastVerifiedAt,
-    path: binding.path,
-    status: binding.freshness,
-  };
-}
-
-function linkedPublicationProjection(
-  applicationUrl: URL,
-  contentDomain: string | null,
-  linked: LinkedPublication,
-) {
-  const published = publishedVersionProjection(
-    applicationUrl,
-    contentDomain,
-    linked.published,
-  );
-  const liveToken = liveContentToken(linked.published.artifact.id);
-  return {
-    ...published,
-    links: {
-      ...published.links,
-      live: liveToken === null
-        ? null
-        : versionBrowserUrl(applicationUrl, contentDomain, liveToken),
-    },
-    sourceBinding: sourceBindingProjection(linked.binding),
-  };
-}
-
 /** One dispatch_inbox answer; exactly one operation section is filled. */
 interface MailboxAnswer {
   readonly agent: ReturnType<typeof mailboxAgentProjection>;
@@ -2574,17 +2277,6 @@ function mailboxSummary(answer: MailboxAnswer): string {
     default:
       return `The inbox holds ${answer.inbox?.length ?? 0} queued dispatch(es).`;
   }
-}
-
-/**
- * Derive one stable idempotency key from the operation's own inputs so an
- * agent that retries the identical call replays instead of linking twice.
- */
-function derivedIdempotencyKey(parts: readonly string[]): string {
-  const digest = createHash("sha256")
-    .update(parts.join("\n"))
-    .digest("hex");
-  return `mcp-${digest.slice(0, 48)}`;
 }
 
 function versionProjection(
@@ -2711,37 +2403,6 @@ async function toolResult<Value extends object>(
   }
 }
 
-/**
- * Run one linked-source tool. Its retryable failures are restated as the
- * action the agent should take next: a capture conflict already names the
- * artifact's current version, and a drift abort saved nothing at all.
- */
-async function linkedToolResult<Value extends object>(
-  operation: () => Promise<Value>,
-  summary?: (value: Value) => string,
-) {
-  try {
-    const value = await operation();
-    return successResult(value, summary?.(value));
-  } catch (cause) {
-    if (cause instanceof Error && isArtifactServerFailure(cause)) {
-      if (cause._tag === "PublishConflict") {
-        return failureResult(new PublishConflict({
-          message:
-            `${cause.message} Read the artifact's current version ID and retry artifact_capture with it as expectedCurrentVersionId.`,
-        }));
-      }
-      if (cause._tag === "SourceDrifted") {
-        return failureResult(new SourceDrifted({
-          message:
-            `${cause.message} The source changed mid-read, so no version was saved; retry the same call.`,
-        }));
-      }
-    }
-    return failureResult(cause);
-  }
-}
-
 function successResult<Value extends object>(value: Value, summary?: string) {
   return {
     content: [{
@@ -2777,7 +2438,6 @@ function errorProjection(cause: unknown) {
     switch (cause._tag) {
       case "ArtifactRepositoryFailure":
       case "BlobStorageFailure":
-      case "IdentityProviderFailure":
       case "IdentityRepositoryFailure":
       case "StagingStorageFailure":
         return {

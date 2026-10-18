@@ -48,14 +48,10 @@ export const authenticatedCliHttpClientLayer = Layer.merge(
 /**
  * Resolve one credential only for the exact destination it is allowed to reach.
  *
- * Linked-file commands default to the local installation because the server
- * must read the selected path. Publication retains its existing default-profile
- * behavior when the caller omits a destination.
+ * Without a destination, the default profile wins, then the local installation.
  */
 export async function resolveCliServerConnection(
   options: CliServerConnectionOptions,
-  purpose: "history" | "link" | "publish",
-  forceProfileRefresh = false,
 ): Promise<CliServerConnection> {
   const explicitToken = await loadExplicitApiToken(options);
   const profileDataDirectory = path.resolve(options.profileData);
@@ -79,11 +75,7 @@ export async function resolveCliServerConnection(
         ? {name: options.profile}
         : {name: options.profile, origin: options.server},
     ));
-    return resolveProfileConnection(
-      profileDataDirectory,
-      profile,
-      forceProfileRefresh,
-    );
+    return resolveProfileConnection(profileDataDirectory, profile);
   }
 
   if (options.server !== undefined) {
@@ -95,25 +87,15 @@ export async function resolveCliServerConnection(
     const profile = await runCliEffect(resolveCliProfile(profileDataDirectory, {
       origin,
     }));
-    return resolveProfileConnection(
-      profileDataDirectory,
-      profile,
-      forceProfileRefresh,
-    );
+    return resolveProfileConnection(profileDataDirectory, profile);
   }
 
-  if (purpose === "history" || purpose === "publish") {
-    const state = await runCliEffect(readCliProfileState(profileDataDirectory));
-    const defaultProfile = state.profiles.find(
-      (profile) => profile.id === state.defaultProfileId,
-    );
-    if (defaultProfile !== undefined) {
-      return resolveProfileConnection(
-        profileDataDirectory,
-        defaultProfile,
-        forceProfileRefresh,
-      );
-    }
+  const state = await runCliEffect(readCliProfileState(profileDataDirectory));
+  const defaultProfile = state.profiles.find(
+    (profile) => profile.id === state.defaultProfileId,
+  );
+  if (defaultProfile !== undefined) {
+    return resolveProfileConnection(profileDataDirectory, defaultProfile);
   }
 
   const managedOrigin = await readHealthyManagedOrigin(options.data);
@@ -126,13 +108,11 @@ export async function resolveCliServerConnection(
 async function resolveProfileConnection(
   dataDirectory: string,
   profile: CliProfile,
-  forceRefresh: boolean,
 ): Promise<CliServerConnection> {
   const resolved = await runCliEffect(resolveVerifiedProfileCredential(
     dataDirectory,
     profile,
     createSystemCredentialStore(),
-    forceRefresh,
   ).pipe(Effect.provide(authenticatedCliHttpClientLayer)));
   return {
     apiToken: resolved.bearer,

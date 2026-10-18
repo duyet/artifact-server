@@ -160,7 +160,6 @@ describe("same-host content in path mode", () => {
     const sessionEndpoints = [
       `/api/v1/artifacts/${priv.artifact.id}/content-sessions`,
       `/api/v1/artifacts/${priv.artifact.id}/versions/${priv.version.id}/content-sessions`,
-      `/api/v1/artifacts/${priv.artifact.id}/live-sessions`,
     ];
     const sessionAttempts = await Promise.all(
       sessionEndpoints.map(async (endpoint) => {

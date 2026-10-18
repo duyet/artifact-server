@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
 /**
@@ -62,24 +64,18 @@ export function CommentComposer({
   };
 
   return (
-    <div className="as-comment-composer grid gap-2">
-      <div className="as-comment-composer__header flex items-baseline justify-between gap-2">
-        <Label className="as-comment-composer__label" htmlFor={inputId}>
-          {label}
-        </Label>
+    <Field>
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
         {draftRestored && trimmed !== "" ? (
-          <span className="flex items-baseline gap-2">
-            <span className="text-xs text-muted-foreground" data-draft-marker>
+          <span className="flex items-center gap-1">
+            <Badge data-draft-marker variant="outline">
               Draft
-            </span>
+            </Badge>
             {onDiscardDraft === undefined ? null : (
-              <button
-                className="text-xs text-muted-foreground underline"
-                onClick={discardDraft}
-                type="button"
-              >
+              <Button onClick={discardDraft} size="xs" type="button" variant="ghost">
                 Discard
-              </button>
+              </Button>
             )}
           </span>
         ) : null}
@@ -87,7 +83,7 @@ export function CommentComposer({
       <Textarea
         aria-describedby={tooLong ? `${inputId}-limit` : undefined}
         aria-invalid={tooLong}
-        className="as-comment-composer__input"
+        className="min-h-20"
         disabled={pending}
         id={inputId}
         onChange={(event) => {
@@ -99,20 +95,21 @@ export function CommentComposer({
       />
       {tooLong
         ? (
-          <p className="text-xs text-destructive" id={`${inputId}-limit`}>
+          <FieldError id={`${inputId}-limit`}>
             {`A comment holds at most ${maximumCharacters} characters. Remove ${
               trimmed.length - maximumCharacters
             }.`}
-          </p>
+          </FieldError>
         )
         : null}
-      <div className="as-comment-composer__actions flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           disabled={pending || trimmed === "" || tooLong}
           onClick={() => void submit()}
           size="xs"
           type="button"
         >
+          {pending ? <Spinner aria-hidden data-icon="inline-start" /> : null}
           {pending ? "Saving…" : submitLabel}
         </Button>
         {onCancel === null || cancelLabel === null
@@ -129,6 +126,6 @@ export function CommentComposer({
             </Button>
           )}
       </div>
-    </div>
+    </Field>
   );
 }

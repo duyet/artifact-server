@@ -23,11 +23,6 @@ import {
   ProjectNotFound,
 } from "../core/errors.js";
 import {principalKinds} from "../core/identity.js";
-import type {
-  ProjectGitHistoryProgress,
-  StoredProjectGitHistorySetting,
-  StoreProjectGitHistorySetting,
-} from "../application/project-git-history.js";
 import {normalizeArtifactSearchText} from "../application/artifact-tags.js";
 import {
   accessSettings,
@@ -40,7 +35,6 @@ import {
   fileDispositions,
   parseStoredAgentCapabilities,
   routingModes,
-  sourceFreshnessStates,
   uploadStatuses,
   defaultProjectId,
   defaultProjectName,
@@ -71,11 +65,13 @@ import {
   type ManifestEntry,
   type PageCursor,
   type PublishedVersion,
+  type ProjectActivityDays,
+  type ProjectActivityTotals,
   type PublicArtifactSummary,
+  type ViewedArtifact,
   type ProjectRecord,
   type RegisteredAgentPresence,
   type RegisteredAgentRecord,
-  type SourceBindingRecord,
   type StagedUpload,
   type StagedUploadFile,
   type VersionContent,
@@ -93,8 +89,6 @@ import type {
   CommentRepository,
   CreateAgentDispatch,
   CommitArtifactVersion,
-  CommitCapturedVersion,
-  CommitLinkedArtifact,
   CommitNewArtifact,
   ContentSessionRepository,
   CreateCommentReply,
@@ -114,10 +108,11 @@ import type {
   MarkDispatchDelivered,
   MarkDispatchFailed,
   ReadArtifactViewDays,
+  ReadMostViewedArtifacts,
+  ReadProjectActivityDays,
+  RenameArtifact,
   RecordAgentActivity,
-  RecordSourceFreshness,
   RegisterAgent,
-  RelinkSourceBinding,
   UpdateCommentReply,
   UpdateCommentThread,
   PublicationSource,
@@ -125,8 +120,6 @@ import type {
   RenameProject,
   RestoreArtifactVersion,
   SetProjectArchive,
-  SourceBindingRepository,
-  SourceBindingWrite,
   StagedUploadRepository,
 } from "../core/ports.js";
 import {
@@ -137,6 +130,11 @@ import {
 import { createManifest } from "../manifest/create-manifest.js";
 import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
+import {
+  artifactOwnerColumns,
+  ownerFilterParameters,
+  withArtifactOwner,
+} from "./artifact-owner-row.js";
 import type {
   ListPublicLinks,
   PublicLinkInventoryPage,
@@ -145,20 +143,6 @@ import {
   publicLinkInventoryRowSchema,
   publicLinkPageFromRows,
 } from "./public-link-inventory-row.js";
-import {
-  gitHistoryJobId,
-  gitHistoryJobKinds,
-  gitHistoryCopyPolicyDigest,
-  type GitHistoryBudgetReservation,
-  type GitHistoryJob,
-  type GitHistoryMapping,
-  type GitHistoryMirrorStore,
-  type GitRepositoryCoordinates,
-} from "../git-history/git-history-mirror.js";
-import {
-  defaultGitHistoryMaximumCopiedFiles,
-  type GitHistoryLimits,
-} from "../git-history/git-history-capability.js";
 
 const accessSettingSchema = z.enum([
   accessSettings.accountRequired,
@@ -174,7 +158,6 @@ const uploadStatusSchema = z.enum([
 ]);
 const routingModeSchema = z.enum([routingModes.static, routingModes.spa]);
 const artifactActionKindSchema = z.enum([
-  artifactActionKinds.capture,
   artifactActionKinds.changeAccess,
   artifactActionKinds.changeTags,
   artifactActionKinds.commentCreate,
@@ -184,25 +167,11 @@ const artifactActionKindSchema = z.enum([
   artifactActionKinds.commentResolve,
   artifactActionKinds.commentUpdate,
   artifactActionKinds.delete,
-  artifactActionKinds.link,
+  artifactActionKinds.edited,
   artifactActionKinds.publish,
-  artifactActionKinds.relink,
+  artifactActionKinds.renamed,
   artifactActionKinds.restore,
 ]);
-const sourceFreshnessSchema = z.enum([
-  sourceFreshnessStates.inSync,
-  sourceFreshnessStates.missing,
-  sourceFreshnessStates.modified,
-  sourceFreshnessStates.unreadable,
-]);
-const sourceBindingRowSchema = z.object({
-  artifactId: z.string(),
-  fingerprint: z.string(),
-  freshness: sourceFreshnessSchema,
-  lastVerifiedAt: z.string(),
-  path: z.string(),
-  projectId: z.string(),
-});
 const publishedRowSchema = z.object({
   accessSetting: accessSettingSchema,
   artifactCreatedAt: z.string(),
@@ -214,6 +183,9 @@ const publishedRowSchema = z.object({
   currentVersionId: z.string(),
   entryPath: z.string(),
   manifestDigest: z.string(),
+  ownerDisplayName: z.string().nullable(),
+  ownerPrincipalId: z.string(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: routingModeSchema,
@@ -235,12 +207,14 @@ const contentSessionRowSchema = contentBootstrapRowSchema;
 const idempotencyRowSchema = z.object({
   accessSetting: accessSettingSchema.nullable(),
   artifactId: z.string(),
+  artifactName: z.string().nullable(),
   inputDigest: z.string(),
   operation: z.enum([
     "change_access",
     "change_tags",
     "delete",
     "publish",
+    "rename",
     "restore",
   ]),
   tagsJson: z.string().nullable(),
@@ -257,7 +231,8 @@ const artifactActionRowSchema = z.object({
   projectId: z.string(),
   versionId: z.string(),
 });
-const artifactRowSchema = z.object({
+const artifactRowColumns = {
+  ...artifactOwnerColumns,
   accessSetting: accessSettingSchema,
   createdAt: z.string(),
   currentVersionId: z.string(),
@@ -266,7 +241,9 @@ const artifactRowSchema = z.object({
   name: z.string(),
   path: z.string().nullable(),
   projectId: z.string(),
-});
+};
+const artifactRowSchema = z.object(artifactRowColumns)
+  .transform(withArtifactOwner);
 const artifactPathMatchSchema = z.object({id: z.string(), path: z.string()});
 const artifactViewDayRowSchema = z.object({
   artifactId: z.string(),
@@ -284,10 +261,30 @@ const publicArtifactSummaryRowSchema = z.object({
   name: z.string(),
   path: z.string().nullable(),
 });
-const artifactListRowSchema = artifactRowSchema.extend({
-  commentCount: z.number().int().nonnegative(),
-  versionCount: z.number().int().positive(),
+const projectActivityTotalsRowSchema = z.object({
+  artifacts: z.number().int().nonnegative(),
+  artifactsViewedOnDay: z.number().int().nonnegative(),
+  pageViews: z.number().int().nonnegative(),
+  publicArtifacts: z.number().int().nonnegative(),
+  uploads: z.number().int().nonnegative(),
 });
+const dayCountRowSchema = z.object({
+  count: z.number().int().nonnegative(),
+  day: z.string(),
+});
+const viewedArtifactRowSchema = z.object({
+  artifactId: z.string(),
+  name: z.string(),
+  totalViews: z.number().int().nonnegative(),
+  windowViews: z.number().int().positive(),
+});
+const artifactListRowSchema = z.object({
+  ...artifactRowColumns,
+  commentCount: z.number().int().nonnegative(),
+  currentVersionCreatedAt: z.string(),
+  currentVersionNumber: z.number().int().positive(),
+  versionCount: z.number().int().positive(),
+}).transform(withArtifactOwner);
 const artifactTagRowSchema = z.object({
   artifactId: z.string(),
   tag: z.string(),
@@ -300,6 +297,7 @@ const versionRowSchema = z.object({
   id: z.string(),
   manifestDigest: z.string(),
   number: z.number().int().positive(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   projectId: z.string(),
   routingMode: routingModeSchema,
@@ -371,76 +369,6 @@ const projectRowSchema = z.object({
   id: z.string(),
   installationId: z.string(),
   name: z.string(),
-});
-const projectGitHistorySettingRowSchema = z.object({
-  enabled: z.union([z.literal(0), z.literal(1)]).transform((value) => value === 1),
-  projectId: z.string(),
-  updatedAt: z.string(),
-  updatedByPrincipalId: z.string(),
-});
-const projectGitHistoryEstimateRowSchema = z.object({
-  estimatedCopiedBytes: z.number().int().nonnegative(),
-  estimatedPointerBytes: z.number().int().nonnegative(),
-  repositories: z.number().int().nonnegative(),
-  versions: z.number().int().nonnegative(),
-});
-const projectGitHistoryProgressRowSchema = z.object({
-  budgetLimitedJobs: z.number().int().nonnegative(),
-  mappedVersions: z.number().int().nonnegative(),
-  pendingJobs: z.number().int().nonnegative(),
-  unmappedVersions: z.number().int().nonnegative(),
-});
-const gitHistoryRepositoryRowSchema = z.object({
-  artifactId: z.string(),
-  defaultBranch: z.literal("main"),
-  projectId: z.string(),
-  provider: z.literal("cloudflare-artifacts"),
-  remoteUrl: z.string(),
-  repositoryName: z.string(),
-  status: z.enum(["provisioned", "deleting", "deleted"]),
-});
-const gitHistoryPurgePlanRowSchema = z.object({
-  alreadyDeletedRepositories: z.number().int().nonnegative(),
-  enabledProjects: z.number().int().nonnegative(),
-  logicalCopiedBytes: z.number().int().nonnegative(),
-  repositories: z.number().int().nonnegative(),
-  repositoriesToDelete: z.number().int().nonnegative(),
-});
-const gitHistoryJobRowSchema = z.object({
-  artifactId: z.string(),
-  attempts: z.number().int().nonnegative(),
-  fileCopyBytes: z.number().int().nonnegative().nullable(),
-  id: z.string(),
-  kind: z.enum([gitHistoryJobKinds.deleteRepository, gitHistoryJobKinds.mirrorVersion]),
-  maximumCopiedFiles: z.number().int().positive().nullable(),
-  projectId: z.string(),
-  storageBudgetBytes: z.number().int().nonnegative().nullable(),
-  versionCopyBytes: z.number().int().nonnegative().nullable(),
-  versionId: z.string().nullable(),
-}).transform((row): GitHistoryJob => ({
-  artifactId: row.artifactId,
-  attempts: row.attempts,
-  id: row.id,
-  kind: row.kind,
-  limits: row.fileCopyBytes === null || row.versionCopyBytes === null ||
-      row.maximumCopiedFiles === null
-    ? null
-    : {
-      fileCopyBytes: row.fileCopyBytes,
-      maximumCopiedFiles: row.maximumCopiedFiles,
-      storageBudgetBytes: row.storageBudgetBytes,
-      versionCopyBytes: row.versionCopyBytes,
-    },
-  projectId: row.projectId,
-  versionId: row.versionId,
-}));
-const gitHistoryMappingRowSchema = z.object({
-  artifactId: z.string(),
-  commitId: z.string(),
-  copiedBytes: z.number().int().nonnegative(),
-  projectId: z.string(),
-  repositoryName: z.string(),
-  versionId: z.string(),
 });
 const commentPrincipalKindSchema = z.enum([
   principalKinds.human,
@@ -572,9 +500,7 @@ export class SqliteArtifactRepository implements
   ArtifactViewRepository,
   CommentRepository,
   ContentSessionRepository,
-  GitHistoryMirrorStore,
   ProjectRepository,
-  SourceBindingRepository,
   StagedUploadRepository
 {
   readonly #database: DatabaseSync;
@@ -631,555 +557,6 @@ export class SqliteArtifactRepository implements
     ));
   }
 
-  readProjectGitHistorySetting(
-    projectId: string,
-  ): Promise<StoredProjectGitHistorySetting | null> {
-    return Promise.resolve().then(() => projectGitHistorySettingRowSchema.nullable().parse(
-      this.#database.prepare(`
-        SELECT project_id AS projectId, enabled,
-          updated_by_principal_id AS updatedByPrincipalId,
-          updated_at AS updatedAt
-        FROM git_history_project_settings
-        WHERE installation_id = ? AND project_id = ?
-      `).get(this.#installationId, projectId) ?? null,
-    ));
-  }
-
-  readProjectGitHistoryProgress(
-    projectId: string,
-  ): Promise<ProjectGitHistoryProgress> {
-    return Promise.resolve().then(() => projectGitHistoryProgressRowSchema.parse(
-      this.#database.prepare(`
-        SELECT
-          (SELECT COUNT(*)
-            FROM versions version
-            JOIN artifacts artifact
-              ON artifact.project_id = version.project_id
-              AND artifact.id = version.artifact_id
-            JOIN git_history_mappings mapping
-              ON mapping.installation_id = ?
-              AND mapping.project_id = version.project_id
-              AND mapping.artifact_id = version.artifact_id
-              AND mapping.version_id = version.id
-              AND mapping.status = 'recorded'
-            WHERE version.project_id = ? AND artifact.deleted_at IS NULL
-          ) AS mappedVersions,
-          (SELECT COUNT(*)
-            FROM versions version
-            JOIN artifacts artifact
-              ON artifact.project_id = version.project_id
-              AND artifact.id = version.artifact_id
-            LEFT JOIN git_history_mappings mapping
-              ON mapping.installation_id = ?
-              AND mapping.project_id = version.project_id
-              AND mapping.artifact_id = version.artifact_id
-              AND mapping.version_id = version.id
-              AND mapping.status = 'recorded'
-            WHERE version.project_id = ? AND artifact.deleted_at IS NULL
-              AND mapping.version_id IS NULL
-          ) AS unmappedVersions,
-          (SELECT COUNT(*) FROM git_history_jobs
-            WHERE installation_id = ? AND project_id = ?
-              AND kind = 'mirror-version' AND state IN ('queued', 'claimed')
-          ) AS pendingJobs,
-          (SELECT COUNT(*) FROM git_history_jobs
-            WHERE installation_id = ? AND project_id = ?
-              AND kind = 'mirror-version' AND state = 'queued'
-              AND last_error = 'budget_limited'
-          ) AS budgetLimitedJobs
-      `).get(
-        this.#installationId,
-        projectId,
-        this.#installationId,
-        projectId,
-        this.#installationId,
-        projectId,
-        this.#installationId,
-        projectId,
-      ),
-    ));
-  }
-
-  estimateProjectGitHistory(
-    projectId: string,
-    limits: {readonly fileCopyBytes: number; readonly versionCopyBytes: number},
-  ): Promise<{
-    readonly estimatedCopiedBytes: number;
-    readonly estimatedPointerBytes: number;
-    readonly repositories: number;
-    readonly versions: number;
-  }> {
-    return Promise.resolve().then(() => projectGitHistoryEstimateRowSchema.parse(
-      this.#database.prepare(`
-        WITH active_versions AS (
-          SELECT version.id
-          FROM versions version
-          JOIN artifacts artifact ON artifact.id = version.artifact_id
-          WHERE version.project_id = ?
-            AND artifact.project_id = ?
-            AND artifact.deleted_at IS NULL
-        ), version_totals AS (
-          SELECT active.id,
-            COALESCE(SUM(entry.size), 0) AS totalBytes,
-            COALESCE(SUM(CASE
-              WHEN entry.size <= ? THEN entry.size ELSE 0
-            END), 0) AS eligibleBytes
-          FROM active_versions active
-          LEFT JOIN manifest_entries entry ON entry.version_id = active.id
-          GROUP BY active.id
-        )
-        SELECT
-          (SELECT COUNT(*) FROM artifacts
-            WHERE project_id = ? AND deleted_at IS NULL) AS repositories,
-          (SELECT COUNT(*) FROM active_versions) AS versions,
-          COALESCE(SUM(CASE
-            WHEN eligibleBytes > ? THEN ? ELSE eligibleBytes
-          END), 0) AS estimatedCopiedBytes,
-          COALESCE(SUM(totalBytes - CASE
-            WHEN eligibleBytes > ? THEN ? ELSE eligibleBytes
-          END), 0) AS estimatedPointerBytes
-        FROM version_totals
-      `).get(
-        projectId,
-        projectId,
-        limits.fileCopyBytes,
-        projectId,
-        limits.versionCopyBytes,
-        limits.versionCopyBytes,
-        limits.versionCopyBytes,
-        limits.versionCopyBytes,
-      ),
-    ));
-  }
-
-  storeProjectGitHistorySetting(
-    setting: StoreProjectGitHistorySetting,
-  ): Promise<StoredProjectGitHistorySetting> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      this.#database.prepare(`
-        INSERT INTO git_history_project_settings (
-          project_id, installation_id, enabled,
-          file_copy_limit_bytes, version_copy_limit_bytes,
-          maximum_copied_files, storage_budget_bytes,
-          updated_by_principal_id, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_id) DO UPDATE SET
-          enabled = excluded.enabled,
-          file_copy_limit_bytes = excluded.file_copy_limit_bytes,
-          version_copy_limit_bytes = excluded.version_copy_limit_bytes,
-          maximum_copied_files = excluded.maximum_copied_files,
-          storage_budget_bytes = excluded.storage_budget_bytes,
-          updated_by_principal_id = excluded.updated_by_principal_id,
-          updated_at = excluded.updated_at
-        WHERE installation_id = excluded.installation_id
-      `).run(
-        setting.projectId,
-        this.#installationId,
-        setting.enabled ? 1 : 0,
-        setting.limits.fileCopyBytes,
-        setting.limits.versionCopyBytes,
-        defaultGitHistoryMaximumCopiedFiles,
-        setting.limits.storageBudgetBytes,
-        setting.updatedByPrincipalId,
-        setting.updatedAt,
-      );
-      if (setting.enabled) {
-        this.#database.prepare(`
-          UPDATE git_history_jobs
-          SET storage_budget_bytes = ?, last_error = NULL,
-            available_at = ?, updated_at = ?
-          WHERE installation_id = ? AND project_id = ?
-            AND kind = 'mirror-version' AND state = 'queued'
-            AND last_error = 'budget_limited'
-        `).run(
-          setting.limits.storageBudgetBytes,
-          setting.updatedAt,
-          setting.updatedAt,
-          this.#installationId,
-          setting.projectId,
-        );
-        const versions = z.array(z.object({
-          artifactId: z.string(),
-          projectId: z.string(),
-          versionId: z.string(),
-        })).parse(this.#database.prepare(`
-          SELECT version.artifact_id AS artifactId,
-            version.project_id AS projectId, version.id AS versionId
-          FROM versions version
-          JOIN artifacts artifact
-            ON artifact.project_id = version.project_id
-            AND artifact.id = version.artifact_id
-          LEFT JOIN git_history_mappings mapping
-            ON mapping.installation_id = ?
-            AND mapping.project_id = version.project_id
-            AND mapping.artifact_id = version.artifact_id
-            AND mapping.version_id = version.id
-            AND mapping.status = 'recorded'
-          WHERE version.project_id = ? AND artifact.deleted_at IS NULL
-            AND mapping.version_id IS NULL
-          ORDER BY version.artifact_id, version.number
-        `).all(this.#installationId, setting.projectId));
-        for (const version of versions) {
-          this.#insertMirrorJob(
-            version.projectId,
-            version.artifactId,
-            version.versionId,
-            setting.updatedAt,
-            setting.limits,
-          );
-        }
-      }
-      const stored = this.#database.prepare(`
-        SELECT project_id AS projectId, enabled,
-          updated_by_principal_id AS updatedByPrincipalId,
-          updated_at AS updatedAt
-        FROM git_history_project_settings
-        WHERE installation_id = ? AND project_id = ?
-      `).get(this.#installationId, setting.projectId);
-      return projectGitHistorySettingRowSchema.parse(stored);
-    }));
-  }
-
-  claimGitHistoryJob(
-    now: string,
-    leaseExpiresAt: string,
-  ): Promise<GitHistoryJob | null> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      this.#database.prepare(`
-        UPDATE git_history_jobs SET state = 'queued', lease_expires_at = NULL,
-          available_at = ?, updated_at = ?
-        WHERE installation_id = ? AND state = 'claimed'
-          AND lease_expires_at <= ?
-      `).run(now, now, this.#installationId, now);
-      const row = this.#database.prepare(`
-        SELECT job.id, job.project_id AS projectId,
-          job.artifact_id AS artifactId, job.version_id AS versionId,
-          job.kind, job.attempts,
-          job.file_copy_limit_bytes AS fileCopyBytes,
-          job.version_copy_limit_bytes AS versionCopyBytes,
-          job.maximum_copied_files AS maximumCopiedFiles,
-          job.storage_budget_bytes AS storageBudgetBytes
-        FROM git_history_jobs job
-        LEFT JOIN git_history_project_settings setting
-          ON setting.installation_id = job.installation_id
-          AND setting.project_id = job.project_id
-        WHERE job.installation_id = ? AND job.state = 'queued'
-          AND job.available_at <= ?
-          AND (job.kind = 'delete-repository' OR setting.enabled = 1)
-          AND NOT EXISTS (
-            SELECT 1 FROM git_history_jobs claimed
-            WHERE claimed.installation_id = job.installation_id
-              AND claimed.artifact_id = job.artifact_id
-              AND claimed.state = 'claimed'
-          )
-        ORDER BY job.created_at, job.id LIMIT 1
-      `).get(this.#installationId, now);
-      const parsed = gitHistoryJobRowSchema.nullable().parse(row ?? null);
-      if (parsed === null) return null;
-      const claimed = this.#database.prepare(`
-        UPDATE git_history_jobs SET state = 'claimed', attempts = attempts + 1,
-          lease_expires_at = ?, updated_at = ?
-        WHERE installation_id = ? AND id = ? AND state = 'queued'
-      `).run(leaseExpiresAt, now, this.#installationId, parsed.id);
-      return claimed.changes === 1 ? {...parsed, attempts: parsed.attempts + 1} : null;
-    }));
-  }
-
-  findGitHistoryRepository(
-    projectId: string,
-    artifactId: string,
-  ): Promise<GitRepositoryCoordinates | null> {
-    return Promise.resolve().then(() => gitHistoryRepositoryRowSchema.nullable().parse(
-      this.#database.prepare(`
-        SELECT project_id AS projectId, artifact_id AS artifactId,
-          provider, repository_name AS repositoryName,
-          remote_url AS remoteUrl, default_branch AS defaultBranch, status
-        FROM git_history_repositories
-        WHERE installation_id = ? AND project_id = ? AND artifact_id = ?
-      `).get(this.#installationId, projectId, artifactId) ?? null,
-    ));
-  }
-
-  recordGitHistoryRepository(
-    coordinates: GitRepositoryCoordinates,
-    recordedAt: string,
-  ): Promise<GitRepositoryCoordinates> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      const deleted = z.object({deletedAt: z.string().nullable()}).parse(
-        this.#database.prepare(`
-          SELECT deleted_at AS deletedAt FROM artifacts
-          WHERE project_id = ? AND id = ?
-        `).get(coordinates.projectId, coordinates.artifactId),
-      ).deletedAt !== null;
-      this.#database.prepare(`
-        INSERT INTO git_history_repositories (
-          installation_id, project_id, artifact_id, provider,
-          repository_name, remote_url, default_branch, status,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(artifact_id) DO NOTHING
-      `).run(
-        this.#installationId,
-        coordinates.projectId,
-        coordinates.artifactId,
-        coordinates.provider,
-        coordinates.repositoryName,
-        coordinates.remoteUrl,
-        coordinates.defaultBranch,
-        deleted ? "deleting" : "provisioned",
-        recordedAt,
-        recordedAt,
-      );
-      if (deleted) {
-        this.#queueGitHistoryDeletionIfPresent(
-          coordinates.projectId,
-          coordinates.artifactId,
-          recordedAt,
-        );
-      }
-      const stored = this.#database.prepare(`
-        SELECT project_id AS projectId, artifact_id AS artifactId,
-          provider, repository_name AS repositoryName,
-          remote_url AS remoteUrl, default_branch AS defaultBranch, status
-        FROM git_history_repositories
-        WHERE installation_id = ? AND project_id = ? AND artifact_id = ?
-      `).get(this.#installationId, coordinates.projectId, coordinates.artifactId);
-      const parsed = gitHistoryRepositoryRowSchema.parse(stored);
-      if (
-        parsed.repositoryName !== coordinates.repositoryName ||
-        parsed.remoteUrl !== coordinates.remoteUrl
-      ) {
-        throw new Error("Git history repository coordinates changed during creation.");
-      }
-      return parsed;
-    }));
-  }
-
-  findGitHistoryMapping(
-    projectId: string,
-    artifactId: string,
-    versionId: string,
-  ): Promise<GitHistoryMapping | null> {
-    return Promise.resolve().then(() => gitHistoryMappingRowSchema.nullable().parse(
-      this.#database.prepare(`
-        SELECT project_id AS projectId, artifact_id AS artifactId,
-          version_id AS versionId, repository_name AS repositoryName,
-          commit_id AS commitId, copied_bytes AS copiedBytes
-        FROM git_history_mappings
-        WHERE installation_id = ? AND project_id = ?
-          AND artifact_id = ? AND version_id = ? AND status = 'recorded'
-      `).get(this.#installationId, projectId, artifactId, versionId) ?? null,
-    ));
-  }
-
-  reserveGitHistoryBudget(
-    jobId: string,
-    logicalBytes: number,
-    storageBudgetBytes: number | null,
-    updatedAt: string,
-  ): Promise<GitHistoryBudgetReservation> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      const existing = z.object({state: z.string()}).nullable().parse(
-        this.#database.prepare(`
-          SELECT state FROM git_history_budget_reservations
-          WHERE installation_id = ? AND job_id = ?
-        `).get(this.#installationId, jobId) ?? null,
-      );
-      if (existing !== null) return {_tag: "AlreadyReserved"} as const;
-      if (storageBudgetBytes !== null) {
-        const used = z.object({logicalBytes: z.number().int().nonnegative()}).parse(
-          this.#database.prepare(`
-            SELECT COALESCE(SUM(logical_bytes), 0) AS logicalBytes
-            FROM git_history_budget_reservations
-            WHERE installation_id = ? AND state IN ('reserved', 'committed')
-          `).get(this.#installationId),
-        ).logicalBytes;
-        if (used + logicalBytes > storageBudgetBytes) {
-          return {_tag: "BudgetLimited"} as const;
-        }
-      }
-      this.#database.prepare(`
-        INSERT INTO git_history_budget_reservations (
-          job_id, installation_id, logical_bytes, state, updated_at
-        ) VALUES (?, ?, ?, 'reserved', ?)
-      `).run(jobId, this.#installationId, logicalBytes, updatedAt);
-      return {_tag: "Reserved"} as const;
-    }));
-  }
-
-  completeGitHistoryMirror(
-    job: GitHistoryJob,
-    mapping: GitHistoryMapping,
-    completedAt: string,
-  ): Promise<"mirrored" | "artifact-deleted"> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      const eligible = z.object({eligible: z.number().int()}).parse(
-        this.#database.prepare(`
-          SELECT EXISTS(
-            SELECT 1 FROM artifacts artifact
-            JOIN git_history_jobs job
-              ON job.installation_id = ? AND job.id = ?
-            WHERE artifact.project_id = ? AND artifact.id = ?
-              AND artifact.deleted_at IS NULL AND job.state = 'claimed'
-          ) AS eligible
-        `).get(
-          this.#installationId,
-          job.id,
-          mapping.projectId,
-          mapping.artifactId,
-        ),
-      ).eligible === 1;
-      if (!eligible) {
-        this.#database.prepare(`
-          UPDATE git_history_budget_reservations
-          SET state = 'released', updated_at = ?
-          WHERE installation_id = ? AND job_id = ? AND state = 'reserved'
-        `).run(completedAt, this.#installationId, job.id);
-        this.#database.prepare(`
-          UPDATE git_history_jobs SET state = 'done', lease_expires_at = NULL,
-            last_error = 'artifact_deleted', updated_at = ?
-          WHERE installation_id = ? AND id = ?
-        `).run(completedAt, this.#installationId, job.id);
-        this.#queueGitHistoryDeletionIfPresent(
-          mapping.projectId,
-          mapping.artifactId,
-          completedAt,
-        );
-        return "artifact-deleted" as const;
-      }
-      this.#database.prepare(`
-        INSERT INTO git_history_mappings (
-          installation_id, project_id, artifact_id, version_id,
-          repository_name, commit_id, attempts, copied_bytes,
-          status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'recorded', ?)
-        ON CONFLICT(installation_id, project_id, artifact_id, version_id)
-        DO NOTHING
-      `).run(
-        this.#installationId,
-        mapping.projectId,
-        mapping.artifactId,
-        mapping.versionId,
-        mapping.repositoryName,
-        mapping.commitId,
-        job.attempts,
-        mapping.copiedBytes,
-        completedAt,
-      );
-      this.#database.prepare(`
-        UPDATE git_history_budget_reservations
-        SET state = 'committed', updated_at = ?
-        WHERE installation_id = ? AND job_id = ? AND state = 'reserved'
-      `).run(completedAt, this.#installationId, job.id);
-      this.#database.prepare(`
-        UPDATE git_history_jobs SET state = 'done', lease_expires_at = NULL,
-          last_error = NULL, updated_at = ?
-        WHERE installation_id = ? AND id = ?
-      `).run(completedAt, this.#installationId, job.id);
-      return "mirrored" as const;
-    }));
-  }
-
-  releaseGitHistoryJob(
-    job: GitHistoryJob,
-    classification: string,
-    availableAt: string,
-  ): Promise<void> {
-    return Promise.resolve().then(() => {
-      this.#database.prepare(`
-        UPDATE git_history_jobs SET state = 'queued', lease_expires_at = NULL,
-          last_error = ?, available_at = ?, updated_at = ?
-        WHERE installation_id = ? AND id = ? AND state = 'claimed'
-      `).run(
-        classification,
-        availableAt,
-        availableAt,
-        this.#installationId,
-        job.id,
-      );
-      return undefined;
-    });
-  }
-
-  completeGitHistoryDeletion(
-    job: GitHistoryJob,
-    completedAt: string,
-  ): Promise<void> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      this.#completeGitHistoryRepositoryRemoval(job.artifactId, completedAt);
-      this.#database.prepare(`
-        UPDATE git_history_jobs SET state = 'done', lease_expires_at = NULL,
-          last_error = NULL, updated_at = ?
-        WHERE installation_id = ? AND id = ?
-      `).run(completedAt, this.#installationId, job.id);
-    }));
-  }
-
-  readGitHistoryPurgePlan(): Promise<{
-    readonly alreadyDeletedRepositories: number;
-    readonly enabledProjects: number;
-    readonly logicalCopiedBytes: number;
-    readonly repositories: number;
-    readonly repositoriesToDelete: number;
-  }> {
-    return Promise.resolve().then(() => gitHistoryPurgePlanRowSchema.parse(
-      this.#database.prepare(`
-        SELECT
-          COUNT(*) AS repositories,
-          COALESCE(SUM(CASE WHEN status = 'deleted' THEN 1 ELSE 0 END), 0)
-            AS alreadyDeletedRepositories,
-          COALESCE(SUM(CASE WHEN status <> 'deleted' THEN 1 ELSE 0 END), 0)
-            AS repositoriesToDelete,
-          COALESCE((SELECT SUM(copied_bytes) FROM git_history_mappings
-            WHERE installation_id = ? AND status = 'recorded'), 0)
-            AS logicalCopiedBytes,
-          (SELECT COUNT(*) FROM git_history_project_settings
-            WHERE installation_id = ? AND enabled = 1) AS enabledProjects
-        FROM git_history_repositories
-        WHERE installation_id = ?
-      `).get(
-        this.#installationId,
-        this.#installationId,
-        this.#installationId,
-      ),
-    ));
-  }
-
-  listGitHistoryRepositoriesForPurge(
-    afterArtifactId: string | null,
-    limit: number,
-  ): Promise<readonly GitRepositoryCoordinates[]> {
-    return Promise.resolve().then(() => gitHistoryRepositoryRowSchema.array().parse(
-      this.#database.prepare(`
-        SELECT artifact_id AS artifactId, default_branch AS defaultBranch,
-          project_id AS projectId, provider, remote_url AS remoteUrl,
-          repository_name AS repositoryName, status
-        FROM git_history_repositories
-        WHERE installation_id = ? AND status <> 'deleted'
-          AND (? IS NULL OR artifact_id > ?)
-        ORDER BY artifact_id
-        LIMIT ?
-      `).all(
-        this.#installationId,
-        afterArtifactId,
-        afterArtifactId,
-        limit,
-      ),
-    ));
-  }
-
-  completeGitHistoryPurge(
-    coordinates: GitRepositoryCoordinates,
-    completedAt: string,
-  ): Promise<void> {
-    return Promise.resolve().then(() => this.#transaction(() => {
-      this.#completeGitHistoryRepositoryRemoval(
-        coordinates.artifactId,
-        completedAt,
-      );
-    }));
-  }
-
   renameProject(command: RenameProject): Promise<ProjectRecord> {
     return Promise.resolve().then(() => {
       const result = this.#database.prepare(
@@ -1221,117 +598,17 @@ export class SqliteArtifactRepository implements
 
   commitNewArtifact(command: CommitNewArtifact): Promise<PublishedVersion> {
     return Promise.resolve().then(() =>
-      this.#transaction(() => this.#applyNewArtifactCommit(command, null)),
-    );
-  }
-
-  /**
-   * Create one linked artifact, its first captured version, and its source
-   * binding in a single transaction.
-   */
-  commitLinkedArtifact(command: CommitLinkedArtifact): Promise<PublishedVersion> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() =>
-        this.#applyNewArtifactCommit(command, command.binding)
-      ),
+      this.#transaction(() => this.#applyNewArtifactCommit(command)),
     );
   }
 
   commitVersion(command: CommitArtifactVersion): Promise<PublishedVersion> {
     return Promise.resolve().then(() =>
-      this.#transaction(() => this.#applyVersionCommit(command, null)),
+      this.#transaction(() => this.#applyVersionCommit(command)),
     );
   }
 
-  /**
-   * Commit one captured version through the ordinary publish path while the
-   * same transaction refreshes the artifact's source binding.
-   */
-  commitCapturedVersion(
-    command: CommitCapturedVersion,
-  ): Promise<PublishedVersion> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() => this.#applyVersionCommit(command, command.binding)),
-    );
-  }
-
-  /** Read one artifact's source binding, or null when it is not linked. */
-  findSourceBinding(
-    projectId: string,
-    artifactId: string,
-  ): Promise<SourceBindingRecord | null> {
-    return Promise.resolve().then(() =>
-      this.#readSourceBindingOrNull(projectId, artifactId)
-    );
-  }
-
-  /**
-   * Record one lazily observed freshness state. The observation never changes
-   * versions, the stored capture fingerprint, or the action history.
-   */
-  recordSourceFreshness(
-    command: RecordSourceFreshness,
-  ): Promise<SourceBindingRecord> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() => {
-        const update = this.#database
-          .prepare(
-            `UPDATE artifacts
-             SET source_status = ?, source_verified_at = ?
-             WHERE project_id = ? AND id = ?
-               AND deleted_at IS NULL AND source_path IS NOT NULL`,
-          )
-          .run(
-            command.freshness,
-            command.verifiedAt,
-            command.projectId,
-            command.artifactId,
-          );
-        if (update.changes !== 1) throw missingSourceBinding();
-        return this.#readSourceBinding(command.projectId, command.artifactId);
-      }),
-    );
-  }
-
-  /**
-   * Re-point one binding at a moved source file, appending the attributed
-   * action record in the same transaction. Artifact identity, versions,
-   * comments, and attachments are untouched.
-   */
-  relinkSource(command: RelinkSourceBinding): Promise<SourceBindingRecord> {
-    return Promise.resolve().then(() =>
-      this.#transaction(() => {
-        const artifact = this.#readArtifact(
-          command.projectId,
-          command.artifactId,
-        );
-        if (this.#hasRelinkAction(command)) {
-          return this.#readSourceBinding(command.projectId, command.artifactId);
-        }
-        this.#writeSourceBinding(
-          command.projectId,
-          command.artifactId,
-          command.binding,
-        );
-        this.#insertAction(
-          command.projectId,
-          command.artifactId,
-          artifact.currentVersionId,
-          command.idempotencyKey,
-          command.createdAt,
-          artifactActionKinds.relink,
-          command.principalId,
-          command.authorizedByPrincipalId,
-        );
-        return this.#readSourceBinding(command.projectId, command.artifactId);
-      }),
-    );
-  }
-
-  #applyNewArtifactCommit(
-    command: CommitNewArtifact,
-    binding: SourceBindingWrite | null,
-  ): PublishedVersion {
+  #applyNewArtifactCommit(command: CommitNewArtifact): PublishedVersion {
     const replayed = this.#findIdempotentResult(
       command.projectId,
       command.idempotencyKey,
@@ -1350,9 +627,9 @@ export class SqliteArtifactRepository implements
       .prepare(
         `INSERT INTO artifacts (
           id, project_id, name, search_name, access_setting,
-          current_version_id, created_at, deleted_at, path,
-          source_path, source_fingerprint, source_status, source_verified_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
+          owner_principal_id, owner_display_name,
+          current_version_id, created_at, deleted_at, path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?)`,
       )
       .run(
         command.artifactId,
@@ -1360,12 +637,10 @@ export class SqliteArtifactRepository implements
         command.name,
         normalizeArtifactSearchText(command.name),
         command.accessSetting,
+        command.principalId,
+        command.principalDisplayName,
         command.createdAt,
         command.path,
-        binding === null ? null : binding.path,
-        binding === null ? null : binding.fingerprint,
-        binding === null ? null : sourceFreshnessStates.inSync,
-        binding === null ? null : binding.verifiedAt,
       );
 
     this.#replaceTags(command.artifactId, command.tags);
@@ -1379,6 +654,7 @@ export class SqliteArtifactRepository implements
       1,
       command.manifest,
       command.principalId,
+      command.principalDisplayName,
     );
     this.#database
       .prepare("UPDATE artifacts SET current_version_id = ? WHERE id = ?")
@@ -1389,7 +665,7 @@ export class SqliteArtifactRepository implements
       command.versionId,
       command.idempotencyKey,
       command.createdAt,
-      binding === null ? artifactActionKinds.publish : artifactActionKinds.link,
+      artifactActionKinds.publish,
       command.principalId,
       command.authorizedByPrincipalId,
     );
@@ -1402,12 +678,6 @@ export class SqliteArtifactRepository implements
       command.createdAt,
     );
     this.#sealStagedUpload(command.source, command.versionId);
-    this.#queueMirrorJobIfEnabled(
-      command.projectId,
-      command.artifactId,
-      command.versionId,
-      command.createdAt,
-    );
 
     return this.#readPublishedVersion(command.projectId, command.versionId, false);
   }
@@ -1429,10 +699,7 @@ export class SqliteArtifactRepository implements
     if (existing !== null) throw artifactPathTaken(path, existing.path);
   }
 
-  #applyVersionCommit(
-    command: CommitArtifactVersion,
-    binding: SourceBindingWrite | null,
-  ): PublishedVersion {
+  #applyVersionCommit(command: CommitArtifactVersion): PublishedVersion {
     const replayed = this.#findIdempotentResult(
       command.projectId,
       command.idempotencyKey,
@@ -1442,7 +709,7 @@ export class SqliteArtifactRepository implements
     this.#assertProjectActive(command.projectId);
     this.#assertStagedUploadReady(
       command.source,
-      command.manifest.digest,
+      command.edit?.stagedManifestDigest ?? command.manifest.digest,
       command.createdAt,
     );
 
@@ -1486,6 +753,7 @@ export class SqliteArtifactRepository implements
       nextNumber,
       command.manifest,
       command.principalId,
+      command.principalDisplayName,
     );
     const update = this.#database
       .prepare(
@@ -1504,13 +772,6 @@ export class SqliteArtifactRepository implements
         message: "The artifact changed during publication.",
       });
     }
-    if (binding !== null) {
-      this.#writeSourceBinding(
-        command.projectId,
-        command.artifactId,
-        binding,
-      );
-    }
 
     this.#insertAction(
       command.projectId,
@@ -1518,9 +779,9 @@ export class SqliteArtifactRepository implements
       command.versionId,
       command.idempotencyKey,
       command.createdAt,
-      binding === null
+      command.edit === null
         ? artifactActionKinds.publish
-        : artifactActionKinds.capture,
+        : artifactActionKinds.edited,
       command.principalId,
       command.authorizedByPrincipalId,
     );
@@ -1533,91 +794,8 @@ export class SqliteArtifactRepository implements
       command.createdAt,
     );
     this.#sealStagedUpload(command.source, command.versionId);
-    this.#queueMirrorJobIfEnabled(
-      command.projectId,
-      command.artifactId,
-      command.versionId,
-      command.createdAt,
-    );
 
     return this.#readPublishedVersion(command.projectId, command.versionId, false);
-  }
-
-  // A binding write always sets the four columns together: the stored path and
-  // fingerprint describe exactly the bytes the same transaction captured, so
-  // the observed freshness is `in-sync` by construction.
-  #writeSourceBinding(
-    projectId: string,
-    artifactId: string,
-    binding: SourceBindingWrite,
-  ): void {
-    const update = this.#database
-      .prepare(
-        `UPDATE artifacts
-         SET source_path = ?,
-           source_fingerprint = ?,
-           source_status = ?,
-           source_verified_at = ?
-         WHERE project_id = ? AND id = ?
-           AND deleted_at IS NULL AND source_path IS NOT NULL`,
-      )
-      .run(
-        binding.path,
-        binding.fingerprint,
-        sourceFreshnessStates.inSync,
-        binding.verifiedAt,
-        projectId,
-        artifactId,
-      );
-    if (update.changes !== 1) throw missingSourceBinding();
-  }
-
-  #hasRelinkAction(command: RelinkSourceBinding): boolean {
-    const row = this.#database
-      .prepare(
-        `SELECT id
-         FROM actions
-         WHERE project_id = ? AND artifact_id = ?
-           AND idempotency_key = ? AND action = ?`,
-      )
-      .get(
-        command.projectId,
-        command.artifactId,
-        command.idempotencyKey,
-        artifactActionKinds.relink,
-      );
-    return z.object({id: z.string()}).nullable().parse(row ?? null) !== null;
-  }
-
-  #readSourceBinding(projectId: string, artifactId: string): SourceBindingRecord {
-    const binding = this.#readSourceBindingOrNull(projectId, artifactId);
-    if (binding === null) {
-      throw new Error(
-        "The source binding was not found after a successful write.",
-      );
-    }
-    return binding;
-  }
-
-  #readSourceBindingOrNull(
-    projectId: string,
-    artifactId: string,
-  ): SourceBindingRecord | null {
-    const row = this.#database
-      .prepare(
-        `SELECT
-          id AS artifactId,
-          project_id AS projectId,
-          source_fingerprint AS fingerprint,
-          source_status AS freshness,
-          source_verified_at AS lastVerifiedAt,
-          source_path AS path
-         FROM artifacts
-         WHERE project_id = ? AND id = ?
-           AND deleted_at IS NULL AND source_path IS NOT NULL`,
-      )
-      .get(projectId, artifactId);
-    return sourceBindingRowSchema.nullable().parse(row ?? null);
   }
 
   changeAccessSetting(
@@ -1731,6 +909,67 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  renameArtifact(command: RenameArtifact): Promise<ArtifactState> {
+    return Promise.resolve().then(() =>
+      this.#transaction(() => {
+        const replayed = this.#findIdempotentRenameResult(
+          command.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+        );
+        if (replayed !== null) return replayed;
+        const artifact = this.#readArtifact(command.projectId, command.artifactId);
+        this.#assertExpectedCurrentVersion(
+          artifact,
+          command.expectedCurrentVersionId,
+        );
+        const update = this.#database
+          .prepare(
+            `UPDATE artifacts
+             SET name = ?, search_name = ?
+             WHERE project_id = ? AND id = ? AND current_version_id = ? AND deleted_at IS NULL`,
+          )
+          .run(
+            command.name,
+            normalizeArtifactSearchText(command.name),
+            command.projectId,
+            command.artifactId,
+            command.expectedCurrentVersionId,
+          );
+        if (update.changes !== 1) throw changedDuringManagement();
+        this.#insertAction(
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          command.idempotencyKey,
+          command.createdAt,
+          artifactActionKinds.renamed,
+          command.principalId,
+          command.authorizedByPrincipalId,
+        );
+        this.#insertIdempotency(
+          command.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          command.createdAt,
+          "rename",
+          artifact.accessSetting,
+          null,
+          command.name,
+        );
+        return this.#readArtifactState(
+          command.projectId,
+          command.artifactId,
+          command.expectedCurrentVersionId,
+          artifact.accessSetting,
+          false,
+        );
+      }),
+    );
+  }
+
   deleteArtifact(command: DeleteArtifact): Promise<ArtifactDeletion> {
     return Promise.resolve().then(() =>
       this.#transaction(() => {
@@ -1780,11 +1019,6 @@ export class SqliteArtifactRepository implements
           command.createdAt,
           "delete",
           artifact.accessSetting,
-        );
-        this.#queueGitHistoryDeletionIfPresent(
-          command.projectId,
-          command.artifactId,
-          command.createdAt,
         );
         return this.#readDeletionResult(command.projectId, command.artifactId, false);
       }),
@@ -1875,6 +1109,99 @@ export class SqliteArtifactRepository implements
     });
   }
 
+  readProjectActivityTotals(
+    projectId: string,
+    day: string,
+  ): Promise<ProjectActivityTotals> {
+    return Promise.resolve().then(() =>
+      projectActivityTotalsRowSchema.parse(this.#database
+        .prepare(
+          `SELECT
+             COUNT(*) AS artifacts,
+             COALESCE(SUM(access_setting = 'public_link'), 0) AS publicArtifacts,
+             (
+               SELECT COUNT(*) FROM versions
+               JOIN artifacts live ON live.id = versions.artifact_id
+               WHERE live.project_id = ? AND live.deleted_at IS NULL
+             ) AS uploads,
+             (
+               SELECT COALESCE(SUM(artifact_views.count), 0) FROM artifact_views
+               JOIN artifacts live ON live.id = artifact_views.artifact_id
+               WHERE live.project_id = ? AND live.deleted_at IS NULL
+             ) AS pageViews,
+             (
+               SELECT COUNT(*) FROM artifact_views
+               JOIN artifacts live ON live.id = artifact_views.artifact_id
+               WHERE live.project_id = ? AND live.deleted_at IS NULL
+                 AND artifact_views.day = ? AND artifact_views.count > 0
+             ) AS artifactsViewedOnDay
+           FROM artifacts
+           WHERE project_id = ? AND deleted_at IS NULL`,
+        )
+        .get(projectId, projectId, projectId, day, projectId)));
+  }
+
+  readProjectActivityDays(
+    command: ReadProjectActivityDays,
+  ): Promise<ProjectActivityDays> {
+    return Promise.resolve().then(() => {
+      const uploads = this.#database
+        .prepare(
+          `SELECT substr(versions.created_at, 1, 10) AS day, COUNT(*) AS count
+           FROM versions
+           JOIN artifacts live ON live.id = versions.artifact_id
+           WHERE live.project_id = ? AND live.deleted_at IS NULL
+             AND substr(versions.created_at, 1, 10) BETWEEN ? AND ?
+           GROUP BY day
+           ORDER BY day`,
+        )
+        .all(command.projectId, command.sinceDay, command.untilDay);
+      const views = this.#database
+        .prepare(
+          `SELECT artifact_views.day AS day, SUM(artifact_views.count) AS count
+           FROM artifact_views
+           JOIN artifacts live ON live.id = artifact_views.artifact_id
+           WHERE live.project_id = ? AND live.deleted_at IS NULL
+             AND artifact_views.day BETWEEN ? AND ?
+           GROUP BY artifact_views.day
+           ORDER BY artifact_views.day`,
+        )
+        .all(command.projectId, command.sinceDay, command.untilDay);
+      return {
+        uploads: z.array(dayCountRowSchema).parse(uploads),
+        views: z.array(dayCountRowSchema).parse(views),
+      };
+    });
+  }
+
+  readMostViewedArtifacts(
+    command: ReadMostViewedArtifacts,
+  ): Promise<readonly ViewedArtifact[]> {
+    return Promise.resolve().then(() =>
+      z.array(viewedArtifactRowSchema).parse(this.#database
+        .prepare(
+          `SELECT
+             live.id AS artifactId,
+             live.name AS name,
+             SUM(CASE WHEN artifact_views.day BETWEEN ? AND ?
+               THEN artifact_views.count ELSE 0 END) AS windowViews,
+             SUM(artifact_views.count) AS totalViews
+           FROM artifacts live
+           JOIN artifact_views ON artifact_views.artifact_id = live.id
+           WHERE live.project_id = ? AND live.deleted_at IS NULL
+           GROUP BY live.id, live.name
+           HAVING windowViews > 0
+           ORDER BY windowViews DESC, totalViews DESC, live.id
+           LIMIT ?`,
+        )
+        .all(
+          command.sinceDay,
+          command.untilDay,
+          command.projectId,
+          command.limit,
+        )));
+  }
+
   recordArtifactViews(
     deltas: readonly ArtifactViewDelta[],
   ): Promise<void> {
@@ -1952,6 +1279,7 @@ export class SqliteArtifactRepository implements
             routing_mode AS routingMode,
             content_token AS contentToken,
             publisher_principal_id AS publisherPrincipalId,
+            publisher_display_name AS publisherDisplayName,
             created_at AS createdAt
            FROM versions
            WHERE project_id = ? AND artifact_id = ?
@@ -1994,6 +1322,7 @@ export class SqliteArtifactRepository implements
       const tagFilterJson = command.tags.length === 0
         ? null
         : JSON.stringify(command.tags);
+      const {notOwnedBy, ownedBy} = ownerFilterParameters(command.owner);
       const rows = this.#database
         .prepare(
           `SELECT * FROM (
@@ -2003,9 +1332,19 @@ export class SqliteArtifactRepository implements
               name,
               path,
               access_setting AS accessSetting,
+              owner_principal_id AS ownerPrincipalId,
+              owner_display_name AS ownerDisplayName,
               current_version_id AS currentVersionId,
               created_at AS createdAt,
               deleted_at AS deletedAt,
+              (
+                SELECT created_at FROM versions
+                WHERE versions.id = artifacts.current_version_id
+              ) AS currentVersionCreatedAt,
+              (
+                SELECT number FROM versions
+                WHERE versions.id = artifacts.current_version_id
+              ) AS currentVersionNumber,
               (
                 SELECT COUNT(*) FROM comment_threads
                 WHERE comment_threads.project_id = artifacts.project_id
@@ -2019,6 +1358,8 @@ export class SqliteArtifactRepository implements
             FROM artifacts
             WHERE project_id = ?
               AND deleted_at IS NULL
+              AND (? IS NULL OR owner_principal_id = ?)
+              AND (? IS NULL OR owner_principal_id <> ?)
               AND (
                 ? IS NULL
                 OR instr(search_name, ?) > 0
@@ -2043,6 +1384,10 @@ export class SqliteArtifactRepository implements
         )
         .all(
           command.projectId,
+          ownedBy,
+          ownedBy,
+          notOwnedBy,
+          notOwnedBy,
           command.search ?? null,
           command.search ?? null,
           command.search ?? null,
@@ -2072,6 +1417,8 @@ export class SqliteArtifactRepository implements
             artifact.name AS artifactName,
             artifact.path AS artifactPath,
             artifact.access_setting AS accessSetting,
+            artifact.owner_principal_id AS ownerPrincipalId,
+            artifact.owner_display_name AS ownerDisplayName,
             artifact.current_version_id AS currentVersionId,
             artifact.created_at AS artifactCreatedAt,
             artifact.deleted_at AS artifactDeletedAt,
@@ -2086,6 +1433,7 @@ export class SqliteArtifactRepository implements
             version.routing_mode AS routingMode,
             version.content_token AS contentToken,
             version.publisher_principal_id AS publisherPrincipalId,
+            version.publisher_display_name AS publisherDisplayName,
             version.created_at AS versionCreatedAt
            FROM artifacts artifact
            INNER JOIN projects project ON project.id = artifact.project_id
@@ -2118,6 +1466,10 @@ export class SqliteArtifactRepository implements
         deletedAt: row.artifactDeletedAt,
         id: row.artifactId,
         name: row.artifactName,
+        owner: {
+          displayName: row.ownerDisplayName,
+          principalId: row.ownerPrincipalId,
+        },
         path: row.artifactPath,
         projectId: row.projectId,
       })));
@@ -2692,6 +2044,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -2730,6 +2083,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -2759,6 +2113,48 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  #findIdempotentRenameResult(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): ArtifactState | null {
+    const row = this.#database
+      .prepare(
+        `SELECT
+          access_setting AS accessSetting,
+          artifact_id AS artifactId,
+          input_digest AS inputDigest,
+          operation,
+          tags_json AS tagsJson,
+          artifact_name AS artifactName,
+          version_id AS versionId
+         FROM idempotency_records
+         WHERE project_id = ? AND idempotency_key = ?`,
+      )
+      .get(projectId, idempotencyKey);
+    const parsed = idempotencyRowSchema.nullable().parse(row ?? null);
+    if (parsed === null) return null;
+    if (
+      parsed.inputDigest !== inputDigest ||
+      parsed.operation !== "rename" ||
+      parsed.accessSetting === null ||
+      parsed.artifactName === null
+    ) {
+      throw new IdempotencyConflict({
+        message: "The idempotency key was already used with different input.",
+      });
+    }
+    return this.#readArtifactState(
+      projectId,
+      parsed.artifactId,
+      parsed.versionId,
+      parsed.accessSetting,
+      true,
+      null,
+      parsed.artifactName,
+    );
+  }
+
   #findIdempotentDeletion(
     projectId: string,
     idempotencyKey: string,
@@ -2772,6 +2168,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -2804,6 +2201,8 @@ export class SqliteArtifactRepository implements
           name,
           path,
           access_setting AS accessSetting,
+          owner_principal_id AS ownerPrincipalId,
+          owner_display_name AS ownerDisplayName,
           current_version_id AS currentVersionId,
           created_at AS createdAt,
           deleted_at AS deletedAt
@@ -2827,6 +2226,8 @@ export class SqliteArtifactRepository implements
           name,
           path,
           access_setting AS accessSetting,
+          owner_principal_id AS ownerPrincipalId,
+          owner_display_name AS ownerDisplayName,
           current_version_id AS currentVersionId,
           created_at AS createdAt,
           deleted_at AS deletedAt
@@ -2920,6 +2321,7 @@ export class SqliteArtifactRepository implements
     accessSetting: ArtifactRecord["accessSetting"],
     replayed: boolean,
     tags: readonly string[] | null = null,
+    name: string | null = null,
   ): ArtifactState {
     const artifact = this.#readArtifact(projectId, artifactId);
     const version = this.#readVersionOrNull(projectId, versionId, artifactId);
@@ -2931,6 +2333,7 @@ export class SqliteArtifactRepository implements
         ...artifact,
         accessSetting,
         currentVersionId: versionId,
+        name: name ?? artifact.name,
         tags: tags ?? artifact.tags,
       },
       replayed,
@@ -2995,6 +2398,7 @@ export class SqliteArtifactRepository implements
           routing_mode AS routingMode,
           content_token AS contentToken,
           publisher_principal_id AS publisherPrincipalId,
+          publisher_display_name AS publisherDisplayName,
           created_at AS createdAt
          FROM versions
          WHERE project_id = ? AND id = ? AND artifact_id = ?`,
@@ -3016,6 +2420,7 @@ export class SqliteArtifactRepository implements
           input_digest AS inputDigest,
           operation,
           tags_json AS tagsJson,
+          artifact_name AS artifactName,
           version_id AS versionId
          FROM idempotency_records
          WHERE project_id = ? AND idempotency_key = ?`,
@@ -3133,16 +2538,18 @@ export class SqliteArtifactRepository implements
       | "change_tags"
       | "delete"
       | "publish"
+      | "rename"
       | "restore" = "publish",
     accessSetting: ArtifactRecord["accessSetting"] | null = null,
     tagsJson: string | null = null,
+    artifactName: string | null = null,
   ): void {
     this.#database
       .prepare(
         `INSERT INTO idempotency_records (
           project_id, idempotency_key, input_digest, artifact_id, version_id,
-          operation, access_setting, tags_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          operation, access_setting, tags_json, artifact_name, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         projectId,
@@ -3153,6 +2560,7 @@ export class SqliteArtifactRepository implements
         operation,
         accessSetting,
         tagsJson,
+        artifactName,
         createdAt,
       );
   }
@@ -3166,13 +2574,15 @@ export class SqliteArtifactRepository implements
     number: number,
     manifest: CommitNewArtifact["manifest"],
     publisherPrincipalId: string,
+    publisherDisplayName: string,
   ): void {
     this.#database
       .prepare(
         `INSERT INTO versions (
           id, project_id, artifact_id, number, manifest_digest, entry_path,
-          routing_mode, content_token, publisher_principal_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          routing_mode, content_token, publisher_principal_id,
+          publisher_display_name, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         versionId,
@@ -3184,6 +2594,7 @@ export class SqliteArtifactRepository implements
         manifest.routingMode,
         contentToken,
         publisherPrincipalId,
+        publisherDisplayName,
         createdAt,
       );
 
@@ -3202,100 +2613,6 @@ export class SqliteArtifactRepository implements
         entry.disposition,
       );
     }
-  }
-
-  #queueMirrorJobIfEnabled(
-    projectId: string,
-    artifactId: string,
-    versionId: string,
-    createdAt: string,
-  ): void {
-    const setting = z.object({
-      fileCopyBytes: z.number().int().nonnegative(),
-      maximumCopiedFiles: z.number().int().positive(),
-      storageBudgetBytes: z.number().int().nonnegative().nullable(),
-      versionCopyBytes: z.number().int().nonnegative(),
-    }).nullable().parse(this.#database.prepare(`
-      SELECT file_copy_limit_bytes AS fileCopyBytes,
-        version_copy_limit_bytes AS versionCopyBytes,
-        maximum_copied_files AS maximumCopiedFiles,
-        storage_budget_bytes AS storageBudgetBytes
-      FROM git_history_project_settings
-      WHERE installation_id = ? AND project_id = ? AND enabled = 1
-    `).get(this.#installationId, projectId) ?? null);
-    if (setting === null) return;
-    this.#insertMirrorJob(projectId, artifactId, versionId, createdAt, {
-      fileCopyBytes: setting.fileCopyBytes,
-      logicalCopiedBytes: 0,
-      logicalReservedBytes: 0,
-      storageBudgetBytes: setting.storageBudgetBytes,
-      versionCopyBytes: setting.versionCopyBytes,
-    }, setting.maximumCopiedFiles);
-  }
-
-  #insertMirrorJob(
-    projectId: string,
-    artifactId: string,
-    versionId: string,
-    createdAt: string,
-    limits: GitHistoryLimits,
-    maximumCopiedFiles = defaultGitHistoryMaximumCopiedFiles,
-  ): void {
-    this.#database.prepare(`
-      INSERT OR IGNORE INTO git_history_jobs (
-        id, installation_id, project_id, artifact_id, version_id,
-        kind, state, attempts, file_copy_limit_bytes,
-        version_copy_limit_bytes, maximum_copied_files,
-        storage_budget_bytes, copy_policy_digest, lease_expires_at,
-        available_at, last_error, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 'mirror-version', 'queued', 0,
-        ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)
-    `).run(
-      gitHistoryJobId(gitHistoryJobKinds.mirrorVersion, artifactId, versionId),
-      this.#installationId,
-      projectId,
-      artifactId,
-      versionId,
-      limits.fileCopyBytes,
-      limits.versionCopyBytes,
-      maximumCopiedFiles,
-      limits.storageBudgetBytes,
-      gitHistoryCopyPolicyDigest(limits, maximumCopiedFiles),
-      createdAt,
-      createdAt,
-      createdAt,
-    );
-  }
-
-  #queueGitHistoryDeletionIfPresent(
-    projectId: string,
-    artifactId: string,
-    createdAt: string,
-  ): void {
-    const coordinates = this.#database.prepare(`
-      SELECT artifact_id FROM git_history_repositories
-      WHERE installation_id = ? AND project_id = ? AND artifact_id = ?
-        AND status <> 'deleted'
-    `).get(this.#installationId, projectId, artifactId);
-    if (coordinates === undefined) return;
-    this.#database.prepare(`
-      INSERT OR IGNORE INTO git_history_jobs (
-        id, installation_id, project_id, artifact_id, version_id,
-        kind, state, attempts, available_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, 'delete-repository', 'queued', 0, ?, ?, ?)
-    `).run(
-      gitHistoryJobId(gitHistoryJobKinds.deleteRepository, artifactId, null),
-      this.#installationId,
-      projectId,
-      artifactId,
-      createdAt,
-      createdAt,
-      createdAt,
-    );
-    this.#database.prepare(`
-      UPDATE git_history_repositories SET status = 'deleting', updated_at = ?
-      WHERE installation_id = ? AND project_id = ? AND artifact_id = ?
-    `).run(createdAt, this.#installationId, projectId, artifactId);
   }
 
   createThread(command: CreateCommentThread): Promise<CommentThreadCreation> {
@@ -4932,9 +4249,10 @@ export class SqliteArtifactRepository implements
         input_digest TEXT NOT NULL,
         artifact_id TEXT NOT NULL REFERENCES artifacts(id),
         version_id TEXT NOT NULL REFERENCES versions(id),
-        operation TEXT NOT NULL DEFAULT 'publish' CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'delete')),
+        operation TEXT NOT NULL DEFAULT 'publish' CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'rename', 'delete')),
         access_setting TEXT CHECK (access_setting IS NULL OR access_setting IN ('account_required', 'public_link')),
         tags_json TEXT,
+        artifact_name TEXT,
         created_at TEXT NOT NULL,
         PRIMARY KEY (project_id, idempotency_key)
       ) STRICT;
@@ -5003,27 +4321,6 @@ export class SqliteArtifactRepository implements
         expires_at TEXT NOT NULL
       ) STRICT;
 
-      CREATE TABLE IF NOT EXISTS git_history_provider_identity (
-        installation_id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL CHECK (provider = 'cloudflare-artifacts'),
-        account_id TEXT NOT NULL,
-        namespace TEXT NOT NULL,
-        activated_at TEXT NOT NULL,
-        UNIQUE (provider, account_id, namespace)
-      ) STRICT;
-
-      CREATE TABLE IF NOT EXISTS git_history_project_settings (
-        project_id TEXT PRIMARY KEY REFERENCES projects(id),
-        installation_id TEXT NOT NULL,
-        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-        file_copy_limit_bytes INTEGER NOT NULL DEFAULT 10485760,
-        version_copy_limit_bytes INTEGER NOT NULL DEFAULT 52428800,
-        maximum_copied_files INTEGER NOT NULL DEFAULT ${defaultGitHistoryMaximumCopiedFiles},
-        storage_budget_bytes INTEGER,
-        updated_by_principal_id TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      ) STRICT;
-
       CREATE INDEX IF NOT EXISTS versions_artifact_id
         ON versions (artifact_id, number);
       CREATE INDEX IF NOT EXISTS artifacts_active_created
@@ -5053,9 +4350,11 @@ export class SqliteArtifactRepository implements
     this.#addCommentTablesIfMissing();
     this.#addAgentDispatchTablesIfMissing();
     this.#widenRegisteredAgentsIfNeeded();
-    this.#addSourceBindingColumnsIfMissing();
-    this.#addGitHistoryMirrorTablesIfMissing();
+    this.#dropSourceBindingColumnsIfPresent();
+    this.#dropGitHistoryTables();
     this.#addArtifactPathIfMissing();
+    this.#addArtifactOwnerIfMissing();
+    this.#addRenameIdempotencyIfMissing();
     this.#database.exec(`
       CREATE INDEX IF NOT EXISTS projects_active_created
         ON projects (archived_at, created_at, id);
@@ -5082,107 +4381,20 @@ export class SqliteArtifactRepository implements
     });
   }
 
-  #addGitHistoryMirrorTablesIfMissing(): void {
-    const settingColumns = this.#tableColumns("git_history_project_settings");
-    if (!settingColumns.includes("file_copy_limit_bytes")) {
-      this.#database.exec(
-        "ALTER TABLE git_history_project_settings ADD COLUMN file_copy_limit_bytes INTEGER NOT NULL DEFAULT 10485760",
-      );
-    }
-    if (!settingColumns.includes("version_copy_limit_bytes")) {
-      this.#database.exec(
-        "ALTER TABLE git_history_project_settings ADD COLUMN version_copy_limit_bytes INTEGER NOT NULL DEFAULT 52428800",
-      );
-    }
-    if (!settingColumns.includes("maximum_copied_files")) {
-      this.#database.exec(
-        `ALTER TABLE git_history_project_settings
-          ADD COLUMN maximum_copied_files INTEGER NOT NULL
-          DEFAULT ${defaultGitHistoryMaximumCopiedFiles}`,
-      );
-    }
-    if (!settingColumns.includes("storage_budget_bytes")) {
-      this.#database.exec(
-        "ALTER TABLE git_history_project_settings ADD COLUMN storage_budget_bytes INTEGER",
-      );
-    }
+  // Git history was removed. Its tables only described copies of versions in
+  // an external provider, so they are dropped, children before parents.
+  #dropGitHistoryTables(): void {
     this.#database.exec(`
-      CREATE TABLE IF NOT EXISTS git_history_repositories (
-        artifact_id TEXT PRIMARY KEY REFERENCES artifacts(id),
-        installation_id TEXT NOT NULL,
-        project_id TEXT NOT NULL REFERENCES projects(id),
-        provider TEXT NOT NULL CHECK (provider = 'cloudflare-artifacts'),
-        repository_name TEXT NOT NULL,
-        remote_url TEXT NOT NULL,
-        default_branch TEXT NOT NULL CHECK (default_branch = 'main'),
-        status TEXT NOT NULL CHECK (status IN ('provisioned', 'deleting', 'deleted')),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE (installation_id, repository_name)
-      ) STRICT;
-
-      CREATE TABLE IF NOT EXISTS git_history_jobs (
-        id TEXT PRIMARY KEY,
-        installation_id TEXT NOT NULL,
-        project_id TEXT NOT NULL REFERENCES projects(id),
-        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
-        version_id TEXT REFERENCES versions(id),
-        kind TEXT NOT NULL CHECK (kind IN ('mirror-version', 'delete-repository')),
-        state TEXT NOT NULL CHECK (state IN ('queued', 'claimed', 'done')),
-        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
-        file_copy_limit_bytes INTEGER,
-        version_copy_limit_bytes INTEGER,
-        maximum_copied_files INTEGER,
-        storage_budget_bytes INTEGER,
-        copy_policy_digest TEXT,
-        lease_expires_at TEXT,
-        available_at TEXT NOT NULL,
-        last_error TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        CHECK (
-          (kind = 'mirror-version' AND version_id IS NOT NULL
-            AND file_copy_limit_bytes IS NOT NULL
-            AND version_copy_limit_bytes IS NOT NULL
-            AND maximum_copied_files IS NOT NULL
-            AND copy_policy_digest IS NOT NULL)
-          OR (kind = 'delete-repository' AND version_id IS NULL)
-        )
-      ) STRICT;
-
-      CREATE TABLE IF NOT EXISTS git_history_mappings (
-        installation_id TEXT NOT NULL,
-        project_id TEXT NOT NULL REFERENCES projects(id),
-        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
-        version_id TEXT NOT NULL REFERENCES versions(id),
-        repository_name TEXT NOT NULL,
-        commit_id TEXT NOT NULL,
-        attempts INTEGER NOT NULL CHECK (attempts > 0),
-        copied_bytes INTEGER NOT NULL CHECK (copied_bytes >= 0),
-        status TEXT NOT NULL CHECK (status IN ('recorded', 'deleted')),
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (installation_id, project_id, artifact_id, version_id)
-      ) STRICT;
-
-      CREATE TABLE IF NOT EXISTS git_history_budget_reservations (
-        job_id TEXT PRIMARY KEY REFERENCES git_history_jobs(id),
-        installation_id TEXT NOT NULL,
-        logical_bytes INTEGER NOT NULL CHECK (logical_bytes >= 0),
-        state TEXT NOT NULL CHECK (state IN ('reserved', 'committed', 'released')),
-        updated_at TEXT NOT NULL
-      ) STRICT;
-
-      CREATE INDEX IF NOT EXISTS git_history_jobs_ready
-        ON git_history_jobs (installation_id, state, available_at, created_at);
-      CREATE INDEX IF NOT EXISTS git_history_jobs_artifact
-        ON git_history_jobs (installation_id, artifact_id, state);
-      CREATE INDEX IF NOT EXISTS git_history_mappings_artifact
-        ON git_history_mappings (installation_id, artifact_id, status);
+      DROP TABLE IF EXISTS git_history_budget_reservations;
+      DROP TABLE IF EXISTS git_history_jobs;
+      DROP TABLE IF EXISTS git_history_mappings;
+      DROP TABLE IF EXISTS git_history_repositories;
+      DROP TABLE IF EXISTS git_history_project_settings;
+      DROP TABLE IF EXISTS git_history_provider_identity;
     `);
   }
 
-  // `path` is the readable URL path an artifact claims at creation. It is
-  // unrelated to `source_path`, the file a linked artifact reads from disk.
+  // `path` is the readable URL path an artifact claims at creation.
   // The index is created on every start rather than behind user_version,
   // because the identity repository stamps the same version.
   #addArtifactPathIfMissing(): void {
@@ -5195,33 +4407,111 @@ export class SqliteArtifactRepository implements
     `);
   }
 
-  // One nullable column group on the artifact record carries every linked
-  // artifact's source binding. The group is all NULL for an ordinary artifact
-  // and completely populated for a linked one; SQLite cannot add a table check
-  // after the fact, so the last added column carries the group constraint.
-  #addSourceBindingColumnsIfMissing(): void {
-    if (this.#tableColumns("artifacts").includes("source_path")) return;
+  // A rename replays the name it set, so its idempotency record keeps that
+  // name. SQLite cannot widen a CHECK in place, so an older table is rebuilt;
+  // dropping it drops its triggers, which the same transaction recreates.
+  #addRenameIdempotencyIfMissing(): void {
+    const row = this.#database
+      .prepare(
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'idempotency_records'",
+      )
+      .get();
+    const {sql} = z.object({sql: z.string()}).parse(row);
+    if (sql.includes("'rename'")) return;
     this.#transaction(() => {
       this.#database.exec(`
-        ALTER TABLE artifacts ADD COLUMN source_path TEXT;
-        ALTER TABLE artifacts ADD COLUMN source_fingerprint TEXT;
-        ALTER TABLE artifacts ADD COLUMN source_status TEXT CHECK (
-          source_status IS NULL
-          OR source_status IN ('in-sync', 'modified', 'missing', 'unreadable')
+        CREATE TABLE idempotency_records_next (
+          project_id TEXT NOT NULL REFERENCES projects(id),
+          idempotency_key TEXT NOT NULL,
+          input_digest TEXT NOT NULL,
+          artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+          version_id TEXT NOT NULL REFERENCES versions(id),
+          operation TEXT NOT NULL DEFAULT 'publish' CHECK (operation IN ('publish', 'restore', 'change_access', 'change_tags', 'rename', 'delete')),
+          access_setting TEXT CHECK (access_setting IS NULL OR access_setting IN ('account_required', 'public_link')),
+          tags_json TEXT,
+          artifact_name TEXT,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (project_id, idempotency_key)
+        ) STRICT;
+
+        INSERT INTO idempotency_records_next (
+          project_id, idempotency_key, input_digest, artifact_id, version_id,
+          operation, access_setting, tags_json, created_at
+        )
+        SELECT
+          project_id, idempotency_key, input_digest, artifact_id, version_id,
+          operation, access_setting, tags_json, created_at
+        FROM idempotency_records;
+
+        DROP TABLE idempotency_records;
+        ALTER TABLE idempotency_records_next RENAME TO idempotency_records;
+
+        CREATE TRIGGER idempotency_project_insert
+        BEFORE INSERT ON idempotency_records
+        WHEN NOT EXISTS (
+          SELECT 1 FROM artifacts
+          WHERE id = NEW.artifact_id AND project_id = NEW.project_id
+        ) OR NOT EXISTS (
+          SELECT 1 FROM versions
+          WHERE id = NEW.version_id AND project_id = NEW.project_id
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'idempotency project mismatch');
+        END;
+
+        CREATE TRIGGER idempotency_project_update
+        BEFORE UPDATE OF project_id ON idempotency_records
+        WHEN NEW.project_id <> OLD.project_id
+        BEGIN
+          SELECT RAISE(ABORT, 'idempotency project cannot change');
+        END;
+      `);
+    });
+  }
+
+  // An artifact's owner is the principal who created it. Artifacts created
+  // before owners were recorded take the publisher of their first version and
+  // keep a null name, because nobody recorded the name that publisher had then.
+  #addArtifactOwnerIfMissing(): void {
+    const artifactColumns = this.#tableColumns("artifacts");
+    const versionColumns = this.#tableColumns("versions");
+    this.#transaction(() => {
+      if (!artifactColumns.includes("owner_principal_id")) {
+        this.#database.exec(`
+          ALTER TABLE artifacts ADD COLUMN owner_principal_id TEXT;
+          ALTER TABLE artifacts ADD COLUMN owner_display_name TEXT;
+          UPDATE artifacts SET owner_principal_id = (
+            SELECT publisher_principal_id FROM versions
+            WHERE versions.artifact_id = artifacts.id AND versions.number = 1
+          );
+        `);
+      }
+      if (!versionColumns.includes("publisher_display_name")) {
+        this.#database.exec(
+          "ALTER TABLE versions ADD COLUMN publisher_display_name TEXT",
         );
-        ALTER TABLE artifacts ADD COLUMN source_verified_at TEXT CHECK (
-          (
-            source_path IS NULL
-            AND source_fingerprint IS NULL
-            AND source_status IS NULL
-            AND source_verified_at IS NULL
-          ) OR (
-            source_path IS NOT NULL
-            AND source_fingerprint IS NOT NULL
-            AND source_status IS NOT NULL
-            AND source_verified_at IS NOT NULL
-          )
-        );
+      }
+      this.#database.exec(`
+        CREATE INDEX IF NOT EXISTS artifacts_owner_created
+          ON artifacts (project_id, owner_principal_id, deleted_at, created_at DESC, id DESC)
+      `);
+    });
+  }
+
+  // Linked artifacts were removed. Their versions were ordinary publishes, so
+  // link and capture actions become publish actions; a relink created no
+  // version and has no remaining meaning. Columns go in reverse order because
+  // the last one carried the check that names the other three.
+  #dropSourceBindingColumnsIfPresent(): void {
+    if (!this.#tableColumns("artifacts").includes("source_path")) return;
+    this.#transaction(() => {
+      this.#database.exec(`
+        UPDATE actions SET action = 'publish' WHERE action IN ('link', 'capture');
+        DELETE FROM actions WHERE action = 'relink';
+        ALTER TABLE artifacts DROP COLUMN source_verified_at;
+        ALTER TABLE artifacts DROP COLUMN source_status;
+        ALTER TABLE artifacts DROP COLUMN source_fingerprint;
+        ALTER TABLE artifacts DROP COLUMN source_path;
       `);
     });
   }
@@ -5630,7 +4920,6 @@ export class SqliteArtifactRepository implements
       | "comment_threads"
       | "content_bootstraps"
       | "content_sessions"
-      | "git_history_project_settings"
       | "idempotency_records"
       | "staged_uploads"
       | "versions",
@@ -5756,6 +5045,8 @@ export class SqliteArtifactRepository implements
           a.name AS artifactName,
           a.path AS artifactPath,
           a.access_setting AS accessSetting,
+          a.owner_principal_id AS ownerPrincipalId,
+          a.owner_display_name AS ownerDisplayName,
           a.current_version_id AS currentVersionId,
           a.created_at AS artifactCreatedAt,
           a.deleted_at AS artifactDeletedAt,
@@ -5766,6 +5057,7 @@ export class SqliteArtifactRepository implements
           v.routing_mode AS routingMode,
           v.content_token AS contentToken,
           v.publisher_principal_id AS publisherPrincipalId,
+          v.publisher_display_name AS publisherDisplayName,
           v.created_at AS versionCreatedAt
         FROM versions v
         JOIN artifacts a ON a.id = v.artifact_id
@@ -5780,6 +5072,10 @@ export class SqliteArtifactRepository implements
       deletedAt: parsed.artifactDeletedAt,
       id: parsed.artifactId,
       name: parsed.artifactName,
+      owner: {
+        displayName: parsed.ownerDisplayName,
+        principalId: parsed.ownerPrincipalId,
+      },
       path: parsed.artifactPath,
       projectId: parsed.projectId,
       tags: this.#readTags(parsed.artifactId),
@@ -5792,6 +5088,7 @@ export class SqliteArtifactRepository implements
       id: parsed.versionId,
       manifestDigest: parsed.manifestDigest,
       number: parsed.versionNumber,
+      publisherDisplayName: parsed.publisherDisplayName,
       publisherPrincipalId: parsed.publisherPrincipalId,
       projectId: parsed.projectId,
       routingMode: parsed.routingMode,
@@ -5826,37 +5123,6 @@ export class SqliteArtifactRepository implements
       WHERE id = ?
     `).get(projectId);
     return projectRowSchema.nullable().parse(row ?? null);
-  }
-
-  #completeGitHistoryRepositoryRemoval(
-    artifactId: string,
-    completedAt: string,
-  ): void {
-    this.#database.prepare(`
-      UPDATE git_history_repositories SET status = 'deleted', updated_at = ?
-      WHERE installation_id = ? AND artifact_id = ?
-    `).run(completedAt, this.#installationId, artifactId);
-    this.#database.prepare(`
-      UPDATE git_history_mappings SET status = 'deleted'
-      WHERE installation_id = ? AND artifact_id = ?
-    `).run(this.#installationId, artifactId);
-    this.#database.prepare(`
-      UPDATE git_history_budget_reservations SET state = 'released', updated_at = ?
-      WHERE installation_id = ? AND job_id IN (
-        SELECT id FROM git_history_jobs
-        WHERE installation_id = ? AND artifact_id = ?
-      )
-    `).run(
-      completedAt,
-      this.#installationId,
-      this.#installationId,
-      artifactId,
-    );
-    this.#database.prepare(`
-      UPDATE git_history_jobs SET state = 'done', lease_expires_at = NULL,
-        last_error = NULL, updated_at = ?
-      WHERE installation_id = ? AND artifact_id = ?
-    `).run(completedAt, this.#installationId, artifactId);
   }
 
   #transaction<Result>(operation: () => Result): Result {
@@ -6034,12 +5300,6 @@ function commentReplyFromRow(
 function missingComment(): CommentNotFound {
   return new CommentNotFound({
     message: "The comment thread or reply does not exist.",
-  });
-}
-
-function missingSourceBinding(): ArtifactNotFound {
-  return new ArtifactNotFound({
-    message: "The artifact does not have a source binding.",
   });
 }
 

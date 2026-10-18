@@ -2,8 +2,6 @@ import type {BlobStore, StagingStore} from "../core/ports.js";
 
 /** Object-storage adapters with first-party deployment support. */
 export const objectStorageProviderKinds = [
-  "azure-blob",
-  "gcs",
   "r2",
   "s3",
 ] as const;

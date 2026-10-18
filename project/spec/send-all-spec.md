@@ -27,8 +27,7 @@ agent's tier.
    therefore exact. `openCountIsLowerBound` and the "N or more" copy are
    deleted, not restored.
 3. **Delegation stays a human click.** Send-all is a human action in the
-   UI; the WebMCP surface deliberately has no dispatch tool
-   (`webmcp-review-tools-spec.md` §3).
+   UI.
 
 ## 3. The send control, state by state
 

@@ -24,47 +24,10 @@ const principalSchema = z.object({
   membershipRole: membershipRoleSchema,
 });
 
-const disabledGitHistoryCapability = {
-  limits: {
-    fileCopyBytes: 10 * 1024 * 1024,
-    logicalCopiedBytes: 0,
-    logicalReservedBytes: 0,
-    storageBudgetBytes: null,
-    versionCopyBytes: 50 * 1024 * 1024,
-  },
-  provider: null,
-  providerState: "disabled" as const,
-};
-const gitHistoryCapabilitySchema = z.object({
-  limits: z.object({
-    fileCopyBytes: z.number().int().nonnegative(),
-    logicalCopiedBytes: z.number().int().nonnegative(),
-    logicalReservedBytes: z.number().int().nonnegative(),
-    storageBudgetBytes: z.number().int().nonnegative().nullable(),
-    versionCopyBytes: z.number().int().nonnegative(),
-  }),
-  provider: z.literal("cloudflare-artifacts").nullable(),
-  providerState: z.enum([
-    "disabled",
-    "checking",
-    "available",
-    "degraded",
-    "misconfigured",
-    "migration-required",
-  ]),
-});
-
-/**
- * What this deployment offers beyond the shared surface. A deployment that
- * never learned the field is a deployment without the capability, so the
- * default keeps every gated affordance hidden rather than guessed at.
- */
+/** What this deployment offers beyond the shared surface. */
 const deploymentCapabilitiesSchema = z.object({
-  gitHistory: gitHistoryCapabilitySchema.default(disabledGitHistoryCapability),
-  linkedArtifacts: z.boolean(),
-}).default({
-  gitHistory: disabledGitHistoryCapability,
-  linkedArtifacts: false,
+  /** The largest text file one edit may save, as the server enforces it. */
+  editing: z.object({maximumTextFileBytes: z.number().int().positive()}),
 });
 
 const sessionSchema = z.object({
@@ -84,20 +47,6 @@ const accessContextSchema = z.discriminatedUnion("accessMode", [
   }),
 ]);
 
-const sourceFreshnessSchema = z.enum([
-  "in-sync",
-  "missing",
-  "modified",
-  "unreadable",
-]);
-
-/** The linked file behind an artifact, as the local deployment reports it. */
-const sourceBindingSchema = z.object({
-  lastVerifiedAt: z.string(),
-  path: z.string(),
-  status: sourceFreshnessSchema,
-});
-
 const projectSchema = z.object({
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
@@ -105,26 +54,10 @@ const projectSchema = z.object({
   installationId: z.string(),
   name: z.string(),
 });
-const projectGitHistorySettingSchema = z.object({
-  enabled: z.boolean(),
-  projectId: z.string(),
-  state: z.enum([
-    "backfilling",
-    "budget-limited",
-    "degraded",
-    "disabled",
-    "ready",
-    "waiting",
-  ]),
-});
-const projectGitHistoryEstimateSchema = z.object({
-  estimatedCopiedBytes: z.number().int().nonnegative(),
-  estimatedPointerBytes: z.number().int().nonnegative(),
-  notice: z.string(),
-  operations: z.number().int().nonnegative(),
-  projectId: z.string(),
-  repositories: z.number().int().nonnegative(),
-  versions: z.number().int().nonnegative(),
+/** The principal who created an artifact; the name is null for old artifacts. */
+const artifactOwnerSchema = z.object({
+  displayName: z.string().nullable(),
+  principalId: z.string(),
 });
 
 const artifactSchema = z.object({
@@ -134,6 +67,9 @@ const artifactSchema = z.object({
   deletedAt: z.string().nullable(),
   id: z.string(),
   name: z.string(),
+  owner: artifactOwnerSchema,
+  /** The readable path claimed at creation, or null. */
+  path: z.string().nullable(),
   projectId: z.string(),
   tags: z.array(z.string()),
 });
@@ -155,6 +91,7 @@ const versionSchema = z.object({
   manifestDigest: z.string(),
   number: z.number(),
   projectId: z.string(),
+  publisherDisplayName: z.string().nullable(),
   publisherPrincipalId: z.string(),
   routingMode: z.enum(["static", "spa"]),
 });
@@ -190,16 +127,13 @@ const noContentStatuses = new Set([204, 205]);
 
 export type AccessSetting = z.infer<typeof accessSettingSchema>;
 export type DeploymentCapabilities = z.infer<typeof deploymentCapabilitiesSchema>;
-export type SourceFreshness = z.infer<typeof sourceFreshnessSchema>;
-export type SourceBinding = z.infer<typeof sourceBindingSchema>;
 export type PrincipalCapability = z.infer<typeof capabilitySchema>;
 export type Principal = z.infer<typeof principalSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type AccessContext = z.infer<typeof accessContextSchema>;
 export type Project = z.infer<typeof projectSchema>;
-export type ProjectGitHistorySetting = z.infer<typeof projectGitHistorySettingSchema>;
-export type ProjectGitHistoryEstimate = z.infer<typeof projectGitHistoryEstimateSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
+export type ArtifactOwner = z.infer<typeof artifactOwnerSchema>;
 export type ManifestEntry = z.infer<typeof manifestEntrySchema>;
 export type Version = z.infer<typeof versionSchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
@@ -265,15 +199,23 @@ export type PublicLinkMutationResponse = z.infer<
   typeof publicLinkMutationResponseSchema
 >;
 
+/** Whose artifacts a listing keeps, relative to the signed-in principal. */
+export type ArtifactOwnerScope = "all" | "me" | "others";
+
 export interface ArtifactPage {
   readonly artifacts: readonly {
     readonly artifact: Artifact;
     readonly commentCount: number;
+    readonly currentVersionNumber: number;
     readonly links: {
       readonly artifact: string;
       readonly management: string;
     };
+    readonly owner: ArtifactOwner;
+    /** The current version's creation time. */
+    readonly updatedAt: string;
     readonly versionCount: number;
+    readonly views: {readonly last30Days: number; readonly total: number};
   }[];
   readonly nextCursor: string | null;
 }
@@ -283,17 +225,12 @@ export interface ArtifactDetails {
   readonly current: ArtifactVersion;
   readonly links: {
     readonly artifact: string;
-    /** The artifact's own live origin; present only for a linked artifact. */
-    readonly live?: string | undefined;
     readonly management: string;
   };
-  /** Present only on a local deployment that linked this artifact to a file. */
-  readonly sourceBinding?: SourceBinding | undefined;
 }
 
 export interface ArtifactAction {
   readonly action:
-    | "capture"
     | "change_access"
     | "change_tags"
     | "comment_create"
@@ -303,9 +240,9 @@ export interface ArtifactAction {
     | "comment_resolve"
     | "comment_update"
     | "delete"
-    | "link"
+    | "edited"
     | "publish"
-    | "relink"
+    | "renamed"
     | "restore";
   readonly artifactId: string;
   readonly authorizedByPrincipalId: string | null;
@@ -358,41 +295,76 @@ const artifactPageSchema: z.ZodType<ArtifactPage> = z.object({
   artifacts: z.array(z.object({
     artifact: artifactSchema,
     commentCount: z.number().int().nonnegative(),
+    currentVersionNumber: z.number().int().positive(),
     links: z.object({ artifact: z.url(), management: z.url() }),
+    owner: artifactOwnerSchema,
+    updatedAt: z.string(),
     versionCount: z.number().int().positive(),
+    views: z.object({
+      last30Days: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative(),
+    }),
   })),
   nextCursor: z.string().nullable(),
 });
+
+const dayStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
+const viewCountSchema = z.number().int().nonnegative();
+
+const projectAnalyticsSchema = z.object({
+  daily: z.array(z.object({
+    day: dayStringSchema,
+    uploads: viewCountSchema,
+    views: viewCountSchema,
+  })),
+  generatedAt: z.string(),
+  today: dayStringSchema,
+  topArtifacts: z.array(z.object({
+    artifactId: z.string(),
+    name: z.string(),
+    total: viewCountSchema,
+    views30d: viewCountSchema,
+  })),
+  totals: z.object({
+    artifacts: viewCountSchema,
+    artifactsViewedToday: viewCountSchema,
+    averageViewsPerArtifact: z.number().nonnegative(),
+    pageViews: viewCountSchema,
+    publicArtifacts: viewCountSchema,
+    uploadedToday: viewCountSchema,
+    uploads: viewCountSchema,
+  }),
+  windowDays: z.number().int().positive(),
+});
+
+const artifactAnalyticsSchema = z.object({
+  artifactId: z.string(),
+  daily: z.array(z.object({day: dayStringSchema, views: viewCountSchema})),
+  today: dayStringSchema,
+  views: z.object({
+    last7Days: viewCountSchema,
+    last30Days: viewCountSchema,
+    total: viewCountSchema,
+  }),
+  windowDays: z.number().int().positive(),
+});
+
+/** One project's activity: totals, a sparse yearly series, its most viewed. */
+export type ProjectAnalytics = z.infer<typeof projectAnalyticsSchema>;
+/** One artifact's 7-day, 30-day, and all-time views with a sparse series. */
+export type ArtifactAnalytics = z.infer<typeof artifactAnalyticsSchema>;
 
 const artifactDetailsSchema: z.ZodType<ArtifactDetails> = z.object({
   artifact: artifactSchema,
   current: artifactVersionSchema,
   links: z.object({
     artifact: z.url(),
-    live: z.url().optional(),
     management: z.url(),
   }),
-  sourceBinding: sourceBindingSchema.optional(),
 });
-
-/** The link and capture answer: a published version plus the binding it read. */
-const linkedPublicationSchema = z.object({
-  artifact: artifactSchema,
-  links: z.object({
-    artifact: z.url(),
-    live: z.url().optional(),
-    version: z.url(),
-  }),
-  replayed: z.boolean(),
-  sourceBinding: sourceBindingSchema,
-  version: versionSchema,
-});
-
-export type LinkedPublication = z.infer<typeof linkedPublicationSchema>;
 
 const actionSchema: z.ZodType<ArtifactAction> = z.object({
   action: z.enum([
-    "capture",
     "change_access",
     "change_tags",
     "comment_create",
@@ -402,9 +374,9 @@ const actionSchema: z.ZodType<ArtifactAction> = z.object({
     "comment_resolve",
     "comment_update",
     "delete",
-    "link",
+    "edited",
     "publish",
-    "relink",
+    "renamed",
     "restore",
   ]),
   artifactId: z.string(),
@@ -953,26 +925,6 @@ export const api = {
     `/api/v1/projects/${encodeURIComponent(projectId)}/unarchive`,
     { headers: mutationHeaders(), method: "POST" },
   ).then(({ project }) => project),
-  projectGitHistory: (projectId: string) => request(
-    z.object({gitHistory: projectGitHistorySettingSchema}),
-    `/api/v1/projects/${encodeURIComponent(projectId)}/git-history`,
-  ).then(({gitHistory}) => gitHistory),
-  estimateProjectGitHistory: (projectId: string) => request(
-    z.object({estimate: projectGitHistoryEstimateSchema}),
-    `/api/v1/projects/${encodeURIComponent(projectId)}/git-history/estimate`,
-    {headers: mutationHeaders(), method: "POST"},
-  ).then(({estimate}) => estimate),
-  setProjectGitHistory: (projectId: string, enabled: boolean) => request(
-    z.object({gitHistory: projectGitHistorySettingSchema}),
-    `/api/v1/projects/${encodeURIComponent(projectId)}/git-history`,
-    {
-      body: JSON.stringify(enabled
-        ? {confirmEstimate: true, enabled: true}
-        : {enabled: false}),
-      headers: mutationHeaders(),
-      method: "PUT",
-    },
-  ).then(({gitHistory}) => gitHistory),
   artifacts: (
     projectId: string,
     cursor: string | null,
@@ -980,11 +932,13 @@ export const api = {
     search = "",
     options: {
       readonly comments?: "all" | "with" | "without";
+      readonly owner?: ArtifactOwnerScope;
       readonly sort?: "comments" | "newest";
     } = {},
   ) => {
     const query = new URLSearchParams({ limit: "25", projectId });
     query.set("comments", options.comments ?? "all");
+    query.set("owner", options.owner ?? "all");
     query.set("sort", options.sort ?? "newest");
     if (cursor !== null) query.set("cursor", cursor);
     for (const tag of tags) query.append("tag", tag);
@@ -1063,6 +1017,30 @@ export const api = {
       method: "PATCH",
     },
   ),
+  analytics: (projectId: string) => request(
+    projectAnalyticsSchema,
+    `/api/v1/analytics?${projectQuery(projectId)}`,
+  ),
+  artifactAnalytics: (artifactId: string, projectId: string) => request(
+    artifactAnalyticsSchema,
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/analytics?${projectQuery(projectId)}`,
+  ),
+  /** Change the display name; no version is saved and links stay the same. */
+  rename: (
+    projectId: string,
+    artifactId: string,
+    expectedCurrentVersionId: string,
+    name: string,
+    idempotencyKey: string,
+  ) => request(
+    artifactStateSchema,
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/name?${projectQuery(projectId)}`,
+    {
+      body: JSON.stringify({ expectedCurrentVersionId, name }),
+      headers: mutationHeaders(idempotencyKey),
+      method: "PATCH",
+    },
+  ),
   changeTags: (
     projectId: string,
     artifactId: string,
@@ -1095,35 +1073,6 @@ export const api = {
       headers: mutationHeaders(idempotencyKey),
       method: "DELETE",
     },
-  ),
-  /**
-   * Save the linked file's current bytes as a new immutable version. Capturing
-   * a binding that is already in sync replays the current version instead of
-   * committing a second identical one.
-   */
-  captureArtifact: (
-    projectId: string,
-    artifactId: string,
-    expectedCurrentVersionId: string,
-    idempotencyKey: string,
-  ) => request(
-    linkedPublicationSchema,
-    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/capture?${projectQuery(projectId)}`,
-    {
-      body: JSON.stringify({ expectedCurrentVersionId }),
-      headers: mutationHeaders(idempotencyKey),
-      method: "POST",
-    },
-  ),
-  /**
-   * Enter the artifact's live origin: the answer is a one-use bootstrap URL
-   * that exchanges itself for the content cookie, exactly like a version's
-   * content session, and then streams the file's current bytes.
-   */
-  liveSession: (projectId: string, artifactId: string) => request(
-    z.object({ bootstrapUrl: z.url(), expiresAt: z.string() }),
-    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/live-sessions?${projectQuery(projectId)}`,
-    { headers: mutationHeaders(), method: "POST" },
   ),
   contentSession: (
     projectId: string,

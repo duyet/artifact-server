@@ -2,6 +2,8 @@
 
 Status: accepted for the local foundation
 
+> Superseded in part (2026-10-18): WorkOS, OIDC, and MCP OAuth token verification were removed. MCP and the HTTP API accept managed API keys only.
+
 ## Decision
 
 Every supported credential is converted once into a provider-neutral

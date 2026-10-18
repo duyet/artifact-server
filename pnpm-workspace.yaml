@@ -1,8 +1,6 @@
 packages:
   - .
-  - apps/*
-  - deploy/cloudflare
-  - deploy/pulumi/*
+  - apps/web
   - integrations/claude-channel
   - integrations/opencode
   - integrations/pi

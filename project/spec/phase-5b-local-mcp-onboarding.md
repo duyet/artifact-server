@@ -1,5 +1,7 @@
 # Phase 5b: local MCP onboarding
 
+> Superseded (2026-10-18): `artifactserver connect`, `disconnect`, `doctor`, and the `artifactserver mcp` stdio bridge were removed. Agents connect to `/mcp` over HTTP with an API key.
+
 Status: implemented locally; current-client host qualification remains open
 
 ## Outcome

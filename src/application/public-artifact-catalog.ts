@@ -171,7 +171,7 @@ function readCounts(
   });
 }
 
-function countViews(
+export function countViews(
   series: readonly ArtifactViewDay[],
   total: ArtifactViewTotal | undefined,
   recentSinceDay: string,

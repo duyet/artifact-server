@@ -2,6 +2,8 @@
 
 Status: accepted
 
+> Superseded in part (2026-10-18): OIDC and WorkOS browser login were removed. Private-team servers use API-key sign-in, and there is no external identity binding.
+
 ## Context
 
 One Artifact Server installation represents one closed group: one person or one

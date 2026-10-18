@@ -69,7 +69,7 @@ The backend already supports:
 - immutable versions, canonical manifests, text comparisons, and restore;
 - public links and account-required content sessions;
 - browser-native HTML, static sites, SPAs, images, PDFs, audio, and video;
-- local browser sessions and hosted WorkOS browser login;
+- local browser sessions and API-key browser sign-in;
 - installation members and managed API keys;
 - CLI, HTTP, and MCP access through the same application services;
 - local packages, OCI images, Compose, Helm, Cloudflare, AWS, and GCP release
@@ -81,7 +81,7 @@ original frontend assignment and is no longer a current-state inventory.
 
 Since this handoff was written, the tree has also gained exact-version comments,
 the artifact-first review viewer, agent dispatch, linked local artifacts,
-generic OIDC and local-owner access, plus the first configurable Git-history
+local-owner access and API-key browser sign-in, plus the first configurable Git-history
 foundation. Public hosting controls, the server-operation route of the Artifact Server skill, custom domains, and the
 remaining Git mirror are still separate work.
 
@@ -244,8 +244,8 @@ application. Update the associated behavior tests.
 
 ## Browser authentication and request rules
 
-The UI uses Artifact Server application sessions. It does not use MCP tokens,
-WorkOS access tokens, or API keys directly.
+The UI uses Artifact Server application sessions. It does not use MCP tokens
+or API keys directly after sign-in.
 
 On startup, call:
 
@@ -253,18 +253,19 @@ On startup, call:
 GET /api/v1/session
 ```
 
-The response contains `authenticationMethod` and the provider-neutral
+The response contains `authenticationMethod` and the
 `principal`. Use the principal's human role and capabilities to decide which
 administrative actions to show.
 
-For a hosted deployment, an unauthenticated screen sends the person to:
+On a private-team deployment, an unauthenticated screen shows a form that posts
+`{"apiKey": "..."}` to the same-origin route:
 
 ```text
-GET /auth/login?returnTo=<safe application path>
+POST /auth/api-key
 ```
 
-WorkOS completes login, but the UI never receives or stores a WorkOS token.
-Artifact Server exchanges the verified identity for its own opaque session.
+Artifact Server checks the key and answers with its own opaque session cookie.
+The UI never stores the key.
 
 Every browser request must use same-origin credentials. For `POST`, `PATCH`,
 and `DELETE` requests authenticated by a browser session, read the CSRF cookie
@@ -380,7 +381,7 @@ The first interface must support these complete workflows.
 ### Session
 
 - Recognize a valid local or hosted application session.
-- Start hosted login when needed.
+- Show the API-key sign-in form when needed.
 - Show the signed-in person's identity and role.
 - Log out.
 - Recover cleanly when a session expires.
@@ -546,8 +547,8 @@ The assignment is complete when:
 - the final source retains the exact QA Miner theme and component foundation;
 - one management application works locally and in every packaged runtime;
 - a local person can open it without reading or copying a credential;
-- hosted login uses Artifact Server's WorkOS-backed application session;
-- no browser code stores an API key, WorkOS token, MCP token, or session secret;
+- team sign-in posts an API key to `/auth/api-key` and receives an Artifact Server application session;
+- no browser code stores an API key, MCP token, or session secret;
 - every MVP workflow above works against the real backend;
 - untrusted artifact content cannot reach the management UI or its credentials;
 - root lint includes anti-slop at error level and passes without suppressions;

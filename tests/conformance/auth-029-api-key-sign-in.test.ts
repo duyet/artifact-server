@@ -1,17 +1,14 @@
 import {createHash} from "node:crypto";
 import path from "node:path";
 
-import {Effect} from "effect";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
-import type {InteractiveIdentityProvider} from "../../src/application/interactive-login.js";
 import {
   browserLoginKinds,
   localOwnerBrowserAccess,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
-import {IdentityProviderFailure} from "../../src/core/errors.js";
 import {principalCapabilities} from "../../src/core/identity.js";
 import type {Clock} from "../../src/core/ports.js";
 import {SqliteIdentityRepository} from "../../src/storage/sqlite-identity-repository.js";
@@ -37,12 +34,6 @@ const issuedKeySchema = z.object({
 });
 const forgedKey =
   "as_key_key_00000000-0000-4000-8000-000000000001_wrongSecretWithSufficientEntropy123456";
-
-const unusedProvider: InteractiveIdentityProvider = {
-  complete: () => Effect.fail(new IdentityProviderFailure({message: "unused"})),
-  name: "unused-provider",
-  start: () => Effect.fail(new IdentityProviderFailure({message: "unused"})),
-};
 
 class MutableClock implements Clock {
   #milliseconds = new Date("2026-10-17T08:00:00.000Z").getTime();
@@ -240,17 +231,6 @@ describe("API-key browser sign-in", () => {
     );
     expect(fromQuery.status).toBe(400);
     expect(fromQuery.headers.getSetCookie()).toEqual([]);
-
-    await running().stop();
-    server = await startTestServer(installation, {
-      browserAccess: privateTeamBrowserAccess(browserLoginKinds.oidc),
-      clock,
-      contentDomain: null,
-      interactiveIdentityProvider: unusedProvider,
-    });
-    const withOidc = await signIn(running(), installation.apiToken);
-    expect(withOidc.status).toBe(404);
-    expect(withOidc.headers.getSetCookie()).toEqual([]);
 
     await running().stop();
     server = await startTestServer(installation, {
