@@ -37,6 +37,7 @@ import {
 import {
   startLocalServer,
 } from "../local/start-local-server.js";
+import {membershipRoles, type MembershipRole} from "../core/identity.js";
 import {PostgresDatabase} from "../storage/postgres-database.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
@@ -63,10 +64,12 @@ interface InitOptions {
   readonly data: string;
 }
 
-interface IssueAdministratorKeyOptions extends LifecycleOptions {
+interface IssueOperatorKeyOptions extends LifecycleOptions {
   readonly email: string;
   readonly expiresAt?: string;
+  readonly keyName?: string;
   readonly name: string;
+  readonly role: MembershipRole;
 }
 
 const operatorKeyLifetimeMilliseconds = 90 * 24 * 60 * 60 * 1_000;
@@ -132,14 +135,23 @@ function configureMaintenance(program: Command): void {
 function configureAdministration(program: Command): void {
   const admin = program
     .command("admin")
-    .description("Recover administrator access with storage access.");
+    .description("Issue member keys and recover administrator access with storage access.");
   admin
     .command("issue-key")
     .description(
-      "Create or reuse an administrator and print a new sign-in key for them once.",
+      "Create or reuse a member and print a new key for them once. Re-issuing a key name replaces that key.",
     )
-    .requiredOption("--email <email>", "administrator email")
-    .requiredOption("--name <name>", "administrator display name")
+    .requiredOption("--email <email>", "member email")
+    .requiredOption("--name <name>", "member display name")
+    .addOption(
+      new Option("--role <role>", "member role")
+        .choices(Object.values(membershipRoles))
+        .default(membershipRoles.administrator),
+    )
+    .option(
+      "--key-name <label>",
+      "key name shown as the author of its writes (default: --name)",
+    )
     .option(
       "--expires-at <timestamp>",
       "key expiry as an ISO timestamp (default: 90 days from now)",
@@ -148,7 +160,7 @@ function configureAdministration(program: Command): void {
     .addOption(dataOption())
     .addOption(hostOption())
     .addOption(portOption())
-    .action(async (options: IssueAdministratorKeyOptions) => {
+    .action(async (options: IssueOperatorKeyOptions) => {
       const configuration = await lifecycleConfiguration(options);
       const runtime = configuration.deploymentMode === "compact"
         ? await createLocalRuntime(compactMaintenanceConfig(configuration))
@@ -156,22 +168,26 @@ function configureAdministration(program: Command): void {
           externalMaintenanceConfig(configuration),
         );
       try {
-        const {issued, member} = await runtime.issueOperatorAdministratorKey({
+        const {issued, member} = await runtime.issueOperatorKey({
           displayName: options.name,
           email: options.email,
           expiresAt: options.expiresAt ?? new Date(
             Date.now() + operatorKeyLifetimeMilliseconds,
           ).toISOString(),
+          keyName: options.keyName ?? options.name,
+          role: options.role,
         });
         console.log(JSON.stringify({
           apiKey: {
             expiresAt: issued.apiKey.expiresAt,
             id: issued.apiKey.id,
+            name: issued.apiKey.name,
           },
           member: {
             displayName: member.displayName,
             email: member.email,
             id: member.id,
+            role: member.role,
           },
           token: issued.token,
         }, null, 2));

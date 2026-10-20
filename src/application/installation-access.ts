@@ -42,6 +42,17 @@ import {
 } from "../core/identity.js";
 
 const allCapabilities = Object.values(principalCapabilities);
+// A member key creates and republishes its own artifacts and comments; it
+// never manages or publishes over other members' work.
+const operatorKeyCapabilities = {
+  [membershipRoles.administrator]: allCapabilities,
+  [membershipRoles.member]: [
+    principalCapabilities.createArtifact,
+    principalCapabilities.readArtifacts,
+    principalCapabilities.writeComments,
+    principalCapabilities.issueContentSession,
+  ],
+} satisfies Record<MembershipRole, readonly PrincipalCapability[]>;
 const localBrowserLoginProvider = "artifact-server-local";
 
 export interface InstallationIdentityRepository {
@@ -168,15 +179,18 @@ export interface AdmitMemberCommand {
   readonly role: MembershipRole;
 }
 
-/** A human administrator key minted by an operator with storage access. */
-export interface IssueOperatorAdministratorKeyCommand {
+/** A human member key minted by an operator with storage access. */
+export interface IssueOperatorKeyCommand {
   readonly displayName: string;
   readonly email: string;
   readonly expiresAt: string;
+  /** Shown as the author of every bearer write made with the key. */
+  readonly keyName: string;
+  readonly role: MembershipRole;
 }
 
-/** The administrator an operator key belongs to, and its one-time secret. */
-export interface IssuedOperatorAdministratorKey {
+/** The member an operator key belongs to, and its one-time secret. */
+export interface IssuedOperatorKey {
   readonly issued: IssuedManagedApiKey;
   readonly member: InstallationMember;
 }
@@ -237,15 +251,16 @@ export interface InstallationAccessOperations {
     AuthorizationDenied | IdentityRepositoryFailure
   >;
   /**
-   * Create or reuse an active administrator member by email and mint a key
-   * whose browser sign-in acts as that administrator. Operators call it with
-   * storage access, so no application principal authorizes it.
+   * Create or reuse an active member with the requested role by email and
+   * mint a key whose browser sign-in acts as that member. Re-issuing the same
+   * key name revokes the member's earlier keys with that name. Operators call
+   * it with storage access, so no application principal authorizes it.
    */
-  readonly issueOperatorAdministratorKey: (
-    command: IssueOperatorAdministratorKeyCommand,
+  readonly issueOperatorKey: (
+    command: IssueOperatorKeyCommand,
   ) => Effect.Effect<
-    IssuedOperatorAdministratorKey,
-    IdentityConflict | IdentityRepositoryFailure
+    IssuedOperatorKey,
+    IdentityConflict | IdentityNotFound | IdentityRepositoryFailure
   >;
   readonly issueLocalBrowserLogin: (
     credential: Redacted.Redacted,
@@ -627,11 +642,12 @@ function makeInstallationAccessService(
     return {apiKey, token};
   });
 
-  const issueOperatorAdministratorKey = Effect.fn(
-    "InstallationAccessService.issueOperatorAdministratorKey",
-  )(function*(command: IssueOperatorAdministratorKeyCommand) {
+  const issueOperatorKey = Effect.fn(
+    "InstallationAccessService.issueOperatorKey",
+  )(function*(command: IssueOperatorKeyCommand) {
     const email = yield* normalizeEmail(command.email);
     const displayName = yield* requireText(command.displayName, "display name");
+    const name = yield* requireText(command.keyName, "API key name");
     const now = dependencies.clock.now();
     const expiresAt = yield* requireFutureDate(command.expiresAt, now);
     const existing = yield* dependencies.repository.findActiveMemberByEmail(
@@ -644,23 +660,24 @@ function makeInstallationAccessService(
       email,
       id: dependencies.ids.memberId(),
       installationId: dependencies.installationId,
-      role: membershipRoles.administrator,
+      role: command.role,
     }));
-    if (member.role !== membershipRoles.administrator) {
+    if (member.role !== command.role) {
       return yield* Effect.fail(new IdentityConflict({
-        message: "That email belongs to a member who is not an administrator.",
+        message:
+          `That email belongs to a member whose role is ${member.role}, not ${command.role}.`,
       }));
     }
     const id = dependencies.ids.apiKeyId();
     const token = `as_key_${id}_${dependencies.secrets.issue()}`;
     const apiKey = yield* dependencies.repository.createApiKey({
       authorizedByPrincipalId: installationOperatorPrincipalId,
-      capabilities: allCapabilities,
+      capabilities: operatorKeyCapabilities[command.role],
       createdAt: now.toISOString(),
       expiresAt,
       id,
       installationId: dependencies.installationId,
-      name: "Operator administrator key",
+      name,
       prefix: token.slice(0, Math.min(token.length, 32)),
       principalId: member.id,
       principalKind: principalKinds.human,
@@ -668,7 +685,26 @@ function makeInstallationAccessService(
       rotatedFromId: null,
       secretDigest: dependencies.secrets.digest(token),
     });
-    const issued: IssuedOperatorAdministratorKey = {
+    // Revoking after the new key exists means a failed re-issue never leaves
+    // a machine without a working key.
+    const replaced = (yield* dependencies.repository.listApiKeys(
+      dependencies.installationId,
+    )).filter((key) =>
+      key.id !== apiKey.id && key.principalId === member.id &&
+      key.name === name && key.revokedAt === null
+    );
+    for (const key of replaced) {
+      yield* dependencies.repository.revokeApiKey(
+        dependencies.installationId,
+        key.id,
+        now.toISOString(),
+      );
+    }
+    if (replaced.length > 0) {
+      apiKeyCache?.clear();
+      sessionCache?.clear();
+    }
+    const issued: IssuedOperatorKey = {
       issued: {apiKey, token},
       member,
     };
@@ -781,7 +817,7 @@ function makeInstallationAccessService(
     deactivateMember,
     issueApiKey,
     issueLocalBrowserLogin,
-    issueOperatorAdministratorKey,
+    issueOperatorKey,
     loginAsLocalOwner,
     listApiKeys,
     listMembers,
