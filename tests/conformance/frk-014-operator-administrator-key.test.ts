@@ -77,7 +77,9 @@ describe("operator administrator key", {timeout: processTestTimeoutMilliseconds}
       await waitForOutput(server, '"status":"ready"');
       const baseUrl = `http://127.0.0.1:${port}`;
 
-      const session = await signIn(baseUrl, first.issued.token);
+      // Re-issuing the same key name replaced the first key.
+      expect((await apiKeySignIn(baseUrl, first.issued.token)).status).toBe(401);
+      const session = await signIn(baseUrl, repeated.issued.token);
       const principal = sessionSchema.parse(await (await fetch(
         `${baseUrl}/api/v1/session`,
         {headers: {Cookie: session.cookie}},
@@ -118,11 +120,24 @@ describe("operator administrator key", {timeout: processTestTimeoutMilliseconds}
 
       // The key is a sign-in credential: as a bearer it stays a delegated key.
       expect((await fetch(`${baseUrl}/api/v1/members`, {
-        headers: {Authorization: `Bearer ${first.issued.token}`},
+        headers: {Authorization: `Bearer ${repeated.issued.token}`},
       })).status).toBe(403);
 
       await stopProcess(server);
-      expect(serverOutput()).not.toContain(first.issued.token);
+      expect(serverOutput()).not.toContain(repeated.issued.token);
+
+      const reviewerLaptop = await runCli([
+        ...issueKeyArguments(dataDirectory, "reviewer@example.test", "Reviewer"),
+        "--role",
+        "member",
+        "--key-name",
+        "Reviewer @ laptop",
+      ], compactEnvironment());
+      expect(reviewerLaptop.exitCode).toBe(0);
+      expect(JSON.parse(reviewerLaptop.stdout)).toMatchObject({
+        apiKey: {name: "Reviewer @ laptop"},
+        member: {id: reviewer.id, role: "member"},
+      });
     } finally {
       await rm(parent, {force: true, recursive: true});
     }
@@ -183,7 +198,7 @@ describe("operator administrator key", {timeout: processTestTimeoutMilliseconds}
       ), compactEnvironment());
       expect(reader.exitCode).not.toBe(0);
       expect(reader.stdout).not.toContain("as_key_");
-      expect(`${reader.stdout}${reader.stderr}`).toContain("not an administrator");
+      expect(`${reader.stdout}${reader.stderr}`).toContain("role is member, not administrator");
 
       const restarted = startCli(
         ["start-compact", "--data", dataDirectory, "--port", String(port)],
@@ -239,8 +254,8 @@ async function issueKey(
   return {issued: issuedSchema.parse(JSON.parse(result.stdout)), result};
 }
 
-async function signIn(baseUrl: string, apiKey: string): Promise<BrowserSession> {
-  const response = await fetch(`${baseUrl}/auth/api-key`, {
+function apiKeySignIn(baseUrl: string, apiKey: string): Promise<Response> {
+  return fetch(`${baseUrl}/auth/api-key`, {
     body: JSON.stringify({apiKey}),
     headers: {
       "Content-Type": "application/json",
@@ -250,6 +265,10 @@ async function signIn(baseUrl: string, apiKey: string): Promise<BrowserSession> 
     },
     method: "POST",
   });
+}
+
+async function signIn(baseUrl: string, apiKey: string): Promise<BrowserSession> {
+  const response = await apiKeySignIn(baseUrl, apiKey);
   expect(response.status).toBe(204);
   const pairs = response.headers.getSetCookie().map((value) =>
     value.split(";", 1)[0] ?? ""

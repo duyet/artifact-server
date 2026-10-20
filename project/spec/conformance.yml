@@ -4260,12 +4260,26 @@ requirements:
     owner: authorization
     source: {file: ../../docs/fork/RUNBOOK.md, anchor: recover-administrator-access}
     acceptance:
-      behavior: {id: FRK-014-B, description: "Issue a key twice for one email against a compact installation, reuse the same member, sign the browser in with the key, read a direct human administrator session, admit a member, and issue that member a key over HTTP."}
+      behavior: {id: FRK-014-B, description: "Issue a key twice for one email against a compact installation, reuse the same member, refuse the replaced first key, sign the browser in with the second key, read a direct human administrator session, admit a member, issue that member a key over HTTP, and issue the same member a named member key through the CLI."}
       failure: {id: FRK-014-F, description: "A missing installation exits non-zero and creates nothing, an email that belongs to a non-administrator gets no key, and the secret appears once on standard output and never on standard error or in server logs."}
     deployments: [local, single_server, kubernetes]
     status: implementing
     proof_gap: Proved against a compact SQLite installation through the CLI and a real server. The external-storage path shares the application service but has no Postgres run.
     depends_on: [AUTH-009, AUTH-029]
+    evidence: []
+
+  - id: FRK-015
+    kind: security
+    behavior: artifactserver admin issue-key --role member --key-name mints a member key that creates, reads, comments, and republishes only artifacts its member owns, records the key name as the author of its writes, and replaces that member's active keys with the same name on re-issue; a member whose role differs gets no key.
+    owner: authorization
+    source: {file: ../../docs/fork/RUNBOOK.md, anchor: give-each-person-a-key}
+    acceptance:
+      behavior: {id: FRK-015-B, description: "Issue one member two keys with different names, publish with one key and read its name as owner and publisher, then publish new versions of that artifact with each key."}
+      failure: {id: FRK-015-F, description: "A member key gets 403 committing a version of, or renaming, an artifact another principal owns; re-issuing a key name makes the old token 401 while the new token and the member's other key stay valid; asking for the administrator role for a member email is an IdentityConflict."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a compact SQLite installation in process. The external-storage path shares the application service and repository methods but has no Postgres run.
+    depends_on: [FRK-010, FRK-014]
     evidence: []
 
   - id: FRK-011

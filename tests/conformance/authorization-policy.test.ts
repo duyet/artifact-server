@@ -69,16 +69,30 @@ describe("authorization policy", () => {
       authorization.requireContentSession(member, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireVersionPublication(member)
+      authorization.requireVersionPublication(member, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireVersionPublication(administrator)
+      authorization.requireVersionPublication(administrator, artifact)
     );
     await expectAllowed((authorization) =>
-      authorization.requireVersionPublication(scopedService)
+      authorization.requireVersionPublication(scopedService, artifact)
     );
     await expectDenied((authorization) =>
-      authorization.requireVersionPublication(unscopedService)
+      authorization.requireVersionPublication(unscopedService, artifact)
+    );
+    // A creator keeps publishing what it owns and nothing else.
+    const creator = servicePrincipal(
+      artifact.owner.principalId,
+      [principalCapabilities.createArtifact],
+    );
+    await expectAllowed((authorization) =>
+      authorization.requireVersionPublication(creator, artifact)
+    );
+    await expectDenied((authorization) =>
+      authorization.requireVersionPublication(
+        {...creator, id: "another-creator"},
+        artifact,
+      )
     );
     await expectDenied((authorization) =>
       authorization.requireArtifactRead(unscopedService)

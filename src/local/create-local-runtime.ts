@@ -6,8 +6,8 @@ import type { ApplicationRuntime } from "../application/application-runtime.js";
 import type { BearerCredentialVerifier } from "../application/authentication.js";
 import {
   InstallationAccessService,
-  type IssueOperatorAdministratorKeyCommand,
-  type IssuedOperatorAdministratorKey,
+  type IssueOperatorKeyCommand,
+  type IssuedOperatorKey,
 } from "../application/installation-access.js";
 import type { Clock } from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
@@ -79,9 +79,9 @@ export interface LocalRuntime {
   /** Write buffered view counts now instead of waiting for the next drain. */
   flushArtifactViews(): Promise<ArtifactViewDrainReport>;
   cleanupStaging(limit: number): Promise<ExpiredStagingCleanupReport>;
-  issueOperatorAdministratorKey(
-    command: IssueOperatorAdministratorKeyCommand,
-  ): Promise<IssuedOperatorAdministratorKey>;
+  issueOperatorKey(
+    command: IssueOperatorKeyCommand,
+  ): Promise<IssuedOperatorKey>;
   close(): Promise<void>;
 }
 
@@ -203,9 +203,9 @@ export async function createLocalRuntime(
     return {
       app,
       cleanupStaging: (limit) => runStagingCleanupPass(applicationRuntime, limit),
-      issueOperatorAdministratorKey: (command) => applicationRuntime.runPromise(
+      issueOperatorKey: (command) => applicationRuntime.runPromise(
         InstallationAccessService.use((access) =>
-          access.issueOperatorAdministratorKey(command)
+          access.issueOperatorKey(command)
         ),
       ),
       flushArtifactViews: () => artifactViewRecorder.flush(),

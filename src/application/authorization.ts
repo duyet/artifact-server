@@ -60,6 +60,7 @@ export interface AuthorizationOperations {
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireVersionPublication: (
     principal: Principal,
+    artifact: ArtifactRecord,
   ) => Effect.Effect<void, AuthorizationDenied>;
 }
 
@@ -268,11 +269,16 @@ function makeAuthorizationService(
 
   const requireVersionPublication = Effect.fn(
     "AuthorizationService.requireVersionPublication",
-  )(function*(principal: Principal) {
+  )(function*(principal: Principal, artifact: ArtifactRecord) {
     yield* requireInstallation(principal);
     if (isDirectHumanPrincipal(principal)) return;
+    // Whoever may create an artifact may keep publishing the ones it owns.
     if (
-      hasCapability(principal, principalCapabilities.publishAnyArtifact)
+      hasCapability(principal, principalCapabilities.publishAnyArtifact) ||
+      (
+        hasCapability(principal, principalCapabilities.createArtifact) &&
+        principal.id === artifact.owner.principalId
+      )
     ) {
       return;
     }

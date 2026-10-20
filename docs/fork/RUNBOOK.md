@@ -138,7 +138,7 @@ The bootstrap key publishes but cannot administer: admitting members and issuing
 
 ## Recover administrator access
 
-Run this on a machine that can reach the installation's storage, with the same configuration the server uses. It creates the administrator member if the email is new, reuses it otherwise, and prints a new key once.
+Run this on a machine that can reach the installation's storage, with the same configuration the server uses. It creates the administrator member if the email is new, reuses it otherwise, and prints a new key once. Running it again with the same email and key name revokes the earlier key.
 
 ```sh
 # Compact (SQLite) installation
@@ -155,7 +155,27 @@ The `token` field in the output is the key. Store it in your secret manager and 
 
 Open the application, choose API-key sign-in, and paste the key. That browser session is the administrator: it can admit members and issue, rotate, or revoke keys under Settings › API keys. Used as a bearer token, the same key is an ordinary delegated key and cannot administer. Deactivating the member revokes the key.
 
-The command refuses an email that belongs to a member who is not an administrator, and an email of a deactivated member.
+The command refuses an email whose member has another role, and an email of a deactivated member. It never promotes or demotes a member.
+
+## Give each person a key
+
+Give every person their own key on every machine, so each artifact and version names who published it. A bearer write records the key name as its author.
+
+In the SG compact pod, the image runs `node dist/cli/main.js` from `/opt/artifact-server`, so call it by path:
+
+```sh
+kubectl --context sg -n artifact-server exec deploy/artifact-server -c artifact-server -- \
+  node /opt/artifact-server/dist/cli/main.js admin issue-key \
+  --mode compact --data /var/lib/artifact-server/data \
+  --role member --email duyet@example.com --name "Duyet Le" \
+  --key-name "Duyet Le @ duet-mbp" > member-key.json
+```
+
+- `--role member` makes a key that creates artifacts, reads, comments, and opens review sessions. It publishes new versions only of artifacts its member created. It cannot manage other people's artifacts or projects. `--role` defaults to `administrator`.
+- `--key-name` is the author shown on the key's writes. It defaults to `--name`.
+- All keys of one member own the same artifacts, so any of that person's machines can publish a new version.
+- Running the command again with the same email and key name revokes that key and prints a new one. The member's other keys keep working. The running server may accept the old key for up to 30 seconds.
+- The output adds `apiKey.name` and `member.role`. Put the `token` in the person's CLI profile or MCP bearer setting and delete the file.
 
 ## Publishing
 

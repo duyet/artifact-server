@@ -338,6 +338,7 @@ function makePublishArtifactService(
     }
     yield* authorization.requireVersionPublication(
       command.principal,
+      current.artifact,
     );
     const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
     const inputDigest = artifactVersionInputDigest({
@@ -394,7 +395,10 @@ function makePublishArtifactService(
     if (current === null) {
       return yield* new ArtifactNotFound({message: "The artifact does not exist."});
     }
-    yield* authorization.requireVersionPublication(command.principal);
+    yield* authorization.requireVersionPublication(
+      command.principal,
+      current.artifact,
+    );
     const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
     const inputDigest = artifactEditInputDigest({
       artifactId: command.artifactId,
