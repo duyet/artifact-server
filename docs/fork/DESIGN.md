@@ -248,7 +248,7 @@ On a private-team server, Review shows a form that posts `{"apiKey": "..."}` to 
 - The key is checked exactly as a bearer key is. The session principal comes from the same `apiKeyPrincipal` function, so it equals the bearer principal. The session ends at the earlier of the normal session lifetime and the key's expiry.
 - A key session is valid only while both the session and its key are live. Revoking or rotating the key revokes its sessions in the same transaction and clears the in-process caches.
 - The request needs `Origin` equal to the application origin and `Sec-Fetch-Site: same-origin`. No CSRF token exists before sign-in.
-- Five failed attempts per client address in 60 seconds return 429 `RATE_LIMITED` with `Retry-After`, checked before the key. The count lives in one process. Behind an ingress all clients share one address, which is acceptable for one pod.
+- Five failed attempts per client address in 60 seconds return 429 `RATE_LIMITED` with `Retry-After`, checked before the key. The count lives in one process. On a TLS-ingress deployment with `ARTIFACT_SERVER_ORIGIN` set, a request whose forwarded host and protocol match the origin keys on the last `X-Forwarded-For` entry, the one the proxy itself appended; without that match the key stays the socket address, which behind one ingress is the proxy pod's.
 - Sign-out is the existing `POST /api/v1/session/logout`.
 - A key session is a cookie on the application origin, so artifact code is the risk. Same-host content keeps the CSP sandbox without `allow-same-origin` (section 4), so artifact script runs in an opaque origin and its requests carry neither the right `Origin` nor the CSRF token.
 
