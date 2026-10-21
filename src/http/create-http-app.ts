@@ -40,6 +40,10 @@ import {
   type PublicLinkInventoryPage,
 } from "../application/public-link-administration.js";
 import {
+  type ArtifactAssetCheck,
+  CheckArtifactAssetsService,
+} from "../application/check-artifact-assets.js";
+import {
   type ArtifactComparison,
   CompareArtifactService,
 } from "../application/compare-artifact.js";
@@ -131,6 +135,7 @@ import {
   sameHostContentSource,
   type SameHostFolderRequest,
   type SameHostPathRequest,
+  versionServedRoots,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {FailedSignInLimiter} from "./failed-sign-in-limiter.js";
@@ -1756,6 +1761,37 @@ export function createHttpApp(
     ));
   });
 
+  const assetCheckRoute = async (
+    context: Context<HttpEnvironment>,
+    versionId: string | null,
+  ) => {
+    const checked = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      CheckArtifactAssetsService.use((assetChecks) =>
+        assetChecks.checkVersion({
+          artifactId: context.req.param("artifactId") ?? "",
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+          servedRoots: (artifact, version) =>
+            versionServedRoots(artifact, version, dependencies.contentDomain),
+          versionId,
+        })
+      ),
+    );
+    return context.json(assetCheckResponse(checked));
+  };
+
+  app.get(
+    "/api/v1/artifacts/:artifactId/asset-check",
+    (context) => assetCheckRoute(context, null),
+  );
+
+  app.get(
+    "/api/v1/artifacts/:artifactId/versions/:versionId/asset-check",
+    (context) => assetCheckRoute(context, context.req.param("versionId")),
+  );
+
   app.get("/api/v1/artifacts/:artifactId/comments", async (context) => {
     const query = commentPageQuerySchema.parse(context.req.query());
     const page = await runHttpApplicationEffect(
@@ -2230,11 +2266,14 @@ export function createHttpApp(
         ),
       );
       return context.json(
-        publishResponse(
-          responseApplicationUrl(context, dependencies),
-          dependencies.contentDomain,
-          result,
-        ),
+        {
+          ...publishResponse(
+            responseApplicationUrl(context, dependencies),
+            dependencies.contentDomain,
+            result,
+          ),
+          assetCheck: await publicationAssetCheck(context, dependencies, result),
+        },
         result.replayed ? 200 : 201,
       );
     },
@@ -2661,6 +2700,48 @@ function runHttpApplicationEffect<A, E>(
       spanName: `${safeHttpMethod(context.req.method)} ${matchedRoute}`,
     },
   );
+}
+
+/**
+ * Count the new version's broken references for the publisher. The check is
+ * advice: any failure yields null and never fails the publish.
+ */
+async function publicationAssetCheck(
+  context: Context<HttpEnvironment>,
+  dependencies: Pick<HttpAppDependencies, "applicationRuntime" | "contentDomain">,
+  published: PublishedVersion,
+): Promise<{readonly broken: number; readonly heuristic: number} | null> {
+  try {
+    const checked = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      CheckArtifactAssetsService.use((assetChecks) =>
+        assetChecks.checkVersion({
+          artifactId: published.artifact.id,
+          principal: context.get("principal"),
+          projectId: published.artifact.projectId,
+          servedRoots: (artifact, version) =>
+            versionServedRoots(artifact, version, dependencies.contentDomain),
+          versionId: published.version.id,
+        })
+      ),
+    );
+    return {
+      broken: checked.report.summary.broken,
+      heuristic: checked.report.summary.heuristic,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function assetCheckResponse(checked: ArtifactAssetCheck) {
+  return {
+    artifactId: checked.artifact.id,
+    references: checked.report.references,
+    summary: checked.report.summary,
+    version: checked.version,
+  };
 }
 
 function requestWithRequestId(context: Context<HttpEnvironment>): Request {

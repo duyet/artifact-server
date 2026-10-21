@@ -25,6 +25,7 @@ import {
   ArtifactManagementService,
 } from "../application/artifact-management.js";
 import { AuthorizationService } from "../application/authorization.js";
+import {CheckArtifactAssetsService} from "../application/check-artifact-assets.js";
 import {
   type CompareArtifactDependencies,
   CompareArtifactService,
@@ -168,6 +169,7 @@ export function createApplicationLayer(
   | ArtifactCommentService
   | ArtifactManagementService
   | AuthorizationService
+  | CheckArtifactAssetsService
   | CompareArtifactService
   | ContentAccessService
   | ExpiredStagingCleanupService
@@ -949,6 +951,9 @@ export function createApplicationLayer(
   const comparisonLayer = CompareArtifactService.layer(
     comparisonDependencies,
   ).pipe(Layer.provideMerge(Layer.mergeAll(authorizationLayer, projectLayer)));
+  const assetCheckLayer = CheckArtifactAssetsService.layer(
+    comparisonDependencies.blobs,
+  ).pipe(Layer.provideMerge(managementLayer));
   return Layer.mergeAll(
     authenticationLayer,
     commentLayer,
@@ -960,6 +965,7 @@ export function createApplicationLayer(
     managementLayer,
     publicLinkAdministrationLayer,
     comparisonLayer,
+    assetCheckLayer,
     projectLayer,
     projectAnalyticsLayer,
     publicCatalogLayer,

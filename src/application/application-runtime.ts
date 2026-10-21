@@ -8,6 +8,7 @@ import type { AuthorizationService } from "./authorization.js";
 import type { ContentAccessService } from "./content-access.js";
 import type { ArtifactCommentService } from "./artifact-comments.js";
 import type { ArtifactManagementService } from "./artifact-management.js";
+import type { CheckArtifactAssetsService } from "./check-artifact-assets.js";
 import type { CompareArtifactService } from "./compare-artifact.js";
 import type { InstallationAccessService } from "./installation-access.js";
 import type {ProjectManagementService} from "./project-management.js";
@@ -25,6 +26,7 @@ export type ApplicationServices =
   | ArtifactManagementService
   | AuthenticationService
   | AuthorizationService
+  | CheckArtifactAssetsService
   | CompareArtifactService
   | ContentAccessService
   | ExpiredStagingCleanupService
