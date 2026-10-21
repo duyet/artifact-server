@@ -97,6 +97,11 @@ const versionSchema = Schema.Struct({
 });
 const publishResponseSchema = Schema.Struct({
   artifact: artifactSchema,
+  // Optional so the CLI still publishes to a server that predates the check.
+  assetCheck: Schema.optional(Schema.NullOr(Schema.Struct({
+    broken: nonnegativeIntegerSchema,
+    heuristic: nonnegativeIntegerSchema,
+  }))),
   links: Schema.Struct({
     artifact: Schema.URLFromString,
     review: Schema.URLFromString,
