@@ -1,5 +1,5 @@
 import {AxeBuilder} from "@axe-core/playwright";
-import {expect, test} from "@playwright/test";
+import {expect, test, type Page} from "@playwright/test";
 import {unzipSync} from "fflate";
 import {readFile} from "node:fs/promises";
 import {z} from "zod";
@@ -566,6 +566,10 @@ test.describe("Artifact Server frontend MVP", () => {
       // A freshly opened artifact starts in annotate mode.
       await expect(fixture.page.getByRole("button", {name: /^Annotate mode:/u}))
         .toHaveAttribute("aria-pressed", "true");
+      // Review follows the system by default; start from an explicit dark
+      // choice so the switch below has something to change.
+      await chooseTheme(fixture.page, "Dark");
+      await expect(frame.locator("html")).not.toHaveClass(/\blight\b/u);
       await preview.locator("#review-theme-target").click();
       const themedCommentPopover = frame.locator('[data-comment-popover="true"]');
       await expect(themedCommentPopover).toBeVisible();
@@ -577,9 +581,7 @@ test.describe("Artifact Server frontend MVP", () => {
       const darkPopoverBackground = await themedCommentSurface.evaluate(
         (node) => getComputedStyle(node).backgroundColor,
       );
-      await fixture.page.getByRole("button", {name: /^Account:/u}).click();
-      await fixture.page.getByRole("menuitemradio", {name: "Light"}).click();
-      await expect(fixture.page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(0);
+      await chooseTheme(fixture.page, "Light");
       await expect(fixture.page.locator("html")).toHaveClass(/\blight\b/u);
       await expect(frame.locator("html")).toHaveClass(/\blight\b/u);
       await expect(themedCommentPopover).toBeVisible();
@@ -2025,4 +2027,11 @@ async function createActionHistory(
     )
   ));
   expect(responses.every((response) => response.status === 200)).toBe(true);
+}
+
+async function chooseTheme(page: Page, name: "Dark" | "Light"): Promise<void> {
+  await page.getByRole("button", {name: /^Account:/u}).click();
+  await page.getByRole("menuitemradio", {name}).click();
+  // The menu animates out before it unmounts; callers inspect the settled page.
+  await expect(page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(0);
 }
