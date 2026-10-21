@@ -577,8 +577,10 @@ test.describe("Artifact Server frontend MVP", () => {
       const darkPopoverBackground = await themedCommentSurface.evaluate(
         (node) => getComputedStyle(node).backgroundColor,
       );
-      await chooseAccountMenuItem(fixture.page, "Use light theme");
-      await expect(fixture.page.locator("html")).toHaveAttribute("data-review-theme", "dawn");
+      await fixture.page.getByRole("button", {name: /^Account:/u}).click();
+      await fixture.page.getByRole("menuitemradio", {name: "Light"}).click();
+      await expect(fixture.page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(0);
+      await expect(fixture.page.locator("html")).toHaveClass(/\blight\b/u);
       await expect(frame.locator("html")).toHaveClass(/\blight\b/u);
       await expect(themedCommentPopover).toBeVisible();
       await expect.poll(() => themedCommentSurface.evaluate(
@@ -1463,7 +1465,7 @@ test.describe("Artifact Server frontend MVP", () => {
       await expect(fixture.page.getByText(secretValue ?? "missing-secret")).toHaveCount(0);
       expect(await browserStorage(fixture.page)).toEqual({
         indexedDatabaseNames: [],
-        localStorageKeys: ["artifact-review-theme"],
+        localStorageKeys: [],
         sessionStorageKeys: [],
       });
 

@@ -227,11 +227,11 @@ Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that 
 - `/` answers `serveWebAsset(context, dependencies, "/index.html", "application-shell")`, which already carries the strict app-shell CSP (`src/http/create-http-app.ts:4210`). The home page is application UI, so it gets that policy and **not** the content sandbox; artifact content keeps `Content-Security-Policy: sandbox` (FRK-002).
 - All UI lives in new files under `apps/web/src/home/`: `home-app.tsx`, `home-main.tsx`, `home-client.ts`, `home-tree.ts`, `home.css`. Nothing existing is modified except the `/` route and the Vite entry list, because issue 4 is restyling the app on another branch.
 - Colors are only semantic tokens (`--border`, `--muted-foreground`, `--chart-*`), so the shadcn preset in issue 4 lands on this page without an edit.
-- The theme key is `artifact-review-theme` with values `dawn` and `moon`, the same one `apps/web/src/review/main.tsx` uses, so one choice applies to the whole application and there is no second theme system.
+- The theme lives in `apps/web/src/lib/theme.ts`: the key `artifact-server-theme` holds `light`, `dark`, or `system` (the default), and the resolved theme is a `light` or `dark` class on `<html>`. The home page header and the Workbench account menu set the same key, so one choice applies to the whole application.
 
 ### Screenshots
 
-`tests/browser/frk-009-home-page.spec.ts` captures the page at 1280×900 in `moon` and in `dawn` and runs the axe builder, as `tests/browser/frontend-mvp.spec.ts` does. It runs in CI only; the development machine has no browsers.
+`tests/browser/frk-009-home-page.spec.ts` captures the page at 1280×900 under a dark and a light system setting and runs the axe builder, as `tests/browser/frontend-mvp.spec.ts` does. It runs in CI only; the development machine has no browsers.
 
 ## 4. Ledger
 

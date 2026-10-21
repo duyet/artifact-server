@@ -49,6 +49,21 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Unlayered, like the tokens, so the pre-script fallback can override them. */
+:root.light {
+  color-scheme: light;
+}
+:root.dark {
+  color-scheme: dark;
+}
+/* Until the entry script sets a theme class, follow the system so a dark reader never sees a white page. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light, .dark) {
+    color-scheme: dark;
+    --background: oklch(0.145 0 0);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

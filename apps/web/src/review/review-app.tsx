@@ -4,10 +4,9 @@ import {setDraftPrincipal} from "@/components/comments/comment-drafts";
 import {api, ApiError, type AccessContext, type Project, type Session} from "@/api/client";
 import {ApiKeySignIn} from "./api-key-sign-in.tsx";
 import {Button, ButtonLink} from "@/components/ui/button";
+import {useTheme} from "@/hooks/use-theme";
 import {ReviewGate} from "./review-primitives.tsx";
 import {ReviewShell} from "./review-shell.tsx";
-
-type ReviewTheme = "dawn" | "moon";
 
 /** Start the artifact-first Artifact Server review application. */
 export function ReviewApp() {
@@ -25,7 +24,7 @@ export function ReviewApp() {
     "loading" | "ready" | "unauthenticated"
   >("loading");
   const [error, setError] = useState<Error | null>(null);
-  const [theme, setTheme] = useState<ReviewTheme>(readInitialTheme);
+  const theme = useTheme();
 
   const bootstrap = useCallback(async (): Promise<void> => {
     if (bootstrapInFlightRef.current) return;
@@ -90,12 +89,6 @@ export function ReviewApp() {
     return () => window.removeEventListener("artifact-session-expired", expire);
   }, [bootstrap]);
 
-  useEffect(() => {
-    document.documentElement.dataset["reviewTheme"] = theme;
-    document.documentElement.classList.toggle("dark", theme === "moon");
-    window.localStorage.setItem("artifact-review-theme", theme);
-  }, [theme]);
-
   const createProject = useCallback(async (name: string): Promise<Project> => {
     const created = await api.createProject(name);
     setProjects((current) => [
@@ -151,17 +144,11 @@ export function ReviewApp() {
     <ReviewShell
       onCreateProject={createProject}
       onProjectsChanged={loadProjects}
-      onThemeChange={() => setTheme((current) => current === "moon" ? "dawn" : "moon")}
+      onThemeChange={theme.setPreference}
       projects={projects}
       session={session}
-      theme={theme}
+      theme={theme.resolved}
+      themePreference={theme.preference}
     />
   );
 }
-
-function readInitialTheme(): ReviewTheme {
-  return window.localStorage.getItem("artifact-review-theme") === "dawn"
-    ? "dawn"
-    : "moon";
-}
-

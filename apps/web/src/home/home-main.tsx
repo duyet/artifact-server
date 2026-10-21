@@ -5,15 +5,13 @@ import {IconAlertCircle} from "@tabler/icons-react";
 
 import {Alert, AlertDescription, AlertTitle} from "@/components/ui/alert";
 import {Skeleton} from "@/components/ui/skeleton";
+import {applyStoredTheme} from "@/lib/theme";
 
 import {HomePage} from "./home-app.js";
 import {readPublicCatalog, type PublicCatalog} from "./home-client.js";
 import "../index.css";
 
-const initialTheme = window.localStorage.getItem("artifact-review-theme") === "dawn"
-  ? "dawn"
-  : "moon";
-document.documentElement.classList.toggle("dark", initialTheme === "moon");
+applyStoredTheme();
 
 function HomeShell() {
   const [catalog, setCatalog] = useState<PublicCatalog | null>(null);

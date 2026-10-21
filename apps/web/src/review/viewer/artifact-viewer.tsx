@@ -21,6 +21,7 @@ import {Alert, AlertDescription} from "@/components/ui/alert";
 import {Button} from "@/components/ui/button";
 import {Spinner} from "@/components/ui/spinner";
 import {useSidebar} from "@/components/ui/sidebar";
+import type {ResolvedTheme} from "@/lib/theme";
 import type {CatalogItem} from "../catalog/use-artifact-catalog.ts";
 import {DeleteArtifactDialog} from "../inspectors/details-inspector.tsx";
 import type {InspectorTab} from "../inspectors/inspector-layout.tsx";
@@ -88,7 +89,7 @@ export function ArtifactViewer({
   readonly permissions: ReviewPermissions;
   readonly projectId: string;
   readonly session: Session;
-  readonly theme: "dawn" | "moon";
+  readonly theme: ResolvedTheme;
   readonly versionId: string | null;
 }) {
   const {setOpen: setSidebarOpen} = useSidebar();
@@ -413,7 +414,7 @@ export function ArtifactViewer({
                 annotations={comments.annotations}
                 artifactId={artifactId}
                 artifactName={name}
-                isLight={theme === "dawn"}
+                isLight={theme === "light"}
                 onAnnotateModeChange={setAnnotateActive}
                 onOpenRawArtifact={() => void viewer.openRawArtifact()}
                 onSelectAnnotation={(threadId) => {

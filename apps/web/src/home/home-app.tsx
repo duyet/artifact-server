@@ -7,6 +7,7 @@ import {
 } from "@tabler/icons-react";
 import {Bar, BarChart, CartesianGrid, XAxis} from "recharts";
 
+import {ThemeMenu} from "@/components/theme-menu";
 import {Alert, AlertDescription} from "@/components/ui/alert";
 import {Badge} from "@/components/ui/badge";
 import {Button, ButtonLink} from "@/components/ui/button";
@@ -82,8 +83,9 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
             {artifactCount(catalog.artifacts.length)}
           </p>
         </div>
-        <nav aria-label="Primary">
+        <nav aria-label="Primary" className="flex items-center gap-2">
           <ButtonLink href="/review" variant="outline">Workbench</ButtonLink>
+          <ThemeMenu />
         </nav>
       </header>
 
