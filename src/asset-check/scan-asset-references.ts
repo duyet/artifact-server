@@ -1,11 +1,10 @@
 import {
-  type DefaultTreeAdapterMap,
-  parse,
+  type Token,
+  Tokenizer,
+  TokenizerMode,
 } from "parse5";
 
-type ParentNode = DefaultTreeAdapterMap["parentNode"];
-type ChildNode = DefaultTreeAdapterMap["childNode"];
-type Element = DefaultTreeAdapterMap["element"];
+type TagToken = Token.TagToken;
 
 /** Where a reference was written, which decides how a browser loads it. */
 export type ScannedReferenceKind =
@@ -30,6 +29,34 @@ export interface ScannedHtmlDocument {
   readonly references: readonly ScannedReference[];
 }
 
+/** Text inside a `<style>` or `<script>` element, collected until its end tag. */
+interface InlineText {
+  readonly language: "css" | "script" | null;
+  line: number | null;
+  readonly tagName: string;
+  text: string;
+}
+
+/** A value read from source text and the offset just past it. */
+interface LexedValue {
+  readonly end: number;
+  readonly value: string;
+}
+
+// The tree builder switches the tokenizer into these modes; scanning without
+// a tree has to do the same, or element text would be read as markup.
+const textModes: ReadonlyMap<string, (typeof TokenizerMode)[keyof typeof TokenizerMode]> = new Map([
+  ["iframe", TokenizerMode.RAWTEXT],
+  ["noembed", TokenizerMode.RAWTEXT],
+  ["noframes", TokenizerMode.RAWTEXT],
+  ["noscript", TokenizerMode.RAWTEXT],
+  ["plaintext", TokenizerMode.PLAINTEXT],
+  ["script", TokenizerMode.SCRIPT_DATA],
+  ["style", TokenizerMode.RAWTEXT],
+  ["textarea", TokenizerMode.RCDATA],
+  ["title", TokenizerMode.RCDATA],
+  ["xmp", TokenizerMode.RAWTEXT],
+]);
 const srcsetAttributes = new Set(["data-srcset", "srcset"]);
 const navigationElements = new Set(["a", "area"]);
 const hrefElements = new Set(["a", "area", "link"]);
@@ -45,43 +72,65 @@ const assetLiteralPattern =
   /^(?:\.{1,2}\/)*[\w@~%.-]+(?:\/[\w@~%.-]+)*\.(?:avif|css|csv|gif|html|ico|jpe?g|js|json|mjs|mp4|pdf|png|svg|ttf|webm|webp|woff2?)(?:[?#]\S*)?$/iu;
 const maximumScriptLiteralLength = 512;
 
-/** Collect every file reference an HTML document makes, inline styles and scripts included. */
+/**
+ * Collect every file reference an HTML document makes, inline styles and
+ * scripts included. It reads tokens rather than building a tree, so work
+ * stays linear however deeply the markup nests.
+ */
 export function scanHtml(text: string): ScannedHtmlDocument {
   const references: ScannedReference[] = [];
   let baseHref: string | null = null;
+  let templateDepth = 0;
+  let inline: InlineText | null = null;
 
-  const visit = (parent: ParentNode): void => {
-    for (const node of parent.childNodes) {
-      if (!isElement(node)) continue;
-      if (node.tagName === "base" && baseHref === null) {
-        baseHref = attribute(node, "href");
-      }
-      scanElementAttributes(node, references);
-      if (node.tagName === "style") {
-        for (const child of textChildren(node)) {
-          references.push(...scanCss(child.value, child.line));
-        }
-      }
-      if (node.tagName === "script" && isClassicOrModuleScript(node)) {
-        for (const child of textChildren(node)) {
-          references.push(...scanScript(child.value, child.line));
-        }
-      }
-      if (node.tagName === "template" && "content" in node) {
-        visit(node.content);
-      }
-      visit(node);
-    }
+  const collect = (token: Token.CharacterToken): void => {
+    if (inline === null) return;
+    inline.line ??= token.location?.startLine ?? 1;
+    inline.text += token.chars;
   };
-  visit(parse(text, {sourceCodeLocationInfo: true}));
+  const tokenizer: Tokenizer = new Tokenizer({sourceCodeLocationInfo: true}, {
+    onCharacter: collect,
+    onComment: () => undefined,
+    onDoctype: () => undefined,
+    onEndTag: (token) => {
+      if (token.tagName === "template") templateDepth = Math.max(0, templateDepth - 1);
+      if (inline === null || token.tagName !== inline.tagName) return;
+      const firstLine = inline.line ?? token.location?.startLine ?? 1;
+      if (inline.language === "css") references.push(...scanCss(inline.text, firstLine));
+      if (inline.language === "script") references.push(...scanScript(inline.text, firstLine));
+      inline = null;
+    },
+    onEof: () => undefined,
+    onNullCharacter: collect,
+    onStartTag: (token) => {
+      if (token.tagName === "template" && !token.selfClosing) templateDepth += 1;
+      if (token.tagName === "base" && baseHref === null && templateDepth === 0) {
+        baseHref = attribute(token, "href");
+      }
+      scanTagAttributes(token, references);
+      const mode = textModes.get(token.tagName);
+      if (mode === undefined) return;
+      tokenizer.state = mode;
+      inline = {
+        language: token.tagName === "style"
+          ? "css"
+          : token.tagName === "script" && isClassicOrModuleScript(token)
+          ? "script"
+          : null,
+        line: null,
+        tagName: token.tagName,
+        text: "",
+      };
+    },
+    onWhitespaceCharacter: collect,
+  });
+  tokenizer.write(text, true);
   return {baseHref, references};
 }
 
-function scanElementAttributes(element: Element, references: ScannedReference[]): void {
-  for (const {name, value} of element.attrs) {
-    const line = element.sourceCodeLocation?.attrs?.[name]?.startLine ??
-      element.sourceCodeLocation?.startLine ??
-      1;
+function scanTagAttributes(tag: TagToken, references: ScannedReference[]): void {
+  for (const {name, value} of tag.attrs) {
+    const line = tag.location?.attrs?.[name]?.startLine ?? tag.location?.startLine ?? 1;
     const add = (raw: string, navigation = false): void => {
       references.push({kind: "html-attr", line, navigation, raw});
     };
@@ -89,23 +138,23 @@ function scanElementAttributes(element: Element, references: ScannedReference[])
       add(value);
     } else if (srcsetAttributes.has(name)) {
       for (const candidate of srcsetUrls(value)) add(candidate);
-    } else if (name === "href" && hrefElements.has(element.tagName)) {
-      add(value, navigationElements.has(element.tagName));
-    } else if (name === "data" && element.tagName === "object") {
+    } else if (name === "href" && hrefElements.has(tag.tagName)) {
+      add(value, navigationElements.has(tag.tagName));
+    } else if (name === "data" && tag.tagName === "object") {
       add(value);
     } else if (name === "style") {
       references.push(...scanCss(value, line));
     }
   }
   if (
-    element.tagName === "meta" &&
-    attribute(element, "http-equiv")?.trim().toLowerCase() === "refresh"
+    tag.tagName === "meta" &&
+    attribute(tag, "http-equiv")?.trim().toLowerCase() === "refresh"
   ) {
-    const target = refreshUrl(attribute(element, "content") ?? "");
+    const target = refreshUrl(attribute(tag, "content") ?? "");
     if (target !== null) {
       references.push({
         kind: "meta-refresh",
-        line: element.sourceCodeLocation?.startLine ?? 1,
+        line: tag.location?.startLine ?? 1,
         navigation: true,
         raw: target,
       });
@@ -131,7 +180,7 @@ export function scanCss(text: string, firstLine = 1): readonly ScannedReference[
       let raw: string | null = null;
       if (text[cursor] === "\"" || text[cursor] === "'") {
         const quoted = readQuoted(text, cursor);
-        raw = quoted.value;
+        raw = unescapeCss(quoted.value);
         cursor = quoted.end;
       } else if (matchesAt(text, cursor, "url(")) {
         const url = readUrlFunction(text, cursor);
@@ -176,17 +225,13 @@ export function scanScript(text: string, firstLine = 1): readonly ScannedReferen
       index = end === -1 ? text.length : end + 2;
     } else if (character === "\"" || character === "'" || character === "`") {
       const literal = readQuoted(text, index);
+      const value = unescapeScript(literal.value);
       if (
-        literal.value.length <= maximumScriptLiteralLength &&
+        value.length <= maximumScriptLiteralLength &&
         !(character === "`" && literal.value.includes("${")) &&
-        assetLiteralPattern.test(literal.value)
+        assetLiteralPattern.test(value)
       ) {
-        references.push({
-          kind: "script",
-          line: lines(index),
-          navigation: false,
-          raw: literal.value,
-        });
+        references.push({kind: "script", line: lines(index), navigation: false, raw: value});
       }
       index = literal.end;
     } else {
@@ -200,24 +245,25 @@ function srcsetUrls(value: string): readonly string[] {
   const urls: string[] = [];
   let index = 0;
   while (index < value.length) {
-    while (index < value.length && /[\s,]/u.test(value[index] ?? "")) index += 1;
+    while (index < value.length && (value[index] === "," || isWhitespace(value[index]))) {
+      index += 1;
+    }
     const start = index;
-    while (index < value.length && !/\s/u.test(value[index] ?? "")) index += 1;
-    let url = value.slice(start, index);
-    const trailingCommas = /,+$/u.exec(url);
-    if (trailingCommas !== null) {
-      url = url.slice(0, trailingCommas.index);
-    } else {
+    while (index < value.length && !isWhitespace(value[index])) index += 1;
+    let end = index;
+    while (end > start && value[end - 1] === ",") end -= 1;
+    if (end === index) {
       const descriptorEnd = value.indexOf(",", index);
       index = descriptorEnd === -1 ? value.length : descriptorEnd + 1;
     }
-    if (url !== "") urls.push(url);
+    if (end > start) urls.push(value.slice(start, end));
   }
   return urls;
 }
 
+/** A refresh with no leading time is ignored by browsers, so it yields nothing. */
 function refreshUrl(content: string): string | null {
-  const match = /^\s*[\d.]*\s*[;,]?\s*(?:url\s*=\s*)?(.*)$/isu.exec(content);
+  const match = /^\s*[\d.]+\s*[;,]?\s*(?:url\s*=\s*)?(.*)$/isu.exec(content);
   let target = match?.[1]?.trim() ?? "";
   const quote = target[0];
   if (quote === "\"" || quote === "'") {
@@ -227,52 +273,66 @@ function refreshUrl(content: string): string | null {
   return target === "" ? null : target;
 }
 
-/** A value read from source text and the offset just past it. */
-interface LexedValue {
-  readonly end: number;
-  readonly value: string;
-}
-
-/** The text of one child node and the line it starts on. */
-interface TextChild {
-  readonly line: number;
-  readonly value: string;
-}
-
 function readUrlFunction(text: string, start: number): LexedValue {
-  let index = skipWhitespace(text, start + "url(".length);
+  const index = skipWhitespace(text, start + "url(".length);
   if (text[index] === "\"" || text[index] === "'") {
     const quoted = readQuoted(text, index);
     const close = text.indexOf(")", quoted.end);
-    return {end: close === -1 ? text.length : close + 1, value: quoted.value};
+    return {end: close === -1 ? text.length : close + 1, value: unescapeCss(quoted.value)};
   }
-  let value = "";
-  while (index < text.length && text[index] !== ")") {
-    if (text[index] === "\\" && index + 1 < text.length) index += 1;
-    value += text[index];
-    index += 1;
-  }
-  return {end: Math.min(index + 1, text.length), value: value.trim()};
+  let end = index;
+  while (end < text.length && text[end] !== ")") end += text[end] === "\\" ? 2 : 1;
+  return {
+    end: Math.min(end + 1, text.length),
+    value: unescapeCss(text.slice(index, Math.min(end, text.length)).trim()),
+  };
 }
 
-/** Read a quoted literal from its opening quote; an unterminated one ends at the line break. */
+/**
+ * Read a quoted literal from its opening quote, escapes left in place. An
+ * unterminated one ends at the line break, or at the end for a template.
+ */
 function readQuoted(text: string, start: number): LexedValue {
   const quote = text[start];
-  let value = "";
   let index = start + 1;
   while (index < text.length) {
     const character = text[index];
-    if (character === quote) return {end: index + 1, value};
-    if (character === "\n" && quote !== "`") return {end: index, value};
-    if (character === "\\" && index + 1 < text.length) {
-      index += 1;
-      value += text[index];
-    } else {
-      value += character;
-    }
-    index += 1;
+    if (character === quote) return {end: index + 1, value: text.slice(start + 1, index)};
+    if (character === "\n" && quote !== "`") return {end: index, value: text.slice(start + 1, index)};
+    index += character === "\\" ? 2 : 1;
   }
-  return {end: index, value};
+  return {end: text.length, value: text.slice(start + 1)};
+}
+
+function unescapeCss(value: string): string {
+  return value.replaceAll(
+    /\\(?:([\da-f]{1,6})\s?|(\n)|(.))/giu,
+    (_: string, hex: string | undefined, _newline: string | undefined, other: string | undefined) =>
+      hex === undefined ? (other ?? "") : codePointText(hex, true),
+  );
+}
+
+function unescapeScript(value: string): string {
+  return value.replaceAll(
+    /\\(?:u\{([\da-f]{1,6})\}|u([\da-f]{4})|x([\da-f]{2})|(.))/giu,
+    (
+      _: string,
+      braced: string | undefined,
+      unicode: string | undefined,
+      hex: string | undefined,
+      other: string | undefined,
+    ) => {
+      const code = braced ?? unicode ?? hex;
+      return code === undefined ? (other ?? "") : codePointText(code, false);
+    },
+  );
+}
+
+function codePointText(hex: string, zeroIsInvalid: boolean): string {
+  const codePoint = Number.parseInt(hex, 16);
+  return (zeroIsInvalid && codePoint === 0) || codePoint > 0x10_ffff
+    ? "\u{FFFD}"
+    : String.fromCodePoint(codePoint);
 }
 
 function lineIndex(text: string, firstLine: number): (offset: number) => number {
@@ -298,32 +358,25 @@ function matchesAt(text: string, index: number, token: string): boolean {
 
 function skipWhitespace(text: string, index: number): number {
   let cursor = index;
-  while (cursor < text.length && /\s/u.test(text[cursor] ?? "")) cursor += 1;
+  while (cursor < text.length && isWhitespace(text[cursor])) cursor += 1;
   return cursor;
+}
+
+function isWhitespace(character: string | undefined): boolean {
+  return character === " " || character === "\t" || character === "\n" ||
+    character === "\r" || character === "\f";
 }
 
 function isIdentifierCharacter(character: string | undefined): boolean {
   return character !== undefined && /[\w-]/u.test(character);
 }
 
-function isElement(node: ChildNode): node is Element {
-  return "tagName" in node;
+function attribute(tag: TagToken, name: string): string | null {
+  return tag.attrs.find((candidate) => candidate.name === name)?.value ?? null;
 }
 
-function attribute(element: Element, name: string): string | null {
-  return element.attrs.find((candidate) => candidate.name === name)?.value ?? null;
-}
-
-function textChildren(element: Element): readonly TextChild[] {
-  return element.childNodes.flatMap((child) =>
-    child.nodeName === "#text" && "value" in child
-      ? [{line: child.sourceCodeLocation?.startLine ?? 1, value: child.value}]
-      : []
-  );
-}
-
-function isClassicOrModuleScript(element: Element): boolean {
-  if (attribute(element, "src") !== null) return false;
-  const type = attribute(element, "type")?.trim().toLowerCase() ?? "";
+function isClassicOrModuleScript(tag: TagToken): boolean {
+  if (attribute(tag, "src") !== null) return false;
+  const type = attribute(tag, "type")?.trim().toLowerCase() ?? "";
   return scriptTypes.has(type);
 }

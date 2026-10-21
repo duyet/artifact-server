@@ -8,6 +8,7 @@ import {
   type AssetCheckReport,
   checkAssetReferences,
   planAssetSources,
+  scanAssetSource,
 } from "../asset-check/check-asset-references.js";
 import type { BlobStorageFailure } from "../core/errors.js";
 import type { Principal } from "../core/identity.js";
@@ -90,14 +91,18 @@ export class CheckArtifactAssetsService extends Context.Service<
               : yield* management.getVersionDetails({...read, versionId: command.versionId});
             const plan = planAssetSources(saved.manifest.entries);
             const decoder = new TextDecoder("utf-8");
+            // Each file is scanned as its read completes, so other requests run
+            // between files and one scan blocks only for its own bounded size.
             const sources = yield* Effect.forEach(
               plan.sources,
               (source) =>
-                blobs.readBytes(source.entry).pipe(Effect.map((bytes) => ({
-                  language: source.language,
-                  path: source.entry.path,
-                  text: decoder.decode(bytes),
-                }))),
+                blobs.readBytes(source.entry).pipe(Effect.map((bytes) =>
+                  scanAssetSource({
+                    language: source.language,
+                    path: source.entry.path,
+                    text: decoder.decode(bytes),
+                  })
+                )),
               {concurrency: 4},
             );
             const report = checkAssetReferences({

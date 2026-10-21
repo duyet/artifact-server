@@ -1,4 +1,5 @@
 import type {ManifestEntry, RoutingMode} from "../core/model.js";
+import {manifestPathFromUrl} from "../manifest/create-manifest.js";
 import {
   scanCss,
   scanHtml,
@@ -56,6 +57,15 @@ export interface AssetSource {
   readonly text: string;
 }
 
+/** The references one file makes, before they are resolved. */
+export interface ScannedAssetSource {
+  /** The document's `<base href>`; always null outside HTML. */
+  readonly baseHref: string | null;
+  readonly language: AssetSourceLanguage;
+  readonly path: string;
+  readonly references: readonly ScannedReference[];
+}
+
 /** The files chosen for scanning and whether a limit left some out. */
 export interface AssetScanPlan {
   readonly sources: readonly PlannedAssetSource[];
@@ -72,16 +82,18 @@ export interface AssetCheckInput {
    * one origin. The first is the base relative references resolve against.
    */
   readonly servedRoots: readonly [string, ...string[]];
-  readonly sources: readonly AssetSource[];
+  readonly sources: readonly ScannedAssetSource[];
   /** The scan plan already skipped files because of a limit. */
   readonly truncated: boolean;
 }
 
+// Scanning is synchronous, so the file limit bounds how long one scan holds
+// the event loop and the version limit bounds what a commit waits for.
 export const assetCheckLimits = {
-  maximumFileBytes: 2 * 1_024 * 1_024,
+  maximumFileBytes: 1_024 * 1_024,
   maximumFiles: 1_000,
   maximumReferences: 1_000,
-  maximumVersionBytes: 32 * 1_024 * 1_024,
+  maximumVersionBytes: 8 * 1_024 * 1_024,
 } as const;
 
 const syntheticOrigin = "https://artifact.invalid";
@@ -124,30 +136,50 @@ export function planAssetSources(entries: readonly ManifestEntry[]): AssetScanPl
   return {sources, truncated};
 }
 
+/** Extract one file's references; linear in the file's length. */
+export function scanAssetSource(source: AssetSource): ScannedAssetSource {
+  if (source.language === "html") {
+    const document = scanHtml(source.text);
+    return {...document, language: source.language, path: source.path};
+  }
+  return {
+    baseHref: null,
+    language: source.language,
+    path: source.path,
+    references: source.language === "css" ? scanCss(source.text) : scanScript(source.text),
+  };
+}
+
 /** Report every reference in the scanned files that the manifest cannot satisfy. */
 export function checkAssetReferences(input: AssetCheckInput): AssetCheckReport {
   const manifestPaths = new Set(input.manifestPaths);
   const roots = input.servedRoots.toSorted((left, right) => right.length - left.length);
   const primaryRoot = new URL(input.servedRoots[0], syntheticOrigin);
-  const entryUrl = new URL(encodePath(input.entryPath), primaryRoot);
   const broken: BrokenAssetReference[] = [];
   let truncated = input.truncated;
 
   const locate = (url: URL): LocatedPath => {
     const pathname = url.pathname;
     for (const root of roots) {
-      if (pathname === root.slice(0, -1)) return {path: "", within: true};
+      if (pathname === root.slice(0, -1)) return {path: "", servable: true, within: true};
       if (pathname.startsWith(root)) {
-        return {path: decodePath(pathname.slice(root.length)), within: true};
+        // The server's own URL-to-path rule, so encoded separators and
+        // non-NFC names count as missing exactly as they 404 there.
+        const relative = `/${pathname.slice(root.length)}`;
+        const servable = manifestPathFromUrl(relative);
+        return servable === null
+          ? {path: decodePath(relative.slice(1)), servable: false, within: true}
+          : {path: servable, servable: true, within: true};
       }
     }
-    return {path: decodePath(pathname), within: false};
+    return {path: decodePath(pathname), servable: false, within: false};
   };
 
-  const satisfied = (path: string, reference: ScannedReference): boolean =>
-    path === "" ||
-    manifestPaths.has(path) ||
-    (reference.navigation && input.routingMode === "spa");
+  const satisfied = (located: LocatedPath, reference: ScannedReference): boolean =>
+    located.within && (
+      (reference.navigation && input.routingMode === "spa") ||
+      (located.servable && (located.path === "" || manifestPaths.has(located.path)))
+    );
 
   const check = (file: string, reference: ScannedReference, bases: readonly URL[]): void => {
     const value = reference.raw.trim();
@@ -160,7 +192,7 @@ export function checkAssetReferences(input: AssetCheckInput): AssetCheckReport {
     });
     const first = located[0];
     if (first === undefined) return;
-    if (located.some((candidate) => candidate.within && satisfied(candidate.path, reference))) {
+    if (located.some((candidate) => satisfied(candidate, reference))) {
       return;
     }
     if (broken.length === assetCheckLimits.maximumReferences) {
@@ -178,21 +210,16 @@ export function checkAssetReferences(input: AssetCheckInput): AssetCheckReport {
   };
 
   for (const source of input.sources) {
-    const fileUrl = new URL(encodePath(source.path), primaryRoot);
-    if (source.language === "html") {
-      const document = scanHtml(source.text);
-      const base = document.baseHref === null
-        ? fileUrl
-        : URL.parse(document.baseHref.trim(), fileUrl) ?? fileUrl;
-      for (const reference of document.references) check(source.path, reference, [base]);
-    } else if (source.language === "css") {
-      for (const reference of scanCss(source.text)) check(source.path, reference, [fileUrl]);
-    } else {
-      // Paths in a script file usually resolve against the page that loads it.
-      for (const reference of scanScript(source.text)) {
-        check(source.path, reference, [fileUrl, entryUrl]);
-      }
-    }
+    // The shared link serves the entry file at the root itself.
+    const fileUrl = source.path === input.entryPath
+      ? primaryRoot
+      : new URL(encodePath(source.path), primaryRoot);
+    const base = source.baseHref === null
+      ? fileUrl
+      : URL.parse(source.baseHref.trim(), fileUrl) ?? fileUrl;
+    // Paths in a script file usually resolve against the page that loads it.
+    const bases = source.language === "script" ? [fileUrl, primaryRoot] : [base];
+    for (const reference of source.references) check(source.path, reference, bases);
   }
 
   const byKind = {
@@ -220,6 +247,8 @@ export function checkAssetReferences(input: AssetCheckInput): AssetCheckReport {
 /** A resolved URL path, relative to the served root it falls under when `within`. */
 interface LocatedPath {
   readonly path: string;
+  /** The server would map this URL to a manifest path at all. */
+  readonly servable: boolean;
   readonly within: boolean;
 }
 

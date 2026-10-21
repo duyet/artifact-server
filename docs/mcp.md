@@ -108,7 +108,7 @@ Every commit result carries `assetCheck`, the counts for the new version:
 }
 ```
 
-The check reads the version's HTML, CSS, and JavaScript files. It resolves each reference the way a browser would from the file's served URL and honors `<base href>`.
+The check reads the version's HTML, CSS, and JavaScript files. It resolves each reference the way a browser would from the file's served URL and honors `<base href>`. The entry file is resolved from the artifact root, where its shared link serves it.
 
 | Kind | Source | Confidence |
 | --- | --- | --- |
@@ -121,7 +121,7 @@ The check reads the version's HTML, CSS, and JavaScript files. It resolves each 
 
 Other origins, `data:`, `blob:`, `mailto:`, `tel:`, `javascript:`, fragments, and templates such as `${src}` or `{{src}}` are ignored. A subfolder URL such as `pages/` is broken unless the version has that exact file, because the server serves only the entry file at the artifact root. In a single-page application, a missing `a` or `area` link is not reported, since navigation falls back to the entry file.
 
-The check stops at 2 MiB per file, 32 MiB and 1,000 files per version, and 1,000 reported references. `summary.truncated` is `true` when a limit was hit.
+The check skips files over 1 MiB and stops at 8 MiB and 1,000 files per version and at 1,000 reported references. `summary.truncated` is `true` when a limit was hit.
 
 ## Tool groups
 

@@ -214,12 +214,28 @@ describe("broken asset check", () => {
       file("index.html", "text/html", "<!doctype html><style>/* never closed url(a.png)"),
       file("broken.css", "text/css", "a { background: url(\"unterminated"),
       file("broken.js", "text/javascript", "const a = 'unterminated.png\n/* never closed"),
-      file("huge.html", "text/html", `<img src="missing.png">${" ".repeat(2 * 1_024 * 1_024)}`),
+      file("huge.html", "text/html", `<img src="missing.png">${" ".repeat(1_024 * 1_024)}`),
     ], "frk-017-hostile-artifact", {accessSetting: "public_link", kind: "new_artifact", name: "Hostile"});
     const hostileReport = await readAssetCheck(hostile.artifact.id, null);
     expect(hostileReport.summary.truncated).toBe(true);
     expect(hostileReport.summary.checkedFiles).toBe(3);
     expect(hostileReport.references.map((reference) => reference.file)).not.toContain("huge.html");
+
+    // The entry is served at the artifact root, and the server maps an encoded
+    // slash to no file, so the check must agree with both.
+    const nested = await commitOverHttp([
+      file("dist/index.html", "text/html", [
+        "<!doctype html>",
+        "<img src=\"dist/logo.png\" alt=\"from the root\">",
+        "<img src=\"logo.png\" alt=\"beside the entry file only\">",
+        "<img src=\"dist%2Flogo.png\" alt=\"encoded slash\">",
+        "<div>".repeat(50_000),
+      ].join("\n")),
+      file("dist/logo.png", "image/png", "png"),
+    ], "frk-017-nested-artifact", {accessSetting: "public_link", kind: "new_artifact", name: "Nested"}, "dist/index.html");
+    expect(nested.assetCheck).toEqual({broken: 2, heuristic: 0});
+    expect((await readAssetCheck(nested.artifact.id, null)).references.map((reference) => reference.raw))
+      .toEqual(["logo.png", "dist%2Flogo.png"]);
 
     const unknownVersion = await fetch(
       `${server.baseUrl}/api/v1/artifacts/${plain.artifact.id}/versions/ver_missing/asset-check`,
@@ -236,13 +252,13 @@ describe("broken asset check", () => {
       path: "notes.txt",
     });
     expect(extraField.isError).toBe(true);
-  });
+  }, 30_000);
 
-  async function stageUpload(files: readonly TestSiteFile[]) {
+  async function stageUpload(files: readonly TestSiteFile[], entryPath?: string) {
     const upload = await createStagedUpload(
       server,
       installation,
-      files.some((entry) => entry.path === "index.html") ? "index.html" : (files[0]?.path ?? ""),
+      entryPath ?? (files.some((entry) => entry.path === "index.html") ? "index.html" : (files[0]?.path ?? "")),
       files,
     );
     expect(upload.response.status).toBe(201);
@@ -256,8 +272,9 @@ describe("broken asset check", () => {
     files: readonly TestSiteFile[],
     idempotencyKey: string,
     target: Readonly<Record<string, string>>,
+    entryPath?: string,
   ) {
-    const upload = await stageUpload(files);
+    const upload = await stageUpload(files, entryPath);
     const response = await fetch(upload.commitUrl, {
       body: JSON.stringify({target: {...target, tags: []}}),
       headers: apiHeaders(installation, idempotencyKey),
