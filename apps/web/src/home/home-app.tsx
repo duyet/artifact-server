@@ -7,6 +7,7 @@ import {
 } from "@tabler/icons-react";
 import {Bar, BarChart, CartesianGrid, XAxis} from "recharts";
 
+import {ThemeMenu} from "@/components/theme-menu";
 import {Alert, AlertDescription} from "@/components/ui/alert";
 import {Badge} from "@/components/ui/badge";
 import {Button, ButtonLink} from "@/components/ui/button";
@@ -49,7 +50,7 @@ import {
 import type {PublicCatalog} from "./home-client.js";
 
 const viewsChartConfig = {
-  views: {color: "var(--chart-2)", label: "Views"},
+  views: {color: "var(--muted-foreground)", label: "Views"},
 } satisfies ChartConfig;
 
 /**
@@ -82,8 +83,9 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
             {artifactCount(catalog.artifacts.length)}
           </p>
         </div>
-        <nav aria-label="Primary">
+        <nav aria-label="Primary" className="flex items-center gap-2">
           <ButtonLink href="/review" variant="outline">Workbench</ButtonLink>
+          <ThemeMenu />
         </nav>
       </header>
 
@@ -300,7 +302,7 @@ function ArtifactNode({
       <span className="hidden shrink-0 sm:block">
         <svg
           aria-hidden="true"
-          className="block text-chart-3"
+          className="block text-muted-foreground"
           height={sparklineBox.height}
           role="presentation"
           viewBox={`0 0 ${sparklineBox.width} ${sparklineBox.height}`}

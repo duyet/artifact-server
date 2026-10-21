@@ -3,15 +3,14 @@ import {
   IconKeyboard,
   IconLayoutGrid,
   IconLogout,
-  IconMoon,
   IconRefresh,
   IconSearch,
   IconSelector,
   IconSettings,
-  IconSun,
 } from "@tabler/icons-react";
 
 import {api, type Project, type Session} from "@/api/client";
+import {ThemeRadioGroup} from "@/components/theme-menu";
 import {Avatar, AvatarFallback} from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -40,6 +39,7 @@ import {
 } from "@/components/ui/sidebar";
 import {Kbd} from "@/components/ui/kbd";
 import {ScrollArea} from "@/components/ui/scroll-area";
+import type {ThemePreference} from "@/lib/theme";
 import {ArtifactMark} from "../artifact-mark.tsx";
 import type {ArtifactCatalog} from "../catalog/use-artifact-catalog.ts";
 import {principalInitials} from "../principal-name.ts";
@@ -62,7 +62,7 @@ export function AppSidebar({
   route,
   selectedArtifactId,
   session,
-  theme,
+  themePreference,
 }: {
   readonly canManageProjects: boolean;
   readonly catalog: ArtifactCatalog;
@@ -70,13 +70,13 @@ export function AppSidebar({
   readonly onOpenHome: () => void;
   readonly onOpenShortcuts: () => void;
   readonly onSelectProject: (projectId: string) => void;
-  readonly onThemeChange: () => void;
+  readonly onThemeChange: (preference: ThemePreference) => void;
   readonly projectId: string;
   readonly projects: readonly Project[];
   readonly route: ReviewRoute;
   readonly selectedArtifactId: string | null;
   readonly session: Session;
-  readonly theme: "dawn" | "moon";
+  readonly themePreference: ThemePreference;
 }) {
   const navigation = [
     {href: withProject(artifactsPath, projectId), icon: IconLayoutGrid, kind: "artifacts", label: "Artifacts"},
@@ -186,7 +186,7 @@ export function AppSidebar({
             onOpenShortcuts={onOpenShortcuts}
             onThemeChange={onThemeChange}
             session={session}
-            theme={theme}
+            themePreference={themePreference}
           />
         </SidebarFooter>
       </nav>
@@ -199,12 +199,12 @@ function UserMenu({
   onOpenShortcuts,
   onThemeChange,
   session,
-  theme,
+  themePreference,
 }: {
   readonly onOpenShortcuts: () => void;
-  readonly onThemeChange: () => void;
+  readonly onThemeChange: (preference: ThemePreference) => void;
   readonly session: Session;
-  readonly theme: "dawn" | "moon";
+  readonly themePreference: ThemePreference;
 }) {
   const principal = session.principal;
   const identity = {displayName: principal.displayName ?? null, principalId: principal.id};
@@ -232,10 +232,11 @@ function UserMenu({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={onThemeChange}>
-                {theme === "moon" ? <IconSun /> : <IconMoon />}
-                {theme === "moon" ? "Use light theme" : "Use dark theme"}
-              </DropdownMenuItem>
+              <DropdownMenuLabel>Theme</DropdownMenuLabel>
+              <ThemeRadioGroup onValueChange={onThemeChange} value={themePreference} />
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
               <DropdownMenuItem onClick={onOpenShortcuts}>
                 <IconKeyboard />
                 Keyboard shortcuts

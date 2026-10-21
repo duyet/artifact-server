@@ -6,11 +6,6 @@
 
 :root {
   --as-focus-comments-width: min(22rem, calc(100vw - 3rem));
-  color-scheme: dark;
-}
-
-:root[data-review-theme="dawn"] {
-  color-scheme: light;
 }
 
 html,

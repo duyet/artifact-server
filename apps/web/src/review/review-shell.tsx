@@ -13,6 +13,7 @@ import {Separator} from "@/components/ui/separator";
 import {SidebarInset, SidebarProvider, SidebarTrigger, useSidebar} from "@/components/ui/sidebar";
 import {Toaster} from "@/components/ui/sonner";
 import {TooltipProvider} from "@/components/ui/tooltip";
+import type {ResolvedTheme, ThemePreference} from "@/lib/theme";
 import {ArtifactsPage} from "./catalog/artifacts-page.tsx";
 import {ownedArtifactCounts} from "./catalog/owner-counts.ts";
 import {useArtifactCatalog} from "./catalog/use-artifact-catalog.ts";
@@ -46,13 +47,15 @@ export function ReviewShell({
   projects,
   session,
   theme,
+  themePreference,
 }: {
   readonly onCreateProject: (name: string) => Promise<Project>;
   readonly onProjectsChanged: () => Promise<readonly Project[]>;
-  readonly onThemeChange: () => void;
+  readonly onThemeChange: (preference: ThemePreference) => void;
   readonly projects: readonly Project[];
   readonly session: Session;
-  readonly theme: "dawn" | "moon";
+  readonly theme: ResolvedTheme;
+  readonly themePreference: ThemePreference;
 }) {
   const {navigate, url} = useReviewNavigation();
   useSameAppLinks(navigate);
@@ -129,7 +132,7 @@ export function ReviewShell({
             route={route}
             selectedArtifactId={route.kind === "artifacts" ? location.artifactId : null}
             session={session}
-            theme={theme}
+            themePreference={themePreference}
           />
           <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
             {route.kind === "artifacts" && location.artifactId !== null ? (
@@ -200,7 +203,7 @@ export function ReviewShell({
         open={paletteOpen}
         projectId={projectId}
       />
-      <Toaster position="bottom-right" theme={theme === "moon" ? "dark" : "light"} />
+      <Toaster position="bottom-right" theme={theme} />
     </TooltipProvider>
   );
 }
