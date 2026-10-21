@@ -172,6 +172,7 @@ describe("modern MCP HTTP", () => {
       "artifact_open",
       "artifact_version_list",
       "artifact_diff",
+      "artifact_check_assets",
       "artifact_create_upload",
       "artifact_commit_upload",
       "artifact_set_visibility",

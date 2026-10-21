@@ -26,6 +26,7 @@ import {
   type UpdateCommentThreadCommand,
 } from "../application/artifact-comments.js";
 import {ArtifactManagementService} from "../application/artifact-management.js";
+import {CheckArtifactAssetsService} from "../application/check-artifact-assets.js";
 import {CompareArtifactService} from "../application/compare-artifact.js";
 import {ContentAccessService} from "../application/content-access.js";
 import {ProjectManagementService} from "../application/project-management.js";
@@ -77,6 +78,7 @@ import {
 import {
   assertCookieSessionsAvailable,
   requestedArtifactPath,
+  versionServedRoots,
 } from "../http/same-host-content.js";
 import {artifactServerFailureResponse} from "../http/artifact-http-failure.js";
 import {
@@ -167,6 +169,14 @@ const artifactStateSchema = z.object({
 const publishedVersionSchema = artifactStateSchema.extend({
   links: z.object({artifact: z.url(), review: z.url(), version: z.url()}).strict(),
 }).strict();
+const assetReferenceKindSchema = z.enum([
+  "css-import",
+  "css-url",
+  "html-attr",
+  "meta-refresh",
+  "outside",
+  "script",
+]);
 const commentThreadIdSchema = z.string().min(1).max(200);
 const commentReplyIdSchema = z.string().min(1).max(200);
 // The comment service is the single body authority: it measures the trimmed
@@ -376,6 +386,36 @@ export function createArtifactMcpServer(
       instructions: agentInstructions(dependencies.mode),
     },
   );
+
+  /**
+   * Count the new version's broken references for the publisher. The check is
+   * advice: any failure yields null and never fails the publish.
+   */
+  async function publicationAssetCheck(
+    published: PublishedVersion,
+  ): Promise<{readonly broken: number; readonly heuristic: number} | null> {
+    try {
+      const checked = await runMcpApplicationEffect(
+        dependencies,
+        CheckArtifactAssetsService.use((assetChecks) =>
+          assetChecks.checkVersion({
+            artifactId: published.artifact.id,
+            principal: identity.principal,
+            projectId: published.artifact.projectId,
+            servedRoots: (artifact, version) =>
+              versionServedRoots(artifact, version, dependencies.contentDomain),
+            versionId: published.version.id,
+          })
+        ),
+      );
+      return {
+        broken: checked.report.summary.broken,
+        heuristic: checked.report.summary.heuristic,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * Register one tool and append the nudge pass to its results. The pass
@@ -1030,6 +1070,61 @@ export function createArtifactMcpServer(
   );
 
   registerNudgedTool(
+    "artifact_check_assets",
+    {
+      title: "Check a version for broken references",
+      description:
+        "List references in a saved version's HTML, CSS, and JavaScript that point at files the version does not contain, such as an image path that repeats the artifact's own folder name. Omit versionId to check the current version. Script and outside references are heuristic; the rest are certain.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        projectId: optionalProjectIdSchema,
+        versionId: versionIdSchema.optional(),
+      }).strict(),
+      outputSchema: z.object({
+        artifactId: z.string(),
+        references: z.array(z.object({
+          confidence: z.enum(["certain", "heuristic"]),
+          file: z.string(),
+          kind: assetReferenceKindSchema,
+          line: z.number().int().positive().nullable(),
+          raw: z.string(),
+          resolvedPath: z.string(),
+        }).strict()),
+        summary: z.object({
+          broken: z.number().int().nonnegative(),
+          byKind: z.record(assetReferenceKindSchema, z.number().int().nonnegative()),
+          checkedFiles: z.number().int().nonnegative(),
+          heuristic: z.number().int().nonnegative(),
+          truncated: z.boolean(),
+        }).strict(),
+        version: versionRecordSchema,
+      }).strict(),
+      annotations: readOnlyAnnotations,
+    },
+    async ({artifactId, projectId, versionId}) => toolResult(async () => {
+      const checked = await runMcpApplicationEffect(
+        dependencies,
+        CheckArtifactAssetsService.use((assetChecks) =>
+          assetChecks.checkVersion({
+            artifactId,
+            principal: identity.principal,
+            projectId,
+            servedRoots: (artifact, version) =>
+              versionServedRoots(artifact, version, dependencies.contentDomain),
+            versionId: versionId ?? null,
+          })
+        ),
+      );
+      return {
+        artifactId: checked.artifact.id,
+        references: checked.report.references,
+        summary: checked.report.summary,
+        version: checked.version,
+      };
+    }),
+  );
+
+  registerNudgedTool(
     "artifact_create_upload",
     {
       title: "Begin a file upload",
@@ -1109,7 +1204,12 @@ export function createArtifactMcpServer(
         ]),
         uploadId: z.string().min(1).max(200),
       }).strict(),
-      outputSchema: publishedVersionSchema,
+      outputSchema: publishedVersionSchema.extend({
+        assetCheck: z.object({
+          broken: z.number().int().nonnegative(),
+          heuristic: z.number().int().nonnegative(),
+        }).strict().nullable(),
+      }).strict(),
       annotations: idempotentWriteAnnotations,
     },
     async ({idempotencyKey, projectId, target, uploadId}) => toolResult(async () => {
@@ -1131,11 +1231,14 @@ export function createArtifactMcpServer(
           })
         ),
       );
-      return publishedVersionProjection(
-        applicationUrl,
-        dependencies.contentDomain,
-        published,
-      );
+      return {
+        ...publishedVersionProjection(
+          applicationUrl,
+          dependencies.contentDomain,
+          published,
+        ),
+        assetCheck: await publicationAssetCheck(published),
+      };
     }, publicationSummary),
   );
 
@@ -2094,6 +2197,7 @@ function agentInstructions(mode: "local" | "remote"): string {
     "Reviewers leave comment threads on an artifact version. Use comment_list and comment_get to read them, comment_create, comment_reply, and comment_update to write, comment_resolve to close or reopen a thread, and comment_delete to remove one you own; deleting a thread also deletes its replies. Sent comments cannot be deleted while their dispatch is queued, claimed, or delivered. comment_clear removes every resolved thread — or all threads — on one artifact at once and reports how many sent comments it skipped.",
     "comment_list hides threads an agent dispatch currently holds unless you pass dispatched: \"include\" or \"only\"; comment_get still reads a dispatched thread directly by id.",
     "dispatch_inbox is this caller's mailbox for annotation bundles a reviewer dispatched to it: list registers the caller as a mailbox-tier agent and shows its queued dispatches, claim takes the oldest one as a rendered message, and delivered or failed reports the outcome. Address a delivered bundle's threads with comment_reply, then comment_resolve.",
+    "After publishing a folder, call artifact_check_assets and fix any certain broken references before handing off; artifact_commit_upload already reports their counts in assetCheck.",
     "artifact_get returns the current complete manifest, current.links.review for exact full-screen Review, and links.artifact for the moving latest version. artifact_open returns reviewUrl for exact full-screen Review and browserUrl for raw immutable content. Prefer the Review URL for human handoff, and never describe browserUrl as a Review link. A remote server never opens a browser on the server machine.",
     mode === "local"
       ? "This is a local MCP connection, but the MCP protocol still carries metadata rather than file bytes. Use the bundled Artifact Server skill or CLI to upload a local path."
@@ -2415,12 +2519,19 @@ function successResult<Value extends object>(value: Value, summary?: string) {
 
 function publicationSummary(published: {
   readonly artifact: {readonly name: string};
+  readonly assetCheck: {readonly broken: number; readonly heuristic: number} | null;
   readonly links: {readonly review: string; readonly version: string};
 }): string {
+  const assetCheck = published.assetCheck;
   return [
     `Published ${JSON.stringify(published.artifact.name)}.`,
     `Review and comment: ${published.links.review}`,
     `Raw artifact: ${published.links.version}`,
+    ...(assetCheck === null || assetCheck.broken + assetCheck.heuristic === 0
+      ? []
+      : [
+        `Asset check: ${assetCheck.broken} broken and ${assetCheck.heuristic} possibly broken references. Call artifact_check_assets for the list.`,
+      ]),
   ].join("\n");
 }
 

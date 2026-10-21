@@ -305,6 +305,21 @@ export function artifactContentRoot(
   return folder === null ? null : `/${folder}/`;
 }
 
+/**
+ * The URL paths that serve one version's files on a single origin, the
+ * artifact's own root first. With a content domain each version owns its host.
+ */
+export function versionServedRoots(
+  artifact: {readonly id: string; readonly name: string; readonly path: string | null},
+  version: {readonly contentToken: string},
+  contentDomain: string | null,
+): readonly [string, ...string[]] {
+  if (contentDomain !== null) return ["/"];
+  const root = artifactContentRoot(artifact);
+  const exact = sameHostVersionPath(version.contentToken);
+  return root === null ? [exact] : [root, exact];
+}
+
 /** Read an artifact ID out of a path segment shaped like an artifact folder. */
 export function parseArtifactFolder(
   segment: string,

@@ -22,6 +22,7 @@ import {localOwnerBrowserAccess} from "../core/browser-access.js";
 import {configureLifecycleCommands} from "./lifecycle-commands.js";
 import {configureCliAuthCommands} from "./cli-auth-commands.js";
 import {configurePublishCommand} from "./publish-command.js";
+import {configureAssetsCommand} from "./assets-command.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
 import {configureOpenManagementCommand} from "./open-management-command.js";
 
@@ -58,6 +59,9 @@ configureCliAuthCommands(program, {
   defaultProfileDirectory: defaultUserDataDirectory,
 });
 configurePublishCommand(program, {
+  defaultProfileDirectory: defaultUserDataDirectory,
+});
+configureAssetsCommand(program, {
   defaultProfileDirectory: defaultUserDataDirectory,
 });
 configureOpenManagementCommand(program, defaultUserDataDirectory);
