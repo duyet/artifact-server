@@ -49,7 +49,7 @@ import {
 import type {PublicCatalog} from "./home-client.js";
 
 const viewsChartConfig = {
-  views: {color: "var(--chart-2)", label: "Views"},
+  views: {color: "var(--muted-foreground)", label: "Views"},
 } satisfies ChartConfig;
 
 /**
@@ -300,7 +300,7 @@ function ArtifactNode({
       <span className="hidden shrink-0 sm:block">
         <svg
           aria-hidden="true"
-          className="block text-chart-3"
+          className="block text-muted-foreground"
           height={sparklineBox.height}
           role="presentation"
           viewBox={`0 0 ${sparklineBox.width} ${sparklineBox.height}`}
