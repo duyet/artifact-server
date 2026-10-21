@@ -4310,6 +4310,20 @@ requirements:
     depends_on: [FRK-009]
     evidence: []
 
+  - id: FRK-017
+    kind: behavior
+    behavior: A saved version's asset check lists every reference in its HTML, CSS, and JavaScript that its own files cannot satisfy, resolved as a browser resolves it from the served URL, over HTTP, MCP, and the CLI, and every commit result carries the broken and heuristic counts without ever blocking the publish.
+    owner: http-api
+    source: {file: ../../docs/mcp.md, anchor: check-a-published-folder-for-broken-references}
+    acceptance:
+      behavior: {id: FRK-017-B, description: "Publish a folder with a correct image, an image path that repeats the artifact's own folder, a stylesheet url to a missing font, a srcset with one missing candidate, a base href, a subpage linking ../index.html, a script literal to missing data, an external image, a template placeholder, and a root-absolute path outside the artifact, then read exactly the broken ones over REST for the current and the exact version, over MCP, and through the CLI, with the counts on the HTTP and MCP commit results."}
+      failure: {id: FRK-017-F, description: "A version without HTML reports zero on its commit and its check, unterminated comments, strings, and url() end the scan, a file over the per-file limit is skipped and reported as truncated, an unknown version is 404, an unauthenticated read is 401, and an MCP call with an unknown field is refused."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server, the MCP endpoint, and the CLI in path mode. No content-domain, Postgres, or deployed run exists.
+    depends_on: [FRK-007]
+    evidence: []
+
   - id: FRK-011
     kind: behavior
     behavior: A project's activity report counts its live artifacts, public artifacts, uploads, and page views, gives a sparse 365-day daily series of uploads and views and the ten most viewed artifacts of the last 30 days, and one artifact's report gives its 7-day, 30-day, and all-time views with a sparse 30-day series; both are read-only and built from versions and stored view rows.
