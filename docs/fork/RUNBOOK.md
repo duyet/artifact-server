@@ -161,14 +161,14 @@ The command refuses an email whose member has another role, and an email of a de
 
 Give every person their own key on every machine, so each artifact and version names who published it. A bearer write records the key name as its author.
 
-In the SG compact pod, the image runs `node dist/cli/main.js` from `/opt/artifact-server`, so call it by path:
+In a compact pod, the image runs `node dist/cli/main.js` from `/opt/artifact-server`, so call it by path:
 
 ```sh
-kubectl --context sg -n artifact-server exec deploy/artifact-server -c artifact-server -- \
+kubectl --context <cluster> -n artifact-server exec deploy/artifact-server -c artifact-server -- \
   node /opt/artifact-server/dist/cli/main.js admin issue-key \
   --mode compact --data /var/lib/artifact-server/data \
-  --role member --email duyet@example.com --name "Duyet Le" \
-  --key-name "Duyet Le @ duet-mbp" > member-key.json
+  --role member --email ada@example.com --name "Ada Lovelace" \
+  --key-name "Ada Lovelace @ laptop" > member-key.json
 ```
 
 - `--role member` makes a key that creates artifacts, reads, comments, and opens review sessions. It publishes new versions only of artifacts its member created. It cannot manage other people's artifacts or projects. `--role` defaults to `administrator`.
