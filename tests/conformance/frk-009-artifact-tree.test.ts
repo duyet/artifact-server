@@ -216,6 +216,45 @@ describe("public artifact tree", () => {
     expect(stamps.toSorted().toReversed()).toEqual(stamps);
   }, 120_000);
 
+  test("FRK-016-B FRK-016-F: the tree names the trusted origin behind a TLS-ending ingress, and keeps the request URL when nothing matches", async () => {
+    await server.stop();
+    server = await startTestServer(installation, {
+      applicationOrigin: "https://example.test",
+      clock,
+      contentDomain: null,
+      webAssetsRoot: webRoot,
+    });
+    await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Agent console",
+      path: "2026/10/agent-console",
+    });
+
+    // The ingress ends TLS and the pod answers plain HTTP, so the request URL
+    // is http and its host is the pod's. The tree still names the origin the
+    // operator configured, matched against the forwarded host and protocol.
+    const proxied = await fetch(`${server.baseUrl}/api/v1/public/tree`, {
+      headers: {
+        "X-Forwarded-Host": "example.test",
+        "X-Forwarded-Proto": "https",
+      },
+    });
+    expect(proxied.status).toBe(200);
+    const proxiedTree = publicTreeSchema.parse(await proxied.json());
+    expect(proxiedTree.artifacts.length).toBe(1);
+    for (const artifact of proxiedTree.artifacts) {
+      expect(artifact.url.startsWith("https://example.test/")).toBe(true);
+    }
+
+    // Without forwarded headers that match the origin, the request URL stays
+    // the authority, so a direct loopback read keeps its own address.
+    const direct = await fetch(`${server.baseUrl}/api/v1/public/tree`);
+    const directTree = publicTreeSchema.parse(await direct.json());
+    for (const artifact of directTree.artifacts) {
+      expect(artifact.url.startsWith(server.baseUrl)).toBe(true);
+    }
+  });
+
   test("FRK-009-F: a private or deleted artifact is absent, the endpoint needs no credential, and the application keeps its own", async () => {
     const publicSite = await publishSite(server, installation, {
       accessSetting: "public_link",

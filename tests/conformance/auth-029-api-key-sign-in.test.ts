@@ -295,6 +295,55 @@ describe("API-key browser sign-in", () => {
     expect((await signIn(running(), forgedKey)).status).toBe(401);
   });
 
+  test("AUTH-033-B AUTH-033-F: behind a trusted TLS-ending proxy failures count per forwarded client, not per proxy", async () => {
+    await running().stop();
+    server = await startTestServer(installation, {
+      applicationOrigin: "https://example.test",
+      browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+      clock,
+      contentDomain: null,
+    });
+    const viaProxy = (forwardedFor: string) => ({
+      ...sameOriginHeaders(running()),
+      Origin: "https://example.test",
+      "X-Forwarded-For": forwardedFor,
+      "X-Forwarded-Host": "example.test",
+      "X-Forwarded-Proto": "https",
+    });
+    const statusOf = async (apiKey: string, headers: Record<string, string>) =>
+      (await signIn(running(), apiKey, headers)).status;
+
+    for (let client = 1; client <= 5; client += 1) {
+      // The count moves between attempts, so each one waits for the last.
+      // eslint-disable-next-line no-await-in-loop
+      expect(await statusOf(forgedKey, viaProxy(`203.0.113.${client}`))).toBe(401);
+    }
+    expect(await statusOf(installation.apiToken, viaProxy("203.0.113.6"))).toBe(204);
+
+    // The proxy appends the address it saw, so a forged leading entry is ignored.
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      // The count moves between attempts, so each one waits for the last.
+      // eslint-disable-next-line no-await-in-loop
+      expect(await statusOf(forgedKey, viaProxy(`198.51.100., 203.0.113.9`)))
+        .toBe(401);
+    }
+    expect(await statusOf(installation.apiToken, viaProxy("203.0.113.9"))).toBe(429);
+    expect(await statusOf(installation.apiToken, viaProxy("203.0.113.10"))).toBe(204);
+
+    // Without forwarded host and protocol naming the origin, the header is not trusted.
+    const direct = (forwardedFor: string) => ({
+      ...sameOriginHeaders(running()),
+      Origin: "https://example.test",
+      "X-Forwarded-For": forwardedFor,
+    });
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      // The count moves between attempts, so each one waits for the last.
+      // eslint-disable-next-line no-await-in-loop
+      expect(await statusOf(forgedKey, direct(`192.0.2.${attempt}`))).toBe(401);
+    }
+    expect(await statusOf(installation.apiToken, direct("192.0.2.6"))).toBe(429);
+  });
+
   test("AUTH-032-B: artifact content served beside a key session stays in an opaque sandbox", async () => {
     const signedIn = await signIn(running(), installation.apiToken);
     expect(signedIn.status).toBe(204);

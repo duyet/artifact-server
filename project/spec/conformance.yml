@@ -1454,7 +1454,7 @@ requirements:
 
   - id: AUTH-031
     kind: security
-    behavior: Failed API-key sign-ins are limited to five per client address in a sixty-second fixed window, checked before the key, with 429 RATE_LIMITED and Retry-After; a success clears the address.
+    behavior: Failed API-key sign-ins are limited to five per client address in a sixty-second fixed window, checked before the key, with 429 RATE_LIMITED and Retry-After; a success clears the address. The address is the request's own socket address unless a trusted proxy names the client per AUTH-033.
     owner: authorization
     source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
     acceptance:
@@ -1462,8 +1462,22 @@ requirements:
       failure: {id: AUTH-031-F, description: "The sixth failure in the window is 429 with Retry-After, and a valid key is also refused until the window ends."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The limiter is per process, so replicas each keep their own count. Behind an ingress every client shares one address.
+    proof_gap: The limiter is per process, so replicas each keep their own count. Proved against a real server without a configured origin, where every sign-in client shares the socket address. The trusted-proxy client naming lives in AUTH-033.
     depends_on: [AUTH-029]
+    evidence: []
+
+  - id: AUTH-033
+    kind: security
+    behavior: When the application origin is configured, a request whose forwarded host and protocol match that origin keys the failed sign-in count on the last X-Forwarded-For entry, which the trusted proxy itself appended, so viewers behind one TLS-ending ingress do not share the proxy pod's address.
+    owner: authorization
+    source: {file: ../../docs/fork/DESIGN.md, anchor: api-key-sign-in}
+    acceptance:
+      behavior: {id: AUTH-033-B, description: "With the origin configured, five failures from five distinct forwarded clients leave sign-in open, and a valid key from a fresh forwarded client still signs in."}
+      failure: {id: AUTH-033-F, description: "A forged leading forwarded entry counts against the appended client, the fifth failure locks that client itself while a valid client on another address signs in, and without matching forwarded headers the count keys the socket address in spite of a forwarded header."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a real HTTP server started with an https application origin over plain HTTP, including the appended-entry rule and the untrusted-header fallback. No deployed ingress run exists, and a second reverse proxy in front of the configured one sits between the rule and the viewer's address.
+    depends_on: [AUTH-031]
     evidence: []
 
   - id: AUTH-032
@@ -4218,7 +4232,7 @@ requirements:
     owner: content-delivery
     source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-tree-endpoint}
     acceptance:
-      behavior: {id: FRK-009-B, description: "Publish artifacts under 2026/10 and 2026/11 plus one with no path, read the tree, and observe nested folders labelled by their last segment, newest-first order, the ungrouped group, sparse daily rows, and the 7-day, 30-day, and all-time totals. Publish 499, exactly 500, then 501 public artifacts and observe truncated flip at the cap, an exactly-full read already reporting it, a capped read holding only the newest 500 newest first, and the oldest artifact falling off."}
+      behavior: {id: FRK-009-B, description: "Publish artifacts under 2026/10 and 2026/11 plus one with no path, read the tree, and observe nested folders labelled by their last segment, newest-first order, the ungrouped group, sparse daily rows, and the 7-day, 30-day, and all-time totals. Publish 499, exactly 500, then 501 public artifacts and observe truncated flip at the cap, an exactly-full read already reporting it, a capped read holding only the newest 500 newest first, and the oldest artifact falling off. Behind an ingress that ends TLS, a request whose forwarded host and protocol match the configured application origin yields only that origin in each artifact url."}
       failure: {id: FRK-009-F, description: "A private or deleted artifact is absent, the endpoint needs no credential and answers cache-control no-cache while /api/v1/artifacts still needs one, an artifact path cannot shadow the endpoint, and / carries the application policy and not the content sandbox."}
     deployments: [single_server, kubernetes]
     status: implementing
@@ -4280,6 +4294,20 @@ requirements:
     status: implementing
     proof_gap: Proved against a compact SQLite installation in process. The external-storage path shares the application service and repository methods but has no Postgres run.
     depends_on: [FRK-010, FRK-014]
+    evidence: []
+
+  - id: FRK-016
+    kind: behavior
+    behavior: The public tree names the configured application origin, matched against the request's forwarded host and protocol, in every artifact url, so home-page links hold when a TLS-ending ingress answers HTTP on the pod.
+    owner: content-delivery
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-tree-endpoint}
+    acceptance:
+      behavior: {id: FRK-016-B, description: "With the application origin configured to https://example.test, a tree request whose forwarded host and protocol match that origin carries only that origin in every artifact url."}
+      failure: {id: FRK-016-F, description: "A tree request whose forwarded headers do not match the origin, or an installation with no configured origin, keeps the request URL as authority, so the tree never names an origin the server would not answer on."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a real HTTP server started with an https application origin, read over plain HTTP both with and without matching forwarded headers. No deployed ingress run exists.
+    depends_on: [FRK-009]
     evidence: []
 
   - id: FRK-011

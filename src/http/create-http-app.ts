@@ -874,7 +874,7 @@ export function createHttpApp(
       PublicArtifactCatalogService.use((catalogService) =>
         catalogService.listCatalog({limit: publicCatalogLimit})),
     );
-    const requestUrl = new URL(context.req.url);
+    const requestUrl = responseApplicationUrl(context, dependencies);
     return context.json({
       ...catalog,
       artifacts: catalog.artifacts.map((item) => ({
@@ -935,7 +935,7 @@ export function createHttpApp(
       return context.notFound();
     }
     requireApplicationOrigin(context, dependencies);
-    const clientAddress = getConnInfo(context).remote.address ?? "unknown";
+    const clientAddress = signInClientAddress(context, dependencies);
     const retryAfterSeconds = failedSignIns.retryAfterSeconds(clientAddress);
     if (retryAfterSeconds !== null) {
       context.header("Retry-After", String(retryAfterSeconds));
@@ -2485,21 +2485,42 @@ function responseApplicationUrl(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
 ): URL {
-  const requestUrl = new URL(context.req.url);
-  if (dependencies.trustedApplicationOrigin === null) return requestUrl;
-  const trustedUrl = new URL(dependencies.trustedApplicationOrigin);
+  const trustedOrigin = dependencies.trustedApplicationOrigin;
+  return trustedOrigin !== null && isForwardedFrom(context, trustedOrigin)
+    ? new URL(trustedOrigin)
+    : new URL(context.req.url);
+}
+
+function isForwardedFrom(
+  context: Context<HttpEnvironment>,
+  trustedOrigin: string,
+): boolean {
+  const trustedUrl = new URL(trustedOrigin);
   const forwardedProtocol = context.req.header("x-forwarded-proto")
     ?.split(",")[0]?.trim();
   const forwardedHost = context.req.header("x-forwarded-host")
     ?.split(",")[0]?.trim() ?? context.req.header("host");
-  if (
-    `${forwardedProtocol}:` === trustedUrl.protocol &&
+  return `${forwardedProtocol}:` === trustedUrl.protocol &&
     forwardedHost?.toLocaleLowerCase("en-US") ===
-      trustedUrl.host.toLocaleLowerCase("en-US")
+      trustedUrl.host.toLocaleLowerCase("en-US");
+}
+
+function signInClientAddress(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+): string {
+  // Behind the proxy every socket is the proxy's; the last X-Forwarded-For
+  // entry is the one the proxy itself appended, so a client cannot choose it.
+  const trustedOrigin = dependencies.trustedApplicationOrigin;
+  const forwardedFor = context.req.header("x-forwarded-for")
+    ?.split(",").at(-1)?.trim();
+  if (
+    forwardedFor !== undefined && forwardedFor !== "" &&
+    trustedOrigin !== null && isForwardedFrom(context, trustedOrigin)
   ) {
-    return trustedUrl;
+    return forwardedFor;
   }
-  return requestUrl;
+  return getConnInfo(context).remote.address ?? "unknown";
 }
 
 function requireBrowserMutationSecurity(
