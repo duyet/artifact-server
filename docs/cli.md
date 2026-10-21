@@ -61,4 +61,20 @@ artifactserver publish ./dist \
 
 The expected version prevents an old client from replacing a newer current pointer. `--name`, `--path`, `--public`, `--private`, and `--tag` apply only when creating an artifact, so this command refuses them. A new version keeps the artifact's path.
 
+## Check for broken references
+
+The publish result carries `assetCheck`, the number of certain and heuristic broken references in the new version. List them for one artifact, or for an exact version with `--version-id`:
+
+```sh
+artifactserver assets check art_example --profile team
+```
+
+Print a table for every artifact the key can read:
+
+```sh
+artifactserver assets check --all --server https://artifacts.example.com --token-file key.txt
+```
+
+The report and its rules are described in [Check a published folder for broken references](./mcp.md#check-a-published-folder-for-broken-references).
+
 Run `artifactserver --help` or `artifactserver <command> --help` for the complete command reference.

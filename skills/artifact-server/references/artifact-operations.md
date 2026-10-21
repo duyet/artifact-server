@@ -43,6 +43,7 @@ The CLI owns local file inspection, symlink policy, media types, SHA-256 hashing
 - `artifact_open`: obtain `reviewUrl` for exact full-screen Review and `browserUrl` for raw immutable content for the current or an exact saved version. Prefer `reviewUrl` for human handoff. Never describe `browserUrl` as Review.
 - `artifact_version_list`: list immutable versions newest first.
 - `artifact_diff`: compare two exact version IDs.
+- `artifact_check_assets`: list references in a version's HTML, CSS, and JavaScript that point at files the version does not contain.
 
 Prefer `artifact_get` over several discovery calls when the artifact ID is already known.
 
@@ -64,6 +65,8 @@ Do not use MCP upload tools when the files exist on the user's machine and the C
 Use `artifact_create_upload` and `artifact_commit_upload` only when the current agent environment can actually read the file bytes and execute the returned authenticated HTTP uploads. A `new_artifact` target accepts the same optional `path` as the CLI's `--path`. Call `artifact_capabilities` first. Never place file bytes, base64, or a local path in MCP arguments, and never expose the MCP bearer credential to the model or output.
 
 ## Final result
+
+After publishing a folder, read `assetCheck` in the result. When `broken` is above zero, run `artifactserver assets check <artifact-id>` or `artifact_check_assets`, fix the paths, and publish a new version before handing off.
 
 For publication, collect these fields from the structured result:
 
