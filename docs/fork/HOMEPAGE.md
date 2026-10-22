@@ -116,7 +116,7 @@ Losses are bounded and stated: a process killed between a record and its drain l
 
 ## 2. The tree endpoint
 
-`GET /api/v1/public/tree` is anonymous. It returns every public artifact with its view counts, newest first.
+`GET /api/v1/public/tree` is anonymous. It returns every public artifact with its view counts, newest first, except artifacts tagged `unlisted`. An unlisted artifact keeps its public link, so an old path that now redirects after a move can stay reachable without showing on the home page.
 
 ### Why `/api/v1/public/` is anonymous
 
