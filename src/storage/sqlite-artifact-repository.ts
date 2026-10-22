@@ -23,7 +23,10 @@ import {
   ProjectNotFound,
 } from "../core/errors.js";
 import {principalKinds} from "../core/identity.js";
-import {normalizeArtifactSearchText} from "../application/artifact-tags.js";
+import {
+  normalizeArtifactSearchText,
+  unlistedArtifactTag,
+} from "../application/artifact-tags.js";
 import {
   accessSettings,
   agentBeaconStates,
@@ -1067,10 +1070,15 @@ export class SqliteArtifactRepository implements
            JOIN versions ON versions.id = artifacts.current_version_id
            WHERE artifacts.deleted_at IS NULL
              AND artifacts.access_setting = 'public_link'
+             AND NOT EXISTS (
+               SELECT 1 FROM artifact_tags
+               WHERE artifact_tags.artifact_id = artifacts.id
+                 AND artifact_tags.tag = ?
+             )
            ORDER BY artifacts.created_at DESC, artifacts.id DESC
            LIMIT ?`,
         )
-        .all(limit)));
+        .all(unlistedArtifactTag, limit)));
   }
 
   readArtifactViewDays(

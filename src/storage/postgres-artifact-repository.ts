@@ -123,7 +123,10 @@ import type {
   UpdateCommentThread,
 } from "../core/ports.js";
 import {principalKinds, type PrincipalKind} from "../core/identity.js";
-import {normalizeArtifactSearchText} from "../application/artifact-tags.js";
+import {
+  normalizeArtifactSearchText,
+  unlistedArtifactTag,
+} from "../application/artifact-tags.js";
 import {
   agentDispatchLeaseMilliseconds,
   agentUnavailableStalenessMilliseconds,
@@ -1042,9 +1045,15 @@ export class PostgresArtifactRepository implements
          WHERE artifacts.installation_id = $1
            AND artifacts.deleted_at IS NULL
            AND artifacts.access_setting = 'public_link'
+           AND NOT EXISTS (
+             SELECT 1 FROM artifact_tags
+             WHERE artifact_tags.installation_id = artifacts.installation_id
+               AND artifact_tags.artifact_id = artifacts.id
+               AND artifact_tags.tag = $3
+           )
          ORDER BY artifacts.created_at DESC, artifacts.id DESC
          LIMIT $2`,
-        [installationId, limit],
+        [installationId, limit, unlistedArtifactTag],
       );
       return z.array(publicArtifactSummaryRowSchema).parse(rows);
     }));

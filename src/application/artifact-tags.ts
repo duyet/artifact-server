@@ -10,6 +10,13 @@ const controlCharacter = /\p{Cc}/u;
 const tagSegmenter = new Intl.Segmenter("en", {granularity: "grapheme"});
 const whitespace = /\s+/gu;
 
+/**
+ * A public artifact with this tag stays reachable by its link but is left
+ * out of the anonymous public tree, for example an old path that now only
+ * redirects to where its content moved.
+ */
+export const unlistedArtifactTag = "unlisted";
+
 /** Normalize and validate the complete artifact tag set. */
 export function parseArtifactTags(
   candidates: readonly string[],

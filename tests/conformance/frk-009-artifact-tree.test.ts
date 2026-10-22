@@ -270,6 +270,32 @@ describe("public artifact tree", () => {
     expect((await readTree(server)).artifacts.map((artifact) => artifact.name))
       .toEqual(["Agent console"]);
 
+    // An old path left behind by a move stays public so its link still works,
+    // and the unlisted tag keeps it out of the tree.
+    const oldPath = await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Agent console (old address)",
+      path: "old/agent-console",
+    });
+    expect((await readTree(server)).artifacts.map((artifact) => artifact.name).toSorted())
+      .toEqual(["Agent console", "Agent console (old address)"]);
+    const tagged = await fetch(
+      `${server.baseUrl}/api/v1/artifacts/${oldPath.artifact.id}/tags`,
+      {
+        body: JSON.stringify({
+          expectedCurrentVersionId: oldPath.version.id,
+          tags: ["Unlisted"],
+        }),
+        headers: apiHeaders(installation, "frk-009-unlist-old-path"),
+        method: "PATCH",
+      },
+    );
+    expect(tagged.status).toBe(200);
+    expect((await readTree(server)).artifacts.map((artifact) => artifact.name))
+      .toEqual(["Agent console"]);
+    expect((await fetch(`${server.baseUrl}/old/agent-console/`)).status)
+      .toBe(200);
+
     // `api` is a reserved path root, so no artifact can claim the endpoint's
     // prefix and shadow it with its own content.
     expect((await commitAtPath(
