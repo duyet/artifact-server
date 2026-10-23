@@ -99,13 +99,13 @@ Catalog at `/`, phone width and desktop share one column, max 720px:
 
 ```
 Artifacts                                   [Sign in]
-29 shared reports
+12 shared reports
 
 2026 / 10
-  Agent console                                 Oct 16
-  /2026/10/agent-console/
-  Weekly ClickHouse report                      Oct 14
-  /2026/10/clickhouse-weekly/
+  Release checklist                             Oct 16
+  /2026/10/release-checklist/
+  Weekly metrics report                         Oct 14
+  /2026/10/weekly-metrics/
 
 2026 / 09
   ...
