@@ -123,6 +123,18 @@ Other origins, `data:`, `blob:`, `mailto:`, `tel:`, `javascript:`, fragments, an
 
 The check skips files over 1 MiB and stops at 8 MiB and 1,000 files per version and at 1,000 reported references. `summary.truncated` is `true` when a limit was hit.
 
+## Add files without a new version
+
+An artifact's asset store holds images, video, PDFs, fonts, stylesheets, scripts, and text data that a page loads, outside every version. Adding or deleting an asset saves no version.
+
+1. Call `asset_create_upload` with `artifactId`, `name`, `mediaType`, `size`, and `sha256`.
+2. `PUT` the exact bytes to `file.uploadUrl` with the MCP bearer credential.
+3. Call `asset_commit_upload` with `artifactId`, `uploadId`, and an `idempotencyKey`. The result's `asset.url` is the file's `/_blob/<id>` link.
+
+`asset_list` returns the assets with the artifact's quota and usage. `asset_copy` adds an asset of another artifact in the same project without uploading bytes. `asset_delete` removes one asset and leaves every version unchanged.
+
+HTML and XML are refused with `ASSET_TYPE_UNSUPPORTED`. A file over its type's cap, or past the artifact's quota, is refused with `ASSET_LIMIT_EXCEEDED` before any byte is stored. `docs/fork/ASSETS.md` lists the types, caps, quota, REST routes, and response headers.
+
 ## Tool groups
 
 | Group | Tools |
@@ -131,6 +143,7 @@ The check skips files over 1 MiB and stops at 8 MiB and 1,000 files per version 
 | Projects | `project_list`, `project_create`, `project_rename`, `project_archive`, `project_unarchive` |
 | Artifacts | `artifact_list`, `artifact_get`, `artifact_open`, `artifact_version_list`, `artifact_diff`, `artifact_check_assets` |
 | Publication | `artifact_create_upload`, `artifact_commit_upload` |
+| Assets | `asset_create_upload`, `asset_commit_upload`, `asset_list`, `asset_copy`, `asset_delete` |
 | Management | `artifact_set_visibility`, `artifact_set_tags`, `artifact_restore_version`, `artifact_delete` |
 | Comments | `comment_list`, `comment_get`, `comment_create`, `comment_reply`, `comment_update`, `comment_resolve`, `comment_delete` |
 

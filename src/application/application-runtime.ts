@@ -1,6 +1,7 @@
 import { Effect, type ManagedRuntime, Result, type Tracer } from "effect";
 
 import type { AgentDispatchService } from "./agent-dispatch.js";
+import type { ArtifactAssetService } from "./artifact-assets.js";
 import type { PublishArtifactService } from "./publish-artifact.js";
 import type { StagedUploadService } from "./staged-upload.js";
 import type { AuthenticationService } from "./authentication.js";
@@ -22,6 +23,7 @@ import type {ProjectAnalyticsService} from "./project-analytics.js";
 /** Application services shared by every Artifact Server entry point. */
 export type ApplicationServices =
   | AgentDispatchService
+  | ArtifactAssetService
   | ArtifactCommentService
   | ArtifactManagementService
   | AuthenticationService

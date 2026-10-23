@@ -11,6 +11,7 @@ import {
   startLocalServer,
 } from "../../src/local/start-local-server.js";
 import type {BearerCredentialVerifier} from "../../src/application/authentication.js";
+import type {AssetQuota} from "../../src/core/asset-policy.js";
 import type {Clock} from "../../src/core/ports.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
@@ -74,6 +75,7 @@ export async function startTestServer(
   options: {
     readonly applicationOrigin?: string;
     readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
+    readonly assetQuota?: AssetQuota;
     readonly bootstrapAdministratorEmail?: string;
     readonly browserAccess?: BrowserAccess;
     readonly contentDomain?: string | null;
@@ -113,6 +115,9 @@ export async function startTestServer(
       ...config,
       artifactViewCollectionPolicy: options.artifactViewCollectionPolicy,
     };
+  }
+  if (options.assetQuota !== undefined) {
+    config = {...config, assetQuota: options.assetQuota};
   }
   if (options.clock !== undefined) {
     config = {...config, clock: options.clock};

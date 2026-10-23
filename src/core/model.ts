@@ -279,6 +279,32 @@ export interface VersionRecord {
   readonly routingMode: RoutingMode;
 }
 
+/**
+ * One file in an artifact's asset store. It lives outside every version, so
+ * adding or deleting one never saves a version, and its bytes are the
+ * content-addressed blob that versions use too.
+ */
+export interface AssetRecord {
+  readonly artifactId: string;
+  readonly createdAt: string;
+  readonly createdByDisplayName: string;
+  readonly createdByPrincipalId: string;
+  readonly id: string;
+  /** A lowercase media type from the asset allowlist. */
+  readonly mediaType: string;
+  /** The name the uploader gave the file. Only a label; it names no path. */
+  readonly name: string;
+  readonly projectId: string;
+  readonly sha256: string;
+  readonly size: number;
+}
+
+/** What one artifact's live assets use of its quota. */
+export interface AssetUsage {
+  readonly assetCount: number;
+  readonly byteCount: number;
+}
+
 /** One saved version together with the canonical manifest it references. */
 export interface ArtifactVersion {
   readonly manifest: CanonicalManifest;

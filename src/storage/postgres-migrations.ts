@@ -781,6 +781,39 @@ const dropGitHistory = Effect.gen(function*() {
     git_history_provider_identity`);
 });
 
+// One row is one file in an artifact's asset store, outside every version.
+// The bytes are the shared content-addressed blob, and deletion is a
+// tombstone, so a replayed idempotency key still finds the row it wrote.
+const addAssets = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  const statements = [
+    `CREATE TABLE assets (
+      installation_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      artifact_id TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      size BIGINT NOT NULL CHECK (size >= 0),
+      sha256 TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_by_principal_id TEXT NOT NULL,
+      created_by_display_name TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      input_digest TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      deleted_at TEXT,
+      PRIMARY KEY (installation_id, id),
+      UNIQUE (installation_id, project_id, idempotency_key),
+      FOREIGN KEY (installation_id, artifact_id)
+        REFERENCES artifacts(installation_id, id)
+    )`,
+    `CREATE INDEX assets_live_by_artifact
+      ON assets (installation_id, artifact_id, created_at)
+      WHERE deleted_at IS NULL`,
+  ] as const;
+  for (const statement of statements) yield* sql.unsafe(statement);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -800,10 +833,11 @@ const migrationLoader = Migrator.fromRecord({
   "0016_rename_and_edit_actions": addRenameAndEditActions,
   "0017_drop_external_identities": dropExternalIdentities,
   "0018_drop_git_history": dropGitHistory,
+  "0019_assets": addAssets,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 18;
+export const requiredPostgresSchemaVersion = 19;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -912,6 +946,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 18,
     name: "drop_git_history",
+  }, {
+    migration_id: 19,
+    name: "assets",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

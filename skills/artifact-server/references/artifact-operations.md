@@ -56,6 +56,13 @@ Call `artifact_get` immediately before a write to obtain the current version ID.
 - `artifact_restore_version`: make an existing saved version current. This restores an artifact version; it does not restore a server backup. When the user identifies the target relatively, such as "the older of the latest two," run `artifact_version_list` again immediately before the restore and confirm that the chosen version still has that relationship to the current version. An optimistic current-version guard alone does not preserve a relative description.
 - `artifact_delete`: use only for an explicit request to delete one artifact. Repeat the artifact name, server, and project before the destructive call. This does not delete the installation.
 
+Assets are files a page loads, kept outside versions:
+
+- `asset_create_upload`, then a `PUT` of the exact bytes, then `asset_commit_upload`: add one image, video, PDF, font, stylesheet, script, or text data file without saving a version. HTML and XML are refused.
+- `asset_list`: list an artifact's assets with their `/_blob` URLs, quota, and usage.
+- `asset_copy`: add another artifact's asset without uploading bytes.
+- `asset_delete`: remove one asset. Versions are not changed.
+
 Project creation, rename, archive, or unarchive are ordinary product actions but must be explicit. Use `project_create`, `project_rename`, `project_archive`, or `project_unarchive`. Archiving a project preserves readable history and stops new publication until it is unarchived.
 
 ## MCP file upload

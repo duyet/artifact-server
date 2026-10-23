@@ -6,6 +6,7 @@ import path from "node:path";
 import {Effect, ManagedRuntime, Redacted, Result} from "effect";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 
+import {defaultAssetQuota} from "../../src/core/asset-policy.js";
 import type {ApplicationRuntime} from "../../src/application/application-runtime.js";
 import {StagedUploadService} from "../../src/application/staged-upload.js";
 import {ExpiredStagingCleanupService} from
@@ -43,6 +44,7 @@ describe("staged upload lifecycle", () => {
     staging = new LocalStagingStore(path.join(dataDirectory, "staging"));
     runtime = ManagedRuntime.make(createLocalApplicationLayer({
       apiToken: Redacted.make("test-api-token"),
+      assetQuota: defaultAssetQuota,
       blobs,
       bootstrapAdministratorEmail: "admin@example.test",
       clock,
@@ -89,6 +91,7 @@ describe("staged upload lifecycle", () => {
     await expectStagedFailure(runtime, "UploadNotFound", (service) =>
       service.uploadFile({
         body: byteStream(bytes),
+        declaredLength: null,
         principal: testPrincipal("principal-b"),
         storageToken: slot.storageToken,
         uploadId: upload.id,
@@ -118,6 +121,7 @@ describe("staged upload lifecycle", () => {
       const foreignRuntime: ApplicationRuntime = ManagedRuntime.make(
         createLocalApplicationLayer({
           apiToken: Redacted.make("foreign-api-token"),
+          assetQuota: defaultAssetQuota,
           blobs: new LocalBlobStore(path.join(dataDirectory, "foreign-blobs")),
           bootstrapAdministratorEmail: "foreign-admin@example.test",
           clock,
@@ -140,6 +144,7 @@ describe("staged upload lifecycle", () => {
           "UploadNotFound",
           (service) => service.uploadFile({
             body: byteStream(bytes),
+            declaredLength: null,
             principal: testPrincipal(
               upload.principalId,
               "foreign-installation",
@@ -198,6 +203,7 @@ describe("staged upload lifecycle", () => {
     await expectStagedFailure(runtime, "UploadExpired", (service) =>
       service.uploadFile({
         body: byteStream(bytes),
+        declaredLength: null,
         principal: testPrincipal(expired.principalId),
         storageToken: expiredSlot.storageToken,
         uploadId: expired.id,
@@ -229,6 +235,7 @@ describe("staged upload lifecycle", () => {
     if (liveSlot === undefined) throw new Error("The commit fixture has no file slot.");
     await runStaged(runtime, (service) => service.uploadFile({
       body: byteStream(bytes),
+      declaredLength: null,
       principal: testPrincipal(live.principalId),
       storageToken: liveSlot.storageToken,
       uploadId: live.id,
@@ -287,6 +294,7 @@ describe("staged upload lifecycle", () => {
     if (expiredFile === undefined) throw new Error("The cleanup fixture has no file.");
     await runStaged(runtime, (service) => service.uploadFile({
       body: byteStream(bytes),
+      declaredLength: null,
       principal: testPrincipal(expired.principalId),
       storageToken: expiredFile.storageToken,
       uploadId: expired.id,
@@ -303,6 +311,7 @@ describe("staged upload lifecycle", () => {
     }
     await runStaged(runtime, (service) => service.uploadFile({
       body: byteStream(bytes),
+      declaredLength: null,
       principal: testPrincipal(committedUpload.principalId),
       storageToken: committedFile.storageToken,
       uploadId: committedUpload.id,

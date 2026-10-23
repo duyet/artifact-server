@@ -3,6 +3,7 @@ import {access, readFile, stat} from "node:fs/promises";
 import path from "node:path";
 
 import {Effect, Option, Redacted, Schema} from "effect";
+import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
@@ -67,6 +68,7 @@ type ConfiguredCredentialSource = "environment" | "file";
 export interface CompactRuntimeConfiguration {
   readonly apiToken: Redacted.Redacted;
   readonly applicationOrigin: string;
+  readonly assetQuota: AssetQuota;
   readonly bootstrapAdministratorEmail: string;
   readonly completedRequestLogSampleRate: number;
   readonly contentDomain: string | null;
@@ -84,6 +86,7 @@ export interface CompactRuntimeConfiguration {
 export interface ExternalStorageRuntimeConfiguration {
   readonly apiToken: Redacted.Redacted;
   readonly applicationOrigin: string;
+  readonly assetQuota: AssetQuota;
   readonly bootstrapAdministratorEmail: string;
   readonly completedRequestLogSampleRate: number;
   readonly contentDomain: string | null;
@@ -202,6 +205,7 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
   return {
     apiToken,
     applicationOrigin,
+    assetQuota: yield* parseAssetQuota(input.environment),
     bootstrapAdministratorEmail: installation.bootstrapAdministratorEmail,
     completedRequestLogSampleRate: yield* parseSampleRate(input.environment),
     contentDomain,
@@ -258,6 +262,7 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
   return {
     apiToken: apiToken.value,
     applicationOrigin,
+    assetQuota: yield* parseAssetQuota(environment),
     bootstrapAdministratorEmail: yield* parseRequiredEnvironment(
       "ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL",
       environment["ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL"],
@@ -587,6 +592,37 @@ function parseMilliseconds(
     );
   }
   return Effect.succeed(milliseconds);
+}
+
+function parseAssetQuota(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<AssetQuota, RuntimeConfigurationError> {
+  return Effect.gen(function*() {
+    return {
+      maximumAssets: yield* parsePositiveInteger(
+        environment,
+        "ARTIFACT_SERVER_ASSET_QUOTA_COUNT",
+        defaultAssetQuota.maximumAssets,
+      ),
+      maximumBytes: yield* parsePositiveInteger(
+        environment,
+        "ARTIFACT_SERVER_ASSET_QUOTA_BYTES",
+        defaultAssetQuota.maximumBytes,
+      ),
+    };
+  });
+}
+
+function parsePositiveInteger(
+  environment: NodeJS.ProcessEnv,
+  field: string,
+  fallback: number,
+): Effect.Effect<number, RuntimeConfigurationError> {
+  const value = Number(environment[field] ?? String(fallback));
+  if (!Number.isSafeInteger(value) || value < 1) {
+    return invalidValue(field, `${field} must be a positive integer.`);
+  }
+  return Effect.succeed(value);
 }
 
 function parsePostgresMaxConnections(

@@ -10,6 +10,7 @@ import {
   UploadFileNotFound,
   UploadIncomplete,
   UploadNotFound,
+  UploadTooLarge,
   type UploadedFileMismatch,
 } from "../core/errors.js";
 import type { Principal } from "../core/identity.js";
@@ -59,6 +60,8 @@ export interface CreateStagedUploadCommand {
 /** Input for streaming one file into a staged upload slot. */
 export interface UploadStagedFileCommand {
   readonly body: ReadableStream<Uint8Array>;
+  /** The request's announced body length, or null when it sent none. */
+  readonly declaredLength: number | null;
   readonly principal: Principal;
   readonly projectId?: string | null;
   readonly storageToken: string;
@@ -164,6 +167,7 @@ export type StagedUploadFailure =
   | UploadExpired
   | UploadFileNotFound
   | UploadIncomplete
+  | UploadTooLarge
   | UploadedFileMismatch
   | ArtifactRepositoryFailure
   | StagingStorageFailure
@@ -289,6 +293,16 @@ function makeStagedUploadService(
       if (file === undefined) {
         return yield* new UploadFileNotFound({
           message: "The staged upload file does not exist.",
+        });
+      }
+      // The stream check still stops a body without a length at the declared
+      // size; this refuses an announced overrun before any byte is read.
+      if (
+        command.declaredLength !== null &&
+        command.declaredLength > file.entry.size
+      ) {
+        return yield* new UploadTooLarge({
+          message: `The request body is ${command.declaredLength} bytes but the file declared ${file.entry.size}.`,
         });
       }
 

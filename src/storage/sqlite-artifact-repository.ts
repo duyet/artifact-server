@@ -6,6 +6,7 @@ import {
   AgentDispatchNotFound,
   ArtifactMutationConflict,
   ArtifactNotFound,
+  AssetNotFound,
   CommentNotFound,
   CommentResolved,
   DispatchStateConflict,
@@ -50,6 +51,8 @@ import {
   type ArtifactPage,
   type ArtifactPathMatch,
   type ArtifactRecord,
+  type AssetRecord,
+  type AssetUsage,
   type ArtifactState,
   type ArtifactTombstone,
   type ArtifactVersion,
@@ -91,8 +94,11 @@ import type {
   ClearCommentThreads,
   CommentRepository,
   CreateAgentDispatch,
+  ArtifactAssetRepository,
   CommitArtifactVersion,
+  CommitAsset,
   CommitNewArtifact,
+  CommittedAsset,
   ContentSessionRepository,
   CreateCommentReply,
   CreateCommentThread,
@@ -122,9 +128,19 @@ import type {
   ProjectRepository,
   RenameProject,
   RestoreArtifactVersion,
+  ServedAsset,
   SetProjectArchive,
   StagedUploadRepository,
 } from "../core/ports.js";
+import {assetQuotaFailure} from "../core/asset-policy.js";
+import {
+  assetColumns,
+  assetReplayRowSchema,
+  assetRowSchema,
+  assetUsageRowSchema,
+  replayedAsset,
+  servedAssetRowSchema,
+} from "./asset-row.js";
 import {
   agentDispatchLeaseMilliseconds,
   agentUnavailableStalenessMilliseconds,
@@ -499,6 +515,7 @@ interface PageResult<Item> {
 
 export class SqliteArtifactRepository implements
   AgentDispatchRepository,
+  ArtifactAssetRepository,
   ArtifactRepository,
   ArtifactViewRepository,
   CommentRepository,
@@ -1026,6 +1043,152 @@ export class SqliteArtifactRepository implements
         return this.#readDeletionResult(command.projectId, command.artifactId, false);
       }),
     );
+  }
+
+  commitAsset(command: CommitAsset): Promise<CommittedAsset> {
+    return Promise.resolve().then(() =>
+      this.#transaction(() => {
+        const {asset} = command;
+        const replayed = this.#findIdempotentAssetRow(
+          asset.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+        );
+        if (replayed !== null) return replayed;
+        if (this.#readArtifactOrNull(asset.projectId, asset.artifactId) === null) {
+          throw new ArtifactNotFound({message: "The artifact does not exist."});
+        }
+        const refused = assetQuotaFailure(
+          asset.size,
+          this.#assetUsage(asset.artifactId),
+          command.quota,
+        );
+        if (refused !== null) throw refused;
+        this.#database
+          .prepare(
+            `INSERT INTO assets (
+              id, project_id, artifact_id, media_type, size, sha256, name,
+              created_by_principal_id, created_by_display_name,
+              idempotency_key, input_digest, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            asset.id,
+            asset.projectId,
+            asset.artifactId,
+            asset.mediaType,
+            asset.size,
+            asset.sha256,
+            asset.name,
+            asset.createdByPrincipalId,
+            asset.createdByDisplayName,
+            command.idempotencyKey,
+            command.inputDigest,
+            asset.createdAt,
+          );
+        return {asset, replayed: false};
+      }),
+    );
+  }
+
+  deleteAsset(
+    projectId: string,
+    artifactId: string,
+    assetId: string,
+    deletedAt: string,
+  ): Promise<AssetRecord> {
+    return Promise.resolve().then(() =>
+      this.#transaction(() => {
+        const row = this.#database
+          .prepare(
+            `SELECT ${assetColumns} FROM assets asset
+             WHERE asset.id = ? AND asset.project_id = ? AND asset.artifact_id = ?
+               AND asset.deleted_at IS NULL`,
+          )
+          .get(assetId, projectId, artifactId);
+        const live = assetRowSchema.nullable().parse(row ?? null);
+        if (live === null) {
+          throw new AssetNotFound({message: "The asset does not exist."});
+        }
+        this.#database
+          .prepare("UPDATE assets SET deleted_at = ? WHERE id = ?")
+          .run(deletedAt, assetId);
+        return live;
+      }));
+  }
+
+  findIdempotentAsset(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): Promise<CommittedAsset | null> {
+    return Promise.resolve().then(() =>
+      this.#findIdempotentAssetRow(projectId, idempotencyKey, inputDigest));
+  }
+
+  findServedAsset(assetId: string): Promise<ServedAsset | null> {
+    return Promise.resolve().then(() => {
+      const row = this.#database
+        .prepare(
+          `SELECT ${assetColumns}, artifact.access_setting AS "accessSetting"
+           FROM assets asset
+           JOIN artifacts artifact ON artifact.id = asset.artifact_id
+           WHERE asset.id = ? AND asset.deleted_at IS NULL
+             AND artifact.deleted_at IS NULL`,
+        )
+        .get(assetId);
+      const served = servedAssetRowSchema.nullable().parse(row ?? null);
+      if (served === null) return null;
+      const {accessSetting, ...asset} = served;
+      return {accessSetting, asset};
+    });
+  }
+
+  listAssets(
+    projectId: string,
+    artifactId: string,
+  ): Promise<{readonly assets: readonly AssetRecord[]; readonly usage: AssetUsage}> {
+    return Promise.resolve().then(() => {
+      const rows = this.#database
+        .prepare(
+          `SELECT ${assetColumns}
+           FROM assets asset
+           WHERE asset.project_id = ? AND asset.artifact_id = ?
+             AND asset.deleted_at IS NULL
+           ORDER BY asset.created_at, asset.id`,
+        )
+        .all(projectId, artifactId);
+      return {
+        assets: z.array(assetRowSchema).parse(rows),
+        usage: this.#assetUsage(artifactId),
+      };
+    });
+  }
+
+  #assetUsage(artifactId: string): AssetUsage {
+    return assetUsageRowSchema.parse(this.#database
+      .prepare(
+        `SELECT COUNT(*) AS assetCount, COALESCE(SUM(size), 0) AS byteCount
+         FROM assets WHERE artifact_id = ? AND deleted_at IS NULL`,
+      )
+      .get(artifactId));
+  }
+
+  #findIdempotentAssetRow(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): CommittedAsset | null {
+    const row = this.#database
+      .prepare(
+        `SELECT ${assetColumns}, asset.input_digest AS "inputDigest",
+           asset.deleted_at AS "deletedAt"
+         FROM assets asset
+         WHERE asset.project_id = ? AND asset.idempotency_key = ?`,
+      )
+      .get(projectId, idempotencyKey);
+    const found = assetReplayRowSchema.nullable().parse(row ?? null);
+    return found === null ? null : replayedAsset(found, inputDigest);
   }
 
   findArtifact(projectId: string, artifactId: string): Promise<ArtifactRecord | null> {
@@ -4250,6 +4413,28 @@ export class SqliteArtifactRepository implements
         count INTEGER NOT NULL CHECK (count >= 0),
         PRIMARY KEY (artifact_id, day)
       ) STRICT;
+
+      -- One row is one file in an artifact's asset store, outside every
+      -- version. The bytes are the shared content-addressed blob. Deletion is
+      -- a tombstone, so a replayed key still finds the row it wrote.
+      CREATE TABLE IF NOT EXISTS assets (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id),
+        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+        media_type TEXT NOT NULL,
+        size INTEGER NOT NULL CHECK (size >= 0),
+        sha256 TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_by_principal_id TEXT NOT NULL,
+        created_by_display_name TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        input_digest TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        deleted_at TEXT,
+        UNIQUE (project_id, idempotency_key)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS assets_live_by_artifact
+        ON assets (artifact_id, created_at) WHERE deleted_at IS NULL;
 
       CREATE TABLE IF NOT EXISTS idempotency_records (
         project_id TEXT NOT NULL REFERENCES projects(id),

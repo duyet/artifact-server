@@ -671,19 +671,20 @@ describe("complete-site publishing", () => {
       error: {code: "UPLOAD_INCOMPLETE"},
     });
 
-    for (const invalidBytes of [
-      declared.slice(0, 4),
-      utf8("declared bytes plus unexpected bytes"),
-      utf8("different bytes"),
-    ]) {
+    // An announced overrun is refused before any byte is read (FRK-018); a
+    // short or different body fails its verification.
+    for (const [invalidBytes, status, code] of [
+      [declared.slice(0, 4), 422, "INVALID_INPUT"],
+      [utf8("declared bytes plus unexpected bytes"), 413, "UPLOAD_TOO_LARGE"],
+      // Same length, so only the fingerprint can reject it.
+      [utf8("declared bytez"), 422, "INVALID_INPUT"],
+    ] as const) {
       // The same slot remains open after each failed verification.
       // eslint-disable-next-line no-await-in-loop
       const response = await uploadStagedFile(installation, planned, invalidBytes);
-      expect(response.status).toBe(422);
+      expect(response.status).toBe(status);
       // eslint-disable-next-line no-await-in-loop
-      await expect(response.json()).resolves.toMatchObject({
-        error: {code: "INVALID_INPUT"},
-      });
+      await expect(response.json()).resolves.toMatchObject({error: {code}});
     }
 
     const stillIncomplete = await commitFailure(
