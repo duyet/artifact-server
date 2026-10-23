@@ -28,10 +28,10 @@ Publication returns JSON with three browser links:
 On a server without a content domain, a new artifact can claim one readable path:
 
 ```sh
-artifactserver publish ./dist --public --name "Agent console" --path 2026/10/agent-console
+artifactserver publish ./dist --public --name "Release checklist" --path 2026/10/release-checklist
 ```
 
-`links.artifact` is then `https://artifacts.example.com/2026/10/agent-console/`, and every new version keeps that link.
+`links.artifact` is then `https://artifacts.example.com/2026/10/release-checklist/`, and every new version keeps that link.
 
 - A path has 1 to 6 segments joined by `/` and at most 200 characters. Each segment uses lowercase letters, digits, and hyphens, and starts with a letter or digit.
 - The first segment cannot be an application route, such as `api`, `assets`, or `review`.

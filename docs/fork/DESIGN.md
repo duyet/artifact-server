@@ -1,10 +1,10 @@
 # Same-host fork design
 
-This fork runs one internal Artifact Server in upstream external-storage mode on Kubernetes 1.33 behind ingress-nginx on a VPN. The pods are stateless. Metadata lives in a dedicated database in an existing CloudNativePG cluster (PostgreSQL 18.1), and bytes live in the bucket `artifact-server` on an existing Versity S3 gateway (`versitygw` 1.4.1, `posix` backend, plain HTTP, path-style). Artifacts are served from the application host at readable paths. Viewers never log in, and publishers use one API key. The base is upstream `v0.1.2` (`5af28ac`).
+This fork runs Artifact Server in upstream external-storage mode on Kubernetes 1.33 or later, on one application host. The pods are stateless. Metadata lives in a dedicated Postgres database, and bytes live in a bucket such as `artifact-server` on an S3-compatible gateway (tested with Versity `versitygw` 1.4.1, `posix` backend, plain HTTP, path-style). Artifacts are served from the application host at readable paths. Viewers never log in, and publishers use one API key. The base is upstream `v0.1.2` (`5af28ac`).
 
-The fork is a public repository, so deployment values stay in the deployment repository. This document uses `artifacts.example.internal` for the application host and `http://s3.example.internal:7070` for the S3 gateway.
+Real deployment values belong in each operator's own configuration, not in this repository. This document uses `artifacts.example.internal` for the application host and `http://s3.example.internal:7070` for the S3 gateway.
 
-This is revision 2 of a proposal. It replaces compact mode with external storage (brief r2). Compact mode gets the same path mode and no-login mode at no extra cost. Nothing below is implemented.
+This is revision 2 of a proposal. It replaces compact mode with external storage. Compact mode gets the same path mode and no-login mode at no extra cost. Nothing below is implemented.
 
 ## 1. How upstream routes content
 
@@ -40,7 +40,7 @@ A middleware that runs before every application route reads the `Host` header (`
 
 ## 2. Storage on Versity
 
-Versity compatibility is the riskiest assumption, so it is proved first, in commit 2, before any feature work.
+Gateway compatibility is the riskiest assumption, so it is proved first, in commit 2, before any feature work.
 
 ### What the adapter uses
 
@@ -84,7 +84,7 @@ Three gaps remain:
 
 1. **Region.** `configuration.s3.region` must equal the gateway's region.
 2. **Large files on ext4.** CompleteMultipartUpload stores one extended attribute that lists every part (`backend/posix/posix.go:2154`). Open issue versity/versitygw#2424 reports 507 `InsufficientStorage` near 1,418 parts on ext4 (seen on 1.7.0, and the code path is the same in 1.4.1). With 8 MiB parts, that caps one file near 11 GiB. XFS is not reported.
-3. **Gateway filesystem.** The directory behind the posix backend must support `user.` extended attributes. If it is NFS without them, the gateway needs `--sidecar`. Section 7 depends on this too.
+3. **Gateway filesystem.** The directory behind the posix backend must support `user.` extended attributes. If the filesystem lacks them, as some network filesystems do, the gateway needs `--sidecar`. Section 7 depends on this too.
 
 The worst gaps in Versity 1.4.1 do not touch this adapter. Its `If-None-Match: *` create is not atomic (fixed in 1.8.0), and it stores `Content-Encoding: aws-chunked` from streaming uploads (versity/versitygw#2398, fixed in 1.9.0). The adapter never writes conditionally, and lib-storage sends Buffers, never `aws-chunked` bodies.
 
@@ -282,16 +282,16 @@ Outside the chart:
 - `scripts/verify-helm-chart.sh:24` adds `1.33.0` to the render loop. It adds a render case with no content domain, which asserts one ingress host and no `ARTIFACT_SERVER_CONTENT_DOMAIN`.
 - `scripts/check-release-version.mjs:8` and `:99` pin `values.yaml` to `ghcr.io/plannotator/artifact-server`. The fork leaves `values.yaml` alone, and the release workflow writes the fork image into the packaged chart (section 8).
 
-### Values the deployment sets
+### Values a deployment sets
 
 - `configuration.applicationOrigin` (`https://artifacts.example.internal`), `installationId`, `bootstrapAdministratorEmail`. Leave `contentDomain` empty.
-- `configuration.s3`: `bucket: artifact-server`, `endpoint: http://s3.example.internal:7070`, `forcePathStyle: true`, and `region` equal to the gateway's `--region` (`us-east-1` unless the gateway sets another). Set `secret.keys.s3AccessKeyId` and `s3SecretAccessKey`, because Versity needs static keys.
-- `ingress.applicationTlsSecretName` is the existing wildcard secret. Leave `contentTlsSecretName` empty. Set `ingress.annotations` to `nginx.ingress.kubernetes.io/proxy-body-size: "0"` and `proxy-request-buffering: "off"`, because upload `PUT`s have no application size limit and ingress-nginx defaults to 1 MiB.
-- Postgres connection budget. The chart checks `postgresConnectionBudget` (default 22) against 2 replicas × `postgresPoolSize` 10 plus the migration and cleanup jobs (`templates/_helpers.tpl:87`). A rolling update with `maxSurge: 1` (`templates/deployment.yaml:17`) briefly runs a third pod. Give the CloudNativePG role a connection limit of at least 32.
+- `configuration.s3`: `bucket: artifact-server`, `endpoint: http://s3.example.internal:7070`, `forcePathStyle: true`, and `region` equal to the gateway's `--region` (`us-east-1` unless the gateway sets another). Set `secret.keys.s3AccessKeyId` and `s3SecretAccessKey`, because a gateway such as Versity needs static keys.
+- `ingress.applicationTlsSecretName` is a TLS secret that covers the application host. Leave `contentTlsSecretName` empty. Set `ingress.annotations` to `nginx.ingress.kubernetes.io/proxy-body-size: "0"` and `proxy-request-buffering: "off"`, because upload `PUT`s have no application size limit and ingress-nginx defaults to 1 MiB.
+- Postgres connection budget. The chart checks `postgresConnectionBudget` (default 22) against 2 replicas × `postgresPoolSize` 10 plus the migration and cleanup jobs (`templates/_helpers.tpl:87`). A rolling update with `maxSurge: 1` (`templates/deployment.yaml:17`) briefly runs a third pod. Give the Postgres role a connection limit of at least 32.
 
 ## 7. Backup
 
-Backup moves to the deployment repository. The fork ships no backup job.
+Backup is the operator's job. The fork ships no backup job.
 
 ### Is "database first, then bucket" safe?
 
@@ -310,7 +310,7 @@ The three conditions:
 
 Copying the bucket first is unsafe, because a row committed during the copy could reference a blob the copy missed.
 
-"No downtime" is a new claim. Every upstream procedure stops the application first (`packaging/compose/README.md:303`, ADR 0012), and the restore qualification scales to zero before its snapshot (`scripts/run-aws-coordinated-restore-qualification.sh:245`). The deployment repository owns the first online drill. Its pass criterion is a healthy `integrity check` on the restored pair.
+"No downtime" is a new claim. Every upstream procedure stops the application first (`packaging/compose/README.md:303`, ADR 0012), and the restore qualification scales to zero before its snapshot (`scripts/run-aws-coordinated-restore-qualification.sh:245`). Each operator should run one online restore drill before relying on it. Its pass criterion is a healthy `integrity check` on the restored pair.
 
 ## 8. CI
 
@@ -356,7 +356,7 @@ The runbook lists these steps. Each one is a setting outside the repository:
 1. In the fork's Actions settings, disable upstream `release.yml`. It fires on `v*` tags and pushes to `ghcr.io/plannotator`, which fails on the fork.
 2. After the first release, make the `artifact-server` image and chart packages on GHCR public, or give the cluster an image pull secret. The first push to GHCR is private.
 3. Create the bucket `artifact-server` on the gateway and an access key limited to it.
-4. Create the database and role in the CloudNativePG cluster, with a connection limit of at least 32.
+4. Create the Postgres database and role, with a connection limit of at least 32.
 5. Generate the API key once, for example `printf 'as_key_key_%s_%s\n' "$(openssl rand -hex 16)" "$(openssl rand -hex 32)"` (`packaging/compose/README.md:201`), and store it in the runtime Secret. Never change it after the first start.
 6. Pick a stable `installationId`. It names the bucket prefix forever.
 7. Allow egress from the pods to the gateway port and to Postgres.
@@ -366,9 +366,9 @@ The runbook lists these steps. Each one is a setting outside the repository:
 
 ## 11. Readable artifact paths
 
-This section was the design for brief r3. Citations are against `b644213`. Branch `feat/artifact-paths` implements it. As built, one test differs: FRK-002-B probed `/not-a-route` as an application route, but that URL is now a path request that carries the sandbox headers, so the probe moved to `/not-a-route.txt`.
+This section was the design for revision 3. Citations are against `b644213`. Branch `feat/artifact-paths` implements it. As built, one test differs: FRK-002-B probed `/not-a-route` as an application route, but that URL is now a path request that carries the sandbox headers, so the probe moved to `/not-a-route.txt`.
 
-The operator is moving 29 static reports from `docs/artifacts/<yyyy>/<mm>/<slug>.html` and wants URLs of the same shape, for example `https://artifacts.example.internal/2026/10/agent-console/` with an asset at `/2026/10/agent-console/shots/a.jpg`. An artifact may therefore claim one optional path when it is created. A path is guessable. The server is VPN-only with no login, and the operator accepts that.
+An operator migrating existing static reports wants readable dated URLs, for example `https://artifacts.example.internal/2026/10/release-checklist/` with an asset at `/2026/10/release-checklist/shots/a.jpg`. An artifact may therefore claim one optional path when it is created. A path is guessable, unlike a folder URL. If the server is reachable only on a private network, an operator may accept guessable paths. On a wider network, publish without a path and share the folder URL.
 
 ### Data shape
 
@@ -378,7 +378,7 @@ The path is a nullable column on the artifact row, not a separate table. Every r
 - A new version never writes the artifact row's name or tags (`CommitArtifactVersion`, `src/core/ports.ts:121`). It keeps the path the same way, with no new code.
 - The value is a plain string. The codebase has no branded types (no `Brand` anywhere in `src`), and one brand here would be the only one. Instead, `parseArtifactPath` is the only way a path enters the server (see "Validation and reserved segments").
 
-Paths are prefix-free within an installation. No live path equals another, and no live path is a prefix of another at a `/` boundary. `2026/10/agent-console` and `2026/10/agent-console-v2` can both exist, but `2026/10` and `2026/10/agent-console` cannot. With nesting, the longer path would hide the shorter artifact's files under that subfolder, and nobody would notice until a reader got the wrong page. A prefix-free rule fails at publish time instead, and every request matches at most one artifact.
+Paths are prefix-free within an installation. No live path equals another, and no live path is a prefix of another at a `/` boundary. `2026/10/release-checklist` and `2026/10/release-checklist-v2` can both exist, but `2026/10` and `2026/10/release-checklist` cannot. With nesting, the longer path would hide the shorter artifact's files under that subfolder, and nobody would notice until a reader got the wrong page. A prefix-free rule fails at publish time instead, and every request matches at most one artifact.
 
 The rule covers live artifacts only. Deletion is a one-way tombstone (`src/storage/postgres-artifact-repository.ts:1505`), and nothing undeletes an artifact, so a deleted artifact frees its path. There is no rename, so to move content to a path, delete the artifact and publish it again.
 
@@ -429,18 +429,18 @@ The first segment picks the form, in this order:
 | Empty, a reserved root, or not a valid path segment | Application route | None |
 | Any other valid path segment | Path | One indexed query |
 
-The candidates are the prefixes `s1`, `s1/s2`, and so on, up to 6 segments. They stop at the first segment that is not valid, such as `index.html` or the empty segment after a trailing slash. `/2026/10/agent-console/shots/a.jpg` has the candidates `2026`, `2026/10`, `2026/10/agent-console`, and `2026/10/agent-console/shots`.
+The candidates are the prefixes `s1`, `s1/s2`, and so on, up to 6 segments. They stop at the first segment that is not valid, such as `index.html` or the empty segment after a trailing slash. `/2026/10/release-checklist/shots/a.jpg` has the candidates `2026`, `2026/10`, `2026/10/release-checklist`, and `2026/10/release-checklist/shots`.
 
 The router calls a new `ContentAccessService.resolvePublicArtifactPath(candidates)`. That calls a new repository method, `findArtifactByPath(candidates)`, which runs `SELECT id, path FROM artifacts WHERE path IN (...) AND deleted_at IS NULL` on the partial unique index. It then reuses `resolvePublicArtifact` (`src/application/content-access.ts:409`). Paths are prefix-free, so at most one row comes back. The router then answers in one of four ways:
 
 - **No row.** The router calls `next()`. No application route owns the segment, so `app.notFound` answers 404 `NOT_FOUND` (`src/http/create-http-app.ts:2531`), as it does for any unknown path today. The isolation wrapper still adds the sandbox headers, because the predicate claimed the URL.
 - **An `account_required` artifact.** `resolvePublicArtifact` fails with `ContentSessionRequired`, which is 401 `CONTENT_NOT_PUBLIC`, as for folders.
-- **A request that ends at the path with no slash**, such as `/2026/10/agent-console?x=1`. The router answers 308 to `/2026/10/agent-console/?x=1`, so relative URLs resolve inside the artifact.
+- **A request that ends at the path with no slash**, such as `/2026/10/release-checklist?x=1`. The router answers 308 to `/2026/10/release-checklist/?x=1`, so relative URLs resolve inside the artifact.
 - **Anything else.** The remaining segments become the in-version URL, and `serveVersionContent` runs as it does for folders (`:3574`). Range, ETag, HEAD, 405, and the SPA fallback come with it.
 
 A new `serveArtifactPath` sits next to `serveArtifactFolder` (`:3559`). Both forms get their `{slashMissing, versionUrl}` from `same-host-content.ts`, so the two cannot drift apart.
 
-The cost per request was counted from the code, not measured. An application route pays only for the pure classifier, as today. A path hit costs one indexed query more than a folder hit: 5 queries on Postgres and 6 statements on SQLite, against 4 and 5 for a folder. A miss costs one indexed query. A scanner probing `/wp-admin/` pays that query, which is acceptable on a VPN.
+The cost per request was counted from the code, not measured. An application route pays only for the pure classifier, as today. A path hit costs one indexed query more than a folder hit: 5 queries on Postgres and 6 statements on SQLite, against 4 and 5 for a folder. A miss costs one indexed query. A scanner probing `/wp-admin/` pays that query, which is acceptable on a private network.
 
 A new `artifactContentRoot(artifact)` in `same-host-content.ts` returns `/<path>/` when the artifact has a path, else `/<folder>/`, else `null`. `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`) and the redirect guard of `/artifacts/:artifactId` (`src/http/create-http-app.ts:2518`) both call it. `links.artifact` therefore prefers the path at all 11 call sites. Each site passes a full artifact record (`grep -n "artifactBrowserUrl(" src`), so none needs an edit. An artifact that has a path still answers at its folder URL, with no redirect, because no response ever returned that URL as its link.
 
@@ -465,12 +465,12 @@ Paths exist only in path mode. A new `assertArtifactPathsAvailable(contentDomain
 - **HTTP.** The `new_artifact` target of the commit body (`src/http/create-http-app.ts:203`) gains `path: z.string().min(1).max(200).optional()`. The commit route (`:2287`) calls `assertArtifactPathsAvailable` and `parseArtifactPath`, then passes `path: string | null` on. The `new_version` target stays `.strict()`, so a path there is 422.
 - **Application.** `CommitStagedUploadTarget` (`src/application/staged-upload.ts:69`) and `PublishPreparedNewArtifactCommand` (`src/application/publish-artifact.ts:55`) gain `path: string | null`. `publishPreparedNew` (`:217`) puts it in the digest and the commit command.
 - **MCP.** The `new_artifact` target of `artifact_commit_upload` (`src/mcp/artifact-mcp-server.ts:1261`) gains the same optional `path`, described as "Optional readable path such as 2026/10/report. 1 to 6 lowercase segments, served at /<path>/ and kept by new versions." The handler makes the same two calls.
-- **CLI.** `publish --path 2026/10/agent-console`. `FilePublicationTarget` (`src/client/file-publication-client.ts:187`) and `effectiveCommitTarget` (`:385`) carry it. The CLI does not validate it, so the operator reads the server's message. The new-version guard (`src/cli/publish-command.ts:145`) becomes "--name, --path, --public, and --tag apply only when creating a new artifact." `prepareFilePublication` (`:309`) already hashes the whole target into the operation digest, so a retried command reuses its idempotency key.
+- **CLI.** `publish --path 2026/10/release-checklist`. `FilePublicationTarget` (`src/client/file-publication-client.ts:187`) and `effectiveCommitTarget` (`:385`) carry it. The CLI does not validate it, so the operator reads the server's message. The new-version guard (`src/cli/publish-command.ts:145`) becomes "--name, --path, --public, and --tag apply only when creating a new artifact." `prepareFilePublication` (`:309`) already hashes the whole target into the operation digest, so a retried command reuses its idempotency key.
 - **Responses.** Every artifact record carries `path`, and `links.artifact` is `/<path>/` when it is set.
 - **No rename.** Changing a path needs a management route, an MCP tool, a CLI command, an action record, and a rule for the old URL. That is not free.
 - **Docs.** `docs/cli.md`, `docs/mcp.md`, `skills/artifact-server/references/artifact-operations.md`, and the migration steps in `docs/fork/RUNBOOK.md`.
 
-Suppose a report's HTML points at its sibling folder as `agent-console/shots/a.jpg`. That link breaks at `/2026/10/agent-console/`, because the document's base URL is now the artifact itself. Stage each report as a directory that holds `index.html` and the sibling folder's contents, and remove the `agent-console/` prefix from those links. This is inferred from the layout in the brief and was not checked against the 29 files.
+Suppose a report's HTML points at its sibling folder as `release-checklist/shots/a.jpg`. That link breaks at `/2026/10/release-checklist/`, because the document's base URL is now the artifact itself. Stage each report as a directory that holds `index.html` and the sibling folder's contents, and remove the `release-checklist/` prefix from those links. This is inferred from that layout and was not checked against real reports.
 
 ### Follow-up, not planned: folder index pages
 
@@ -490,7 +490,7 @@ Branch `feat/artifact-paths`, one pull request. Each commit adds its ledger entr
 | --- | --- | --- |
 | 1 | `docs(fork): design readable artifact paths` | This section. Its citations resolve at `b644213`. |
 | 2 | `feat(storage): add the artifact path column` | SQLite: a new case in `tests/conformance/storage-migration.test.ts` builds a schema-12 database by hand, as the case at `:121` does, starts a server on it, and reads `user_version` 13, the new index, and `path: null` on its artifacts. Postgres (CI): `tests/integration/external-storage-runtime.test.ts:274` and `:464` import `requiredPostgresSchemaVersion` and migrate to it, so `0012` runs. `pnpm typecheck` covers all three backends. |
-| 3 | `feat(publish): claim a readable path when an artifact is created` | FRK-006 in `tests/conformance/frk-006-artifact-paths.test.ts`. B: an HTTP publish with `/2026/10/agent-console/` stores `2026/10/agent-console`, a new version keeps it, and the same idempotency key replays. F: an equal, ancestor, or descendant path is 409. Two concurrent creates of one path give one 201 and one 409. Reserved, folder-shaped, uppercase, empty-segment, and 7-segment paths are 422 with their messages. A path on `new_version` is 422. A host-mode server answers `CapabilityUnavailable`. A deleted artifact frees its path. The FRK-003-F walk gains the reserved-root assertion. CI: a Postgres foundation case in which two processes race for one path. |
+| 3 | `feat(publish): claim a readable path when an artifact is created` | FRK-006 in `tests/conformance/frk-006-artifact-paths.test.ts`. B: an HTTP publish with `/2026/10/release-checklist/` stores `2026/10/release-checklist`, a new version keeps it, and the same idempotency key replays. F: an equal, ancestor, or descendant path is 409. Two concurrent creates of one path give one 201 and one 409. Reserved, folder-shaped, uppercase, empty-segment, and 7-segment paths are 422 with their messages. A path on `new_version` is 422. A host-mode server answers `CapabilityUnavailable`. A deleted artifact frees its path. The FRK-003-F walk gains the reserved-root assertion. CI: a Postgres foundation case in which two processes race for one path. |
 | 4 | `feat(http): serve artifacts at their readable paths` | FRK-007 in `tests/conformance/frk-007-artifact-path-serving.test.ts`. B: the entry, a nested asset, and the SPA fallback at the path. A new version at the same URL. `links.artifact` over HTTP and MCP. `/artifacts/:artifactId` answers 302 to the path. The folder URL still serves. The sandbox and CORS headers appear on 200, 206, 304, 404, and HEAD. F: `account_required` is 401. A missing slash is 308 and keeps its query. An unknown path is 404 `NOT_FOUND`. `/api/v1/session` carries no sandbox header. A deleted artifact's path is 404. POST is 405. |
 | 5 | `feat(publish): accept a path from the CLI and MCP` | FRK-006-B gains an MCP commit and a spawned CLI `publish --path`, following `callMcpTool` and `publishOverCli` in `tests/conformance/frk-005-public-default.test.ts:192` and `:231`. `--path` together with `--artifact` fails with the guard message. |
 | 6 | `docs: document readable artifact paths` | The four docs list `--path` and the MCP field, and every command matches `publish --help`. |
