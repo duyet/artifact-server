@@ -6,6 +6,7 @@ import path from "node:path";
 import {Effect, ManagedRuntime, Redacted, Result} from "effect";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 
+import {defaultAssetQuota} from "../../src/core/asset-policy.js";
 import type {ApplicationRuntime} from "../../src/application/application-runtime.js";
 import {ContentAccessService} from "../../src/application/content-access.js";
 import {StagedUploadService} from "../../src/application/staged-upload.js";
@@ -38,6 +39,7 @@ describe("content access lifecycle", () => {
     identityRepository = new SqliteIdentityRepository(databasePath);
     runtime = ManagedRuntime.make(createLocalApplicationLayer({
       apiToken: Redacted.make("test-api-token"),
+      assetQuota: defaultAssetQuota,
       blobs: new LocalBlobStore(path.join(dataDirectory, "blobs")),
       bootstrapAdministratorEmail: "admin@example.test",
       clock,

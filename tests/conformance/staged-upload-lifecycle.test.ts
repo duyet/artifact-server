@@ -6,6 +6,7 @@ import path from "node:path";
 import {Effect, ManagedRuntime, Redacted, Result} from "effect";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 
+import {defaultAssetQuota} from "../../src/core/asset-policy.js";
 import type {ApplicationRuntime} from "../../src/application/application-runtime.js";
 import {StagedUploadService} from "../../src/application/staged-upload.js";
 import {ExpiredStagingCleanupService} from
@@ -43,6 +44,7 @@ describe("staged upload lifecycle", () => {
     staging = new LocalStagingStore(path.join(dataDirectory, "staging"));
     runtime = ManagedRuntime.make(createLocalApplicationLayer({
       apiToken: Redacted.make("test-api-token"),
+      assetQuota: defaultAssetQuota,
       blobs,
       bootstrapAdministratorEmail: "admin@example.test",
       clock,
@@ -119,6 +121,7 @@ describe("staged upload lifecycle", () => {
       const foreignRuntime: ApplicationRuntime = ManagedRuntime.make(
         createLocalApplicationLayer({
           apiToken: Redacted.make("foreign-api-token"),
+          assetQuota: defaultAssetQuota,
           blobs: new LocalBlobStore(path.join(dataDirectory, "foreign-blobs")),
           bootstrapAdministratorEmail: "foreign-admin@example.test",
           clock,

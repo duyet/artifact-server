@@ -6,6 +6,7 @@ import {
   AgentDispatchNotFound,
   ArtifactMutationConflict,
   ArtifactNotFound,
+  AssetNotFound,
   CommentNotFound,
   CommentResolved,
   DispatchStateConflict,
@@ -43,6 +44,8 @@ import {
   type ArtifactPage,
   type ArtifactPathMatch,
   type ArtifactRecord,
+  type AssetRecord,
+  type AssetUsage,
   type ArtifactState,
   type ArtifactTombstone,
   type ArtifactVersion,
@@ -85,7 +88,10 @@ import type {
   ClearCommentThreads,
   CommentRepository,
   CommitArtifactVersion,
+  ArtifactAssetRepository,
+  CommitAsset,
   CommitNewArtifact,
+  CommittedAsset,
   ContentSessionRepository,
   CreateAgentDispatch,
   CreateCommentReply,
@@ -117,11 +123,21 @@ import type {
   RenameArtifact,
   RenameProject,
   RestoreArtifactVersion,
+  ServedAsset,
   SetProjectArchive,
   StagedUploadRepository,
   UpdateCommentReply,
   UpdateCommentThread,
 } from "../core/ports.js";
+import {assetQuotaFailure} from "../core/asset-policy.js";
+import {
+  assetColumns,
+  assetReplayRowSchema,
+  assetRowSchema,
+  assetUsageRowSchema,
+  replayedAsset,
+  servedAssetRowSchema,
+} from "./asset-row.js";
 import {principalKinds, type PrincipalKind} from "../core/identity.js";
 import {
   normalizeArtifactSearchText,
@@ -506,6 +522,7 @@ interface ChangedCommentThreadValues {
 /** Installation-scoped Postgres persistence for artifacts and browser content sessions. */
 export class PostgresArtifactRepository implements
   AgentDispatchRepository,
+  ArtifactAssetRepository,
   ArtifactRepository,
   ArtifactViewRepository,
   CommentRepository,
@@ -990,6 +1007,188 @@ export class PostgresArtifactRepository implements
         );
       }));
     }));
+  }
+
+  async commitAsset(command: CommitAsset): Promise<CommittedAsset> {
+    const installationId = this.#installationId;
+    const {asset} = command;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
+        yield* lockIdempotency(
+          sql,
+          installationId,
+          asset.projectId,
+          command.idempotencyKey,
+        );
+        const replayed = yield* this.#findIdempotentAssetRow(
+          asset.projectId,
+          command.idempotencyKey,
+          command.inputDigest,
+        );
+        if (replayed !== null) return replayed;
+        const artifact = yield* this.#readArtifactOrNull(
+          asset.projectId,
+          asset.artifactId,
+          false,
+        );
+        if (artifact === null) {
+          return yield* new ArtifactNotFound({message: "The artifact does not exist."});
+        }
+        // Two replicas may commit to one artifact at once; one lock per
+        // artifact makes the quota check and the insert one step.
+        yield* sql`SELECT pg_advisory_xact_lock(
+          hashtextextended(${`${installationId}:assets:${asset.artifactId}`}, 0)
+        )`;
+        const refused = assetQuotaFailure(
+          asset.size,
+          yield* this.#assetUsage(asset.artifactId),
+          command.quota,
+        );
+        if (refused !== null) return yield* refused;
+        yield* sql.unsafe(
+          `INSERT INTO assets (
+            installation_id, id, project_id, artifact_id, media_type, size,
+            sha256, name, created_by_principal_id, created_by_display_name,
+            idempotency_key, input_digest, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            installationId,
+            asset.id,
+            asset.projectId,
+            asset.artifactId,
+            asset.mediaType,
+            asset.size,
+            asset.sha256,
+            asset.name,
+            asset.createdByPrincipalId,
+            asset.createdByDisplayName,
+            command.idempotencyKey,
+            command.inputDigest,
+            asset.createdAt,
+          ],
+        );
+        return {asset, replayed: false};
+      }));
+    }));
+  }
+
+  async deleteAsset(
+    projectId: string,
+    artifactId: string,
+    assetId: string,
+    deletedAt: string,
+  ): Promise<AssetRecord> {
+    const installationId = this.#installationId;
+    const rows = await this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.unsafe<object>(
+        `UPDATE assets AS asset SET deleted_at = $1
+         WHERE asset.installation_id = $2 AND asset.id = $3
+           AND asset.project_id = $4 AND asset.artifact_id = $5
+           AND asset.deleted_at IS NULL
+         RETURNING ${assetColumns}`,
+        [deletedAt, installationId, assetId, projectId, artifactId],
+      );
+    }));
+    const deleted = assetRowSchema.nullable().parse(rows[0] ?? null);
+    if (deleted === null) {
+      throw new AssetNotFound({message: "The asset does not exist."});
+    }
+    return deleted;
+  }
+
+  async findIdempotentAsset(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): Promise<CommittedAsset | null> {
+    return this.#database.run(
+      this.#findIdempotentAssetRow(projectId, idempotencyKey, inputDigest),
+    );
+  }
+
+  async findServedAsset(assetId: string): Promise<ServedAsset | null> {
+    const installationId = this.#installationId;
+    const rows = await this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.unsafe<object>(
+        `SELECT ${assetColumns}, artifact.access_setting AS "accessSetting"
+         FROM assets asset
+         JOIN artifacts artifact
+           ON artifact.installation_id = asset.installation_id
+          AND artifact.id = asset.artifact_id
+         WHERE asset.installation_id = $1 AND asset.id = $2
+           AND asset.deleted_at IS NULL AND artifact.deleted_at IS NULL`,
+        [installationId, assetId],
+      );
+    }));
+    const served = servedAssetRowSchema.nullable().parse(rows[0] ?? null);
+    if (served === null) return null;
+    const {accessSetting, ...asset} = served;
+    return {accessSetting, asset};
+  }
+
+  async listAssets(
+    projectId: string,
+    artifactId: string,
+  ): Promise<{readonly assets: readonly AssetRecord[]; readonly usage: AssetUsage}> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT ${assetColumns}
+         FROM assets asset
+         WHERE asset.installation_id = $1 AND asset.project_id = $2
+           AND asset.artifact_id = $3 AND asset.deleted_at IS NULL
+         ORDER BY asset.created_at, asset.id`,
+        [installationId, projectId, artifactId],
+      );
+      return {
+        assets: z.array(assetRowSchema).parse(rows),
+        usage: yield* this.#assetUsage(artifactId),
+      };
+    }));
+  }
+
+  #assetUsage(artifactId: string) {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT COUNT(*) AS "assetCount", COALESCE(SUM(size), 0) AS "byteCount"
+         FROM assets
+         WHERE installation_id = $1 AND artifact_id = $2 AND deleted_at IS NULL`,
+        [installationId, artifactId],
+      );
+      return assetUsageRowSchema.parse(rows[0]);
+    });
+  }
+
+  #findIdempotentAssetRow(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ) {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        `SELECT ${assetColumns}, asset.input_digest AS "inputDigest",
+           asset.deleted_at AS "deletedAt"
+         FROM assets asset
+         WHERE asset.installation_id = $1 AND asset.project_id = $2
+           AND asset.idempotency_key = $3`,
+        [installationId, projectId, idempotencyKey],
+      );
+      const found = assetReplayRowSchema.nullable().parse(rows[0] ?? null);
+      if (found === null) return null;
+      // A conflict or a deleted asset fails the transaction as a typed error.
+      return yield* Effect.try({
+        catch: (cause) => cause,
+        try: () => replayedAsset(found, inputDigest),
+      });
+    });
   }
 
   async findArtifact(

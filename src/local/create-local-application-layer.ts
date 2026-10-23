@@ -24,6 +24,7 @@ import {
   type ArtifactManagementDependencies,
   ArtifactManagementService,
 } from "../application/artifact-management.js";
+import {ArtifactAssetService} from "../application/artifact-assets.js";
 import { AuthorizationService } from "../application/authorization.js";
 import {CheckArtifactAssetsService} from "../application/check-artifact-assets.js";
 import {
@@ -68,6 +69,8 @@ import {
   ArtifactMutationConflict,
   ArtifactPathTaken,
   ArtifactRepositoryFailure,
+  AssetLimitExceeded,
+  AssetNotFound,
   AuthenticationRequired,
   BlobStorageFailure,
   CapabilityUnavailable,
@@ -102,6 +105,7 @@ import {
 } from "../core/identity.js";
 import type {
   AgentDispatchRepository,
+  ArtifactAssetRepository,
   ArtifactRepository,
   ArtifactViewRepository,
   ProjectActivityRepository,
@@ -115,6 +119,7 @@ import type {
   StagingStore,
 } from "../core/ports.js";
 import type {IdentityRepository} from "../core/identity-ports.js";
+import type {AssetQuota} from "../core/asset-policy.js";
 import type { ManifestEntry } from "../core/model.js";
 import {randomBase64Url} from "../core/random.js";
 import { FileVerificationError } from "../storage/verified-file.js";
@@ -124,6 +129,7 @@ import {defaultStagingCleanupPolicy} from
 /** Concrete Node adapters reused by the Effect application layer. */
 export interface ApplicationAdapters {
   readonly apiToken: Redacted.Redacted | null;
+  readonly assetQuota: AssetQuota;
   readonly blobs: BlobStore;
   readonly bootstrapAdministratorEmail: string;
   readonly clock: Clock;
@@ -140,6 +146,7 @@ export interface ApplicationAdapters {
   readonly localBootstrapCredential: Redacted.Redacted | null;
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: ArtifactRepository &
+    ArtifactAssetRepository &
     ArtifactViewRepository &
     ProjectActivityRepository &
     CommentRepository &
@@ -165,6 +172,7 @@ export function createApplicationLayer(
   adapters: ApplicationAdapters,
 ): Layer.Layer<
   | AgentDispatchService
+  | ArtifactAssetService
   | AuthenticationService
   | ArtifactCommentService
   | ArtifactManagementService
@@ -890,6 +898,66 @@ export function createApplicationLayer(
   const stagedLayer = StagedUploadService.layer(stagedDependencies).pipe(
     Layer.provideMerge(Layer.mergeAll(publishLayer, projectLayer)),
   );
+  const assetLayer = ArtifactAssetService.layer({
+    blobs: publishDependencies.blobs,
+    clock,
+    ids: adapters.ids,
+    quota: adapters.assetQuota,
+    repository: {
+      commitAsset: (command) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.commitAsset(command),
+          catch: (cause) =>
+            cause instanceof ArtifactNotFound ||
+              cause instanceof AssetLimitExceeded ||
+              cause instanceof AssetNotFound ||
+              cause instanceof IdempotencyConflict
+              ? cause
+              : repositoryFailure("commitAsset", cause),
+        }),
+      deleteAsset: (projectId, artifactId, assetId, deletedAt) =>
+        Effect.tryPromise({
+          try: () =>
+            adapters.repository.deleteAsset(projectId, artifactId, assetId, deletedAt),
+          catch: (cause) =>
+            cause instanceof AssetNotFound
+              ? cause
+              : repositoryFailure("deleteAsset", cause),
+        }),
+      findArtifact: (projectId, artifactId) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.findArtifact(projectId, artifactId),
+          catch: (cause) => repositoryFailure("findArtifact", cause),
+        }),
+      findIdempotentAsset: (projectId, idempotencyKey, inputDigest) =>
+        Effect.tryPromise({
+          try: () =>
+            adapters.repository.findIdempotentAsset(
+              projectId,
+              idempotencyKey,
+              inputDigest,
+            ),
+          catch: (cause) =>
+            cause instanceof AssetNotFound || cause instanceof IdempotencyConflict
+              ? cause
+              : repositoryFailure("findIdempotentAsset", cause),
+        }),
+      findServedAsset: (assetId) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.findServedAsset(assetId),
+          catch: (cause) => repositoryFailure("findServedAsset", cause),
+        }),
+      listAssets: (projectId, artifactId) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.listAssets(projectId, artifactId),
+          catch: (cause) => repositoryFailure("listAssets", cause),
+        }),
+    },
+    staging: stagedDependencies.staging,
+    uploads: stagedDependencies.uploads,
+  }).pipe(
+    Layer.provideMerge(Layer.mergeAll(authorizationLayer, projectLayer, stagedLayer)),
+  );
   const cleanupLayer = ExpiredStagingCleanupService.layer({
     clock,
     concurrency: adapters.stagingCleanupPolicy?.concurrency ??
@@ -955,6 +1023,7 @@ export function createApplicationLayer(
     comparisonDependencies.blobs,
   ).pipe(Layer.provideMerge(managementLayer));
   return Layer.mergeAll(
+    assetLayer,
     authenticationLayer,
     commentLayer,
     dispatchLayer,

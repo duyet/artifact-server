@@ -19,6 +19,11 @@ export class SystemIdGenerator implements IdGenerator {
     return `art_${randomUUID()}`;
   }
 
+  /** Create one opaque asset identity. */
+  assetId(): string {
+    return `ast_${randomUUID()}`;
+  }
+
   /** Create one opaque comment reply identity. */
   commentReplyId(): string {
     return `rpl_${randomUUID()}`;

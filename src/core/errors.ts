@@ -6,6 +6,9 @@ export const errorCodes = {
   artifactNotFound: "ARTIFACT_NOT_FOUND",
   artifactMutationConflict: "ARTIFACT_MUTATION_CONFLICT",
   artifactPathTaken: "ARTIFACT_PATH_TAKEN",
+  assetLimitExceeded: "ASSET_LIMIT_EXCEEDED",
+  assetNotFound: "ASSET_NOT_FOUND",
+  assetTypeUnsupported: "ASSET_TYPE_UNSUPPORTED",
   authorizationDenied: "AUTHORIZATION_DENIED",
   authenticationRequired: "AUTHENTICATION_REQUIRED",
   commentNotFound: "COMMENT_NOT_FOUND",
@@ -60,6 +63,24 @@ export class ArtifactMutationConflict extends Schema.TaggedError<ArtifactMutatio
 /** A live artifact already holds the requested path, an ancestor, or a descendant. */
 export class ArtifactPathTaken extends Schema.TaggedError<ArtifactPathTaken>()(
   "ArtifactPathTaken",
+  messageField,
+) {}
+
+/** The requested asset does not exist on the artifact, or was deleted. */
+export class AssetNotFound extends Schema.TaggedError<AssetNotFound>()(
+  "AssetNotFound",
+  messageField,
+) {}
+
+/** An asset would exceed its type's byte cap or its artifact's quota. */
+export class AssetLimitExceeded extends Schema.TaggedError<AssetLimitExceeded>()(
+  "AssetLimitExceeded",
+  messageField,
+) {}
+
+/** An asset's media type is not on the asset store allowlist. */
+export class AssetTypeUnsupported extends Schema.TaggedError<AssetTypeUnsupported>()(
+  "AssetTypeUnsupported",
   messageField,
 ) {}
 
@@ -321,6 +342,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "changeTags",
       "claimAgentDispatch",
       "clearCommentThreads",
+      "commitAsset",
       "commitNewArtifact",
       "commitVersion",
       "createAgentDispatch",
@@ -349,12 +371,16 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "findStagedUpload",
       "findVersionContent",
       "deleteArtifact",
+      "deleteAsset",
+      "findIdempotentAsset",
+      "findServedAsset",
       "listAgentDispatches",
       "listArtifactActions",
       "listArtifacts",
       "listCommentReplies",
       "listCommentThreads",
       "listArtifactVersions",
+      "listAssets",
       "listPublicLinks",
       "listExpiredStagedUploads",
       "listPublicArtifacts",
@@ -436,6 +462,9 @@ const artifactServerFailureSchema = Schema.Union([
   ArtifactNotFound,
   ArtifactMutationConflict,
   ArtifactPathTaken,
+  AssetLimitExceeded,
+  AssetNotFound,
+  AssetTypeUnsupported,
   AuthenticationRequired,
   CommentNotFound,
   CommentResolved,

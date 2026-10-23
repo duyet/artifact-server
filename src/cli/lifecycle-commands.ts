@@ -368,6 +368,7 @@ function configureExternalStorageStart(
       const server = await startExternalStorageServer({
         apiToken: parsed.apiToken,
         applicationOrigin: parsed.applicationOrigin,
+        assetQuota: parsed.assetQuota,
         bootstrapAdministratorEmail: parsed.bootstrapAdministratorEmail,
         browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
         completedRequestLogSampleRate: parsed.completedRequestLogSampleRate,
@@ -400,6 +401,7 @@ async function startCompactServer(
   return startLocalServer({
     apiToken: Redacted.value(configuration.apiToken),
     applicationOrigin: configuration.applicationOrigin,
+    assetQuota: configuration.assetQuota,
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
     browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
     completedRequestLogSampleRate: configuration.completedRequestLogSampleRate,

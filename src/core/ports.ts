@@ -13,6 +13,8 @@ import type {
   ArtifactRecord,
   ArtifactViewDay,
   ArtifactViewTotal,
+  AssetRecord,
+  AssetUsage,
   CanonicalManifest,
   CommentAuthor,
   DispatchedThreadFilter,
@@ -43,6 +45,7 @@ import type {
   VersionContent,
   ViewedArtifact,
 } from "./model.js";
+import type {AssetQuota} from "./asset-policy.js";
 
 export interface StoredBlob {
   readonly sha256: string;
@@ -653,6 +656,58 @@ export interface ArtifactRepository {
   restoreVersion(command: RestoreArtifactVersion): Promise<ArtifactState>;
 }
 
+/** Write one new asset row once its blob is stored. */
+export interface CommitAsset {
+  readonly asset: AssetRecord;
+  readonly idempotencyKey: string;
+  readonly inputDigest: string;
+  readonly quota: AssetQuota;
+}
+
+/** One asset row together with whether an idempotent retry returned it. */
+export interface CommittedAsset {
+  readonly asset: AssetRecord;
+  readonly replayed: boolean;
+}
+
+/** One live asset and the access of the live artifact that holds it. */
+export interface ServedAsset {
+  readonly accessSetting: AccessSetting;
+  readonly asset: AssetRecord;
+}
+
+/** Durable per-artifact asset rows. Bytes live in the blob store. */
+export interface ArtifactAssetRepository {
+  /**
+   * Insert the asset unless the key already committed one. The quota is
+   * checked again under the same lock as the insert, so two concurrent
+   * commits cannot both pass it. Throws AssetLimitExceeded, ArtifactNotFound,
+   * IdempotencyConflict, or AssetNotFound for a replayed key whose asset was
+   * deleted.
+   */
+  commitAsset(command: CommitAsset): Promise<CommittedAsset>;
+  /** Tombstone one live asset and return it. Throws AssetNotFound. */
+  deleteAsset(
+    projectId: string,
+    artifactId: string,
+    assetId: string,
+    deletedAt: string,
+  ): Promise<AssetRecord>;
+  /** The asset an earlier commit with this key wrote, or null when none did. */
+  findIdempotentAsset(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): Promise<CommittedAsset | null>;
+  /** One live asset of a live artifact, in any project. */
+  findServedAsset(assetId: string): Promise<ServedAsset | null>;
+  /** The live assets of one artifact, oldest first, and their usage. */
+  listAssets(
+    projectId: string,
+    artifactId: string,
+  ): Promise<{readonly assets: readonly AssetRecord[]; readonly usage: AssetUsage}>;
+}
+
 /** One coalesced group of view counts for one artifact on one UTC day. */
 export interface ArtifactViewDelta {
   readonly artifactId: string;
@@ -776,6 +831,7 @@ export interface Clock {
 export interface IdGenerator {
   agentDispatchId(): string;
   artifactId(): string;
+  assetId(): string;
   commentReplyId(): string;
   commentThreadId(): string;
   contentToken(): string;

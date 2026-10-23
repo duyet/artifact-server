@@ -20,6 +20,12 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
       return {code: errorCodes.artifactMutationConflict, message: failure.message, status: 409};
     case "ArtifactPathTaken":
       return {code: errorCodes.artifactPathTaken, message: failure.message, status: 409};
+    case "AssetLimitExceeded":
+      return {code: errorCodes.assetLimitExceeded, message: failure.message, status: 413};
+    case "AssetNotFound":
+      return {code: errorCodes.assetNotFound, message: failure.message, status: 404};
+    case "AssetTypeUnsupported":
+      return {code: errorCodes.assetTypeUnsupported, message: failure.message, status: 415};
     case "AuthenticationRequired":
       return {code: errorCodes.authenticationRequired, message: failure.message, status: 401};
     case "IdentityConflict":

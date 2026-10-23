@@ -9,6 +9,7 @@ import {
   type IssueOperatorKeyCommand,
   type IssuedOperatorKey,
 } from "../application/installation-access.js";
+import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import type { Clock } from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
 import { SystemClock, SystemIdGenerator } from "../core/system.js";
@@ -54,6 +55,8 @@ export interface LocalRuntimeConfig {
   readonly applicationOrigin?: string;
   /** Drain cadence for entry-document view counts; tests use a fast value. */
   readonly artifactViewCollectionPolicy?: ArtifactViewCollectionPolicy;
+  /** Per-artifact asset quota; the default applies when it is omitted. */
+  readonly assetQuota?: AssetQuota;
   readonly bootstrapAdministratorEmail?: string;
   readonly browserAccess: BrowserAccess;
   readonly clock?: Clock;
@@ -131,6 +134,7 @@ export async function createLocalRuntime(
     apiToken: config.browserAccess.mode === browserAccessModes.localOwner
       ? apiToken
       : null,
+    assetQuota: config.assetQuota ?? defaultAssetQuota,
     blobs,
     bootstrapAdministratorEmail: config.bootstrapAdministratorEmail ??
       "local-administrator@artifactserver.invalid",
