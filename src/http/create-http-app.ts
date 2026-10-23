@@ -39,10 +39,12 @@ import {
   PublicLinkAdministrationService,
   type PublicLinkInventoryPage,
 } from "../application/public-link-administration.js";
+import {ArtifactAssetService} from "../application/artifact-assets.js";
 import {
   type ArtifactAssetCheck,
   CheckArtifactAssetsService,
 } from "../application/check-artifact-assets.js";
+import {assetMediaTypes} from "../core/asset-policy.js";
 import {
   type ArtifactComparison,
   CompareArtifactService,
@@ -127,19 +129,25 @@ import {
 import {
   artifactContentRoot,
   artifactPathTarget,
+  assertAssetStoreAvailable,
   assertCookieSessionsAvailable,
+  assetProjection,
   canonicalFolderLocation,
   isolateSameHostResponse,
   parseSameHostContentRequest,
   requestedArtifactPath,
   sameHostContentSource,
+  type SameHostBlobRequest,
   type SameHostFolderRequest,
   type SameHostPathRequest,
   versionServedRoots,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {FailedSignInLimiter} from "./failed-sign-in-limiter.js";
-import {attachmentContentDisposition} from "./content-disposition.js";
+import {
+  attachmentContentDisposition,
+  portableDownloadFilename,
+} from "./content-disposition.js";
 import {
   PublicArtifactCatalogService,
   publicCatalogLimit,
@@ -175,6 +183,19 @@ const declaredFileSchema = z.object({
   path: z.string().min(1).max(1_024),
   sha256: z.string().regex(/^[a-f0-9]{64}$/u),
   size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+}).strict();
+const createAssetUploadSchema = z.object({
+  mediaType: z.string().min(1).max(200),
+  name: z.string().min(1).max(1_024),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+}).strict();
+const commitAssetUploadSchema = z.object({
+  uploadId: z.string().min(1).max(200),
+}).strict();
+const copyAssetSchema = z.object({
+  sourceArtifactId: z.string().min(1).max(200),
+  sourceAssetId: z.string().min(1).max(200),
 }).strict();
 const createUploadSchema = z.object({
   entryPath: z.string().min(1).max(1_024),
@@ -640,7 +661,12 @@ export function createHttpApp(
         return next();
       }
       await next();
-      context.res = isolateSameHostResponse(context.res);
+      const isolated = isolateSameHostResponse(context.res);
+      // Hono copies the old response's headers over a replacement, which
+      // would put the branch's own policy back in place of both. Clearing
+      // the slot first keeps the isolated headers exactly as built.
+      context.res = undefined;
+      context.res = isolated;
     });
   }
 
@@ -650,6 +676,9 @@ export function createHttpApp(
     if (dependencies.contentDomain === null) {
       const sameHost = parseSameHostContentRequest(requestUrl);
       if (sameHost === null) return next();
+      if (sameHost.kind === "blob") {
+        return serveAssetBlob(context, sameHost, dependencies);
+      }
       if (sameHost.kind === "folder") {
         return serveArtifactFolder(
           context,
@@ -1791,6 +1820,136 @@ export function createHttpApp(
     "/api/v1/artifacts/:artifactId/versions/:versionId/asset-check",
     (context) => assetCheckRoute(context, context.req.param("versionId")),
   );
+
+  app.post(
+    "/api/v1/artifacts/:artifactId/assets/uploads",
+    boundedJsonBody,
+    async (context) => {
+      assertAssetStoreAvailable(dependencies.contentDomain);
+      const body = createAssetUploadSchema.parse(await context.req.json());
+      const upload = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.createUpload({
+            ...body,
+            artifactId: context.req.param("artifactId"),
+            principal: context.get("principal"),
+            projectId: requestedProjectId(context),
+          })
+        ),
+      );
+      const [file] = upload.files;
+      if (file === undefined) {
+        throw new Error("An asset upload plan has no file slot.");
+      }
+      const requestUrl = responseApplicationUrl(context, dependencies);
+      const projectQuery = `?projectId=${encodeURIComponent(upload.projectId)}`;
+      return context.json({
+        commitUrl: new URL(
+          `/api/v1/artifacts/${encodeURIComponent(context.req.param("artifactId"))}/assets${projectQuery}`,
+          requestUrl,
+        ).toString(),
+        expiresAt: upload.expiresAt,
+        file: {
+          method: "PUT" as const,
+          size: file.entry.size,
+          uploadUrl: new URL(
+            `/api/v1/uploads/${upload.id}/files/${file.storageToken}${projectQuery}`,
+            requestUrl,
+          ).toString(),
+        },
+        projectId: upload.projectId,
+        uploadId: upload.id,
+      }, 201);
+    },
+  );
+
+  app.post("/api/v1/artifacts/:artifactId/assets", boundedJsonBody, async (context) => {
+    assertAssetStoreAvailable(dependencies.contentDomain);
+    const body = commitAssetUploadSchema.parse(await context.req.json());
+    const committed = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ArtifactAssetService.use((assets) =>
+        assets.commitUpload({
+          artifactId: context.req.param("artifactId"),
+          idempotencyKey: requiredIdempotencyKey(context.req.header("idempotency-key")),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+          uploadId: body.uploadId,
+        })
+      ),
+    );
+    return context.json({
+      asset: assetProjection(responseApplicationUrl(context, dependencies), committed.asset),
+      replayed: committed.replayed,
+    }, committed.replayed ? 200 : 201);
+  });
+
+  app.post(
+    "/api/v1/artifacts/:artifactId/assets/copies",
+    boundedJsonBody,
+    async (context) => {
+      assertAssetStoreAvailable(dependencies.contentDomain);
+      const body = copyAssetSchema.parse(await context.req.json());
+      const copied = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.copyAsset({
+            ...body,
+            artifactId: context.req.param("artifactId"),
+            idempotencyKey: requiredIdempotencyKey(context.req.header("idempotency-key")),
+            principal: context.get("principal"),
+            projectId: requestedProjectId(context),
+          })
+        ),
+      );
+      return context.json({
+        asset: assetProjection(responseApplicationUrl(context, dependencies), copied.asset),
+        replayed: copied.replayed,
+      }, copied.replayed ? 200 : 201);
+    },
+  );
+
+  app.get("/api/v1/artifacts/:artifactId/assets", async (context) => {
+    const listing = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ArtifactAssetService.use((assets) =>
+        assets.listAssets({
+          artifactId: context.req.param("artifactId"),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    const requestUrl = responseApplicationUrl(context, dependencies);
+    return context.json({
+      assets: listing.assets.map((asset) => assetProjection(requestUrl, asset)),
+      quota: listing.quota,
+      usage: listing.usage,
+    });
+  });
+
+  app.delete("/api/v1/artifacts/:artifactId/assets/:assetId", async (context) => {
+    const deleted = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      ArtifactAssetService.use((assets) =>
+        assets.deleteAsset({
+          artifactId: context.req.param("artifactId"),
+          assetId: context.req.param("assetId"),
+          principal: context.get("principal"),
+          projectId: requestedProjectId(context),
+        })
+      ),
+    );
+    return context.json({
+      asset: assetProjection(responseApplicationUrl(context, dependencies), deleted),
+    });
+  });
 
   app.get("/api/v1/artifacts/:artifactId/comments", async (context) => {
     const query = commentPageQuerySchema.parse(context.req.query());
@@ -3336,6 +3495,61 @@ async function serveVersionContent(
   );
 }
 
+// The asset store holds images, data, and scripts a page loads, never a page,
+// so a top-level asset response runs no script whatever its type. The router
+// adds the content sandbox as a second policy, and a browser enforces both.
+const assetContentSecurityPolicy =
+  "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+
+async function serveAssetBlob(
+  context: Context<HttpEnvironment>,
+  request: SameHostBlobRequest,
+  dependencies: HttpAppDependencies,
+): Promise<Response> {
+  const method = context.req.method;
+  if (method !== "GET" && method !== "HEAD") {
+    return Response.json(
+      {error: {code: errorCodes.methodNotAllowed, message: "Only GET and HEAD are supported."}},
+      {status: 405, headers: {Allow: "GET, HEAD"}},
+    );
+  }
+  if (request.trailing) {
+    return Response.json(
+      {error: {code: errorCodes.assetNotFound, message: "The asset does not exist."}},
+      {status: 404},
+    );
+  }
+  const asset = await runHttpApplicationEffect(
+    context,
+    dependencies,
+    ArtifactAssetService.use((assets) => assets.resolvePublicAsset(request.assetId)),
+  );
+  // A type later dropped from the allowlist downloads as opaque bytes.
+  const policy = assetMediaTypes.get(asset.mediaType);
+  const filename = portableDownloadFilename(asset.name.split("/").at(-1) ?? asset.name);
+  const headers = new Headers({
+    "Accept-Ranges": "bytes",
+    // One asset ID always names the same bytes.
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Disposition": policy?.inline === true
+      ? `inline; filename*=UTF-8''${encodeDispositionFilename(filename)}`
+      : attachmentContentDisposition(filename),
+    "Content-Length": String(asset.size),
+    "Content-Security-Policy": assetContentSecurityPolicy,
+    "Content-Type": policy?.contentType ?? "application/octet-stream",
+    ETag: `"${asset.sha256}"`,
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex, nofollow",
+  });
+  return serveImmutableVersionEntry(
+    asset,
+    method,
+    context.req.raw.headers,
+    headers,
+    dependencies,
+  );
+}
+
 async function serveArtifactFolder(
   context: Context<HttpEnvironment>,
   request: SameHostFolderRequest,
@@ -3563,7 +3777,7 @@ async function serveVersionMedia(
 }
 
 async function serveImmutableVersionEntry(
-  entry: ManifestEntry,
+  entry: Pick<ManifestEntry, "sha256" | "size">,
   method: string,
   requestHeaders: Headers,
   headers: Headers,

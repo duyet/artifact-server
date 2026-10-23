@@ -4365,3 +4365,31 @@ requirements:
     proof_gap: Proved against a compact SQLite installation over a real server. The S3 staging adapter shares the same verified stream but has no run here.
     depends_on: [PUB-003]
     evidence: []
+
+  - id: FRK-019
+    kind: security
+    behavior: Each artifact has an asset store outside its versions. A publisher of the artifact plans one file of an allowlisted type, uploads its exact bytes, and commits it with an idempotency key; the type cap and the artifact quota refuse before any byte is stored and again at commit, and the asset is served at /_blob/<id> with the content sandbox and a script-free policy, nosniff, an immutable cache, and attachment for types not on the inline list.
+    owner: content-delivery
+    source: {file: ../../docs/fork/ASSETS.md, anchor: asset-store}
+    acceptance:
+      behavior: {id: FRK-019-B, description: "Plan, upload, and commit an image over REST, replay its key for the same asset with no new version, read it from /_blob with nosniff, both content policies, an immutable cache, ETag, HEAD, a 206 range, and a 304, then add a PDF that downloads, an SVG whose policy runs no script, and JSON served as UTF-8, and list all four with their usage and quota."}
+      failure: {id: FRK-019-F, description: "HTML, XHTML, XML, and unknown types are 415; an oversized SVG and a plan over the byte quota are 413 at the plan; bytes that miss their fingerprint are 422 and the commit is 409; a version plan committed as an asset is 415; a commit past the count quota is 413; a reused key is 409; a read-only key lists but gets 403 on plan, commit, and delete; deleting an asset makes its URL 404 and leaves a version file with the same bytes serving; an account-required artifact's asset is 401 with the sandbox; an unknown ID, a trailing path, and POST are refused."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a compact SQLite installation over a real server in path mode. The Postgres migration 0019 and its asset queries compile and lint but no test runs them, and no browser run opens an asset at top level.
+    depends_on: [FRK-002, FRK-018]
+    evidence: []
+
+  - id: FRK-020
+    kind: behavior
+    behavior: MCP adds, lists, copies, and deletes assets through the same service as REST with asset_create_upload, asset_commit_upload, asset_list, asset_copy, and asset_delete; a copy is a new row over the same stored bytes.
+    owner: mcp
+    source: {file: ../../docs/mcp.md, anchor: add-files-without-a-new-version}
+    acceptance:
+      behavior: {id: FRK-020-B, description: "Plan and commit a CSV over MCP, read it from /_blob, list it with its usage, copy it to another artifact and replay the copy key, then delete the original and see the copy still serve."}
+      failure: {id: FRK-020-F, description: "An unknown field is refused, an HTML type is ASSET_TYPE_UNSUPPORTED, a missing source asset is ASSET_NOT_FOUND, and a read-only key gets AUTHORIZATION_DENIED on a plan while it can still list."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over the MCP endpoint. No Postgres or deployed run exists.
+    depends_on: [FRK-019]
+    evidence: []

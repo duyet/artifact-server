@@ -6,8 +6,10 @@
  */
 
 import {CapabilityUnavailable, InvalidArtifactPath} from "../core/errors.js";
+import type {AssetRecord} from "../core/model.js";
 
 const versionPathSegment = "v";
+const blobPathSegment = "_blob";
 const artifactIdPrefix = "art_";
 const uuidSource =
   "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -56,6 +58,28 @@ export function sameHostVersionPath(
     : `${prefix}${manifestPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/** The path that serves one asset in path mode. */
+export function assetBlobPath(assetId: string): string {
+  return `/${blobPathSegment}/${encodeURIComponent(assetId)}`;
+}
+
+/** One asset as HTTP and MCP return it, with its absolute `/_blob/<id>` URL. */
+export function assetProjection(applicationUrl: URL, asset: AssetRecord) {
+  return {
+    createdAt: asset.createdAt,
+    createdBy: {
+      displayName: asset.createdByDisplayName,
+      principalId: asset.createdByPrincipalId,
+    },
+    id: asset.id,
+    mediaType: asset.mediaType,
+    name: asset.name,
+    sha256: asset.sha256,
+    size: asset.size,
+    url: new URL(assetBlobPath(asset.id), applicationUrl).toString(),
+  };
+}
+
 /** One `/v/<token>/<path>` request, split into the token and the in-version URL. */
 export interface SameHostVersionRequest {
   /** The unvalidated second path segment; empty when the request names none. */
@@ -89,7 +113,17 @@ export interface SameHostPathRequest {
   readonly requestUrl: URL;
 }
 
+/** One `/_blob/<id>` request for a file in an artifact's asset store. */
+export interface SameHostBlobRequest {
+  /** The unvalidated second path segment. */
+  readonly assetId: string;
+  readonly kind: "blob";
+  /** Whether anything follows the ID, which no asset URL has. */
+  readonly trailing: boolean;
+}
+
 export type SameHostContentRequest =
+  | SameHostBlobRequest
   | SameHostFolderRequest
   | SameHostPathRequest
   | SameHostVersionRequest;
@@ -104,6 +138,13 @@ export function parseSameHostContentRequest(
 ): SameHostContentRequest | null {
   const segments = requestUrl.pathname.split("/");
   const first = segments[1] ?? "";
+  if (first === blobPathSegment) {
+    return {
+      assetId: segments[2] ?? "",
+      kind: "blob",
+      trailing: segments.length > 3,
+    };
+  }
   if (first === versionPathSegment) {
     const contentToken = segments[2] ?? "";
     const versionUrl = new URL(requestUrl);
@@ -173,7 +214,9 @@ const sandboxPolicy =
  */
 export function isolateSameHostResponse(response: Response): Response {
   const headers = new Headers(response.headers);
-  headers.set("Content-Security-Policy", sandboxPolicy);
+  // Appended, not set: a branch may send a stricter policy of its own, and a
+  // browser enforces every policy a response carries.
+  headers.append("Content-Security-Policy", sandboxPolicy);
   headers.set("Access-Control-Allow-Origin", "*");
   return new Response(response.body, {
     headers,
@@ -197,6 +240,19 @@ export function assertCookieSessionsAvailable(
   if (contentDomain === null) {
     throw new CapabilityUnavailable({
       message: "Private artifact content opens in Review on this deployment.",
+    });
+  }
+}
+
+/**
+ * Assets are served at `/_blob/<id>` on the application origin, which only
+ * path mode isolates with the content sandbox, so host mode refuses to store
+ * one it could not serve.
+ */
+export function assertAssetStoreAvailable(contentDomain: string | null): void {
+  if (contentDomain !== null) {
+    throw new CapabilityUnavailable({
+      message: "The asset store needs a deployment without a content domain.",
     });
   }
 }
