@@ -6,7 +6,7 @@ The operator's goal: "keep simplify the artifact server codebase". Upstream pari
 
 - One Kubernetes pod in compact mode (SQLite and files on NFS), path mode on one host, no browser identity provider.
 - Anonymous viewers on a VPN open shared links. Agents publish over MCP and the CLI with one API key.
-- Artifacts have readable paths like `/2026/10/agent-console/`.
+- Artifacts have readable paths like `/2026/10/release-checklist/`.
 - No Postgres, S3, Azure, GCS, Cloudflare, OIDC, or WorkOS is in use.
 
 All line counts come from `wc -l` on tracked files at `origin/main` (`748e704`).
@@ -90,7 +90,7 @@ For scale, `src/` is 51,371 lines and `tests/` is 53,082. `deploy/` and `apps/si
    - An artifact without a path is listed under "Other" by its `/artifacts/<id>` link.
 3. **Folder pages.** `GET /2026/` and `GET /2026/10/` render the same list filtered to that prefix when no artifact owns that exact path. Today they return a JSON 404. Each folder page has a breadcrumb (`Artifacts / 2026 / 10`).
 4. **Back to the folder.** Content is not modified, because injected markup would change immutable bytes and their ETags. Instead, the folder pages and the catalog are the navigation, and the 404 for a missing path inside a folder links to its nearest folder page.
-5. **Titles.** The list shows `name` as the title and the last path segment under it in a monospace font, so `agent-console` and "Agent console" both read clearly. Reading `<title>` at publish time is left out for now; `name` is already set by every publisher.
+5. **Titles.** The list shows `name` as the title and the last path segment under it in a monospace font, so `release-checklist` and "Release checklist" both read clearly. Reading `<title>` at publish time is left out for now; `name` is already set by every publisher.
 6. **Themes.** The catalog and folder pages follow `prefers-color-scheme` through the same tokens as the Review app (`apps/web/src/theme-tokens.css`). The Review app starts from `prefers-color-scheme` when nothing is stored, instead of always dark.
 
 ### Mockups
@@ -118,8 +118,8 @@ Folder page at `/2026/10/`:
 
 ```
 Artifacts / 2026 / 10
-  Agent console                                 Oct 16
-  /2026/10/agent-console/
+  Release checklist                             Oct 16
+  /2026/10/release-checklist/
   ...
 ```
 

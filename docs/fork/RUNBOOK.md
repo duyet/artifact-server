@@ -200,21 +200,21 @@ Artifact pages run in a CSP sandbox on the application host. Tell publishers thr
 
 ### Move the static reports
 
-Each report in `docs/artifacts/<yyyy>/<mm>/<slug>.html` keeps a URL of the same shape, such as `https://artifacts.example.internal/2026/10/agent-console/`. Publish each one with `--path <yyyy>/<mm>/<slug>`.
+Each report in `docs/artifacts/<yyyy>/<mm>/<slug>.html` keeps a URL of the same shape, such as `https://artifacts.example.internal/2026/10/release-checklist/`. Publish each one with `--path <yyyy>/<mm>/<slug>`.
 
 1. Stage the report as a directory. Copy `<slug>.html` to `index.html`, and copy the contents of its sibling folder `<slug>/`, if there is one, next to it.
-2. Remove the `<slug>/` prefix from links into that folder. The page is served at `/<yyyy>/<mm>/<slug>/`, so the document's base URL is the artifact itself, and `agent-console/shots/a.jpg` must become `shots/a.jpg`.
+2. Remove the `<slug>/` prefix from links into that folder. The page is served at `/<yyyy>/<mm>/<slug>/`, so the document's base URL is the artifact itself, and `release-checklist/shots/a.jpg` must become `shots/a.jpg`.
 3. Publish the directory.
 
    ```sh
-   pnpm artifactserver publish ./staged/agent-console \
+   pnpm artifactserver publish ./staged/release-checklist \
      --server https://artifacts.example.internal \
      --token-file ./api-token \
-     --name "Agent console" \
-     --path 2026/10/agent-console | jq -r '.links.artifact'
+     --name "Release checklist" \
+     --path 2026/10/release-checklist | jq -r '.links.artifact'
    ```
 
-   The command prints `https://artifacts.example.internal/2026/10/agent-console/`.
+   The command prints `https://artifacts.example.internal/2026/10/release-checklist/`.
 
 Step 2 is inferred from the report layout and was not checked against all 29 files. Open each published report and check that its images load.
 

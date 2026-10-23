@@ -76,10 +76,10 @@ One view is one `GET` that returns an artifact's entry document. Nothing else.
 
 | Request | Counted | Why |
 | --- | --- | --- |
-| `GET /2026/10/agent-console/` | yes | The page view. |
-| `GET /2026/10/agent-console/index.html` | yes | The same entry document by name. |
-| `GET /2026/10/agent-console/settings/profile` on an SPA | yes | The client route resolved to the entry document; a browser navigation happened. |
-| `GET /2026/10/agent-console/assets/a.css` | no | An asset, not a page. |
+| `GET /2026/10/release-checklist/` | yes | The page view. |
+| `GET /2026/10/release-checklist/index.html` | yes | The same entry document by name. |
+| `GET /2026/10/release-checklist/settings/profile` on an SPA | yes | The client route resolved to the entry document; a browser navigation happened. |
+| `GET /2026/10/release-checklist/assets/a.css` | no | An asset, not a page. |
 | `HEAD` on any of the above | no | A probe, not a page load. |
 | `304 Not Modified` on the entry document | yes | A reload is a view. The browser asked again and was told the page was current. |
 | `/v/<token>/…`, a folder `/<slug>-<uuid>/…`, a path `/<path>/…` | yes | All three forms end at `serveVersionContent` (`src/http/create-http-app.ts:3529`), so one call site covers them. |
@@ -97,7 +97,7 @@ if (context.req.method === "GET" &&
 
 `requestedPath` is `""` for `/` and the manifest path otherwise (`src/manifest/create-manifest.ts:73`). `content.entryPath` is the version's declared entry document, which is why `VersionContent` carries it beside `entry`: `entry` is whichever manifest entry the request resolved to, so it equals `entryPath` for the page and differs from it for every asset.
 
-**SPA fallback counts.** A client route such as `/2026/10/agent-console/settings/profile` on an SPA names no file, but for a browser navigation it answers the entry document, so it is one page view. The gate above is written for exactly that rule: it counts one GET whenever the response carries the entry document (`content.entry.path === content.entryPath`), which covers the path, folder, version-URL, and fallback forms with one comparison and still excludes every asset, every HEAD probe, and every 404. FRK-008-B proves the fallback form: one client-route navigation lands exactly one view, and the same navigation on a static artifact is a plain 404 with no row.
+**SPA fallback counts.** A client route such as `/2026/10/release-checklist/settings/profile` on an SPA names no file, but for a browser navigation it answers the entry document, so it is one page view. The gate above is written for exactly that rule: it counts one GET whenever the response carries the entry document (`content.entry.path === content.entryPath`), which covers the path, folder, version-URL, and fallback forms with one comparison and still excludes every asset, every HEAD probe, and every 404. FRK-008-B proves the fallback form: one client-route navigation lands exactly one view, and the same navigation on a static artifact is a plain 404 with no row.
 
 ### Written without blocking the response
 
@@ -140,11 +140,11 @@ A prefix rule rather than an allowlist of exact paths, so the next anonymous rea
   "artifacts": [
     {
       "access": "public_link",
-      "name": "Agent console",
-      "path": "2026/10/agent-console",
+      "name": "Release checklist",
+      "path": "2026/10/release-checklist",
       "series": [{"count": 2, "day": "2026-10-17"}],
       "updatedAt": "2026-10-17T07:41:02.113Z",
-      "url": "https://artifacts.example.internal/2026/10/agent-console/",
+      "url": "https://artifacts.example.internal/2026/10/release-checklist/",
       "views": {"last7Days": 3, "last30Days": 9, "total": 41}
     }
   ],
@@ -199,7 +199,7 @@ The 7-day and 30-day counts are `SUM(count)` over the window's first 7 and all 3
 
 The grouping is a pure function on the client, because it is display order and display order has one owner.
 
-1. Split each artifact's `path` on `/`. `2026/10/agent-console` yields `["2026", "10", "agent-console"]`.
+1. Split each artifact's `path` on `/`. `2026/10/release-checklist` yields `["2026", "10", "release-checklist"]`.
 2. The last element is the leaf and the leading elements are the folder chain. An artifact with `path === null` goes to the ungrouped list, which renders last under its own label.
 3. Folders are keyed by their full path, so `2026` and `2026/10` are separate nodes and a child always has exactly one parent.
 4. Order artifacts by `updatedAt` descending, then `id`. That is "newest first", and `id` breaks ties so the order is total.
