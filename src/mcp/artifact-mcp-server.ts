@@ -25,6 +25,7 @@ import {
   type ReadCommentThreadCommand,
   type UpdateCommentThreadCommand,
 } from "../application/artifact-comments.js";
+import {ArtifactAssetService} from "../application/artifact-assets.js";
 import {ArtifactManagementService} from "../application/artifact-management.js";
 import {CheckArtifactAssetsService} from "../application/check-artifact-assets.js";
 import {CompareArtifactService} from "../application/compare-artifact.js";
@@ -76,7 +77,9 @@ import {
   versionFileBrowserUrl,
 } from "../http/artifact-http-links.js";
 import {
+  assertAssetStoreAvailable,
   assertCookieSessionsAvailable,
+  assetProjection,
   requestedArtifactPath,
   versionServedRoots,
 } from "../http/same-host-content.js";
@@ -177,6 +180,20 @@ const assetReferenceKindSchema = z.enum([
   "outside",
   "script",
 ]);
+const assetSchema = z.object({
+  createdAt: z.string(),
+  createdBy: z.object({displayName: z.string(), principalId: z.string()}).strict(),
+  id: z.string(),
+  mediaType: z.string(),
+  name: z.string(),
+  sha256: z.string(),
+  size: z.number().int().nonnegative(),
+  url: z.url(),
+}).strict();
+const committedAssetSchema = z.object({
+  asset: assetSchema,
+  replayed: z.boolean(),
+}).strict();
 const commentThreadIdSchema = z.string().min(1).max(200);
 const commentReplyIdSchema = z.string().min(1).max(200);
 // The comment service is the single body authority: it measures the trimmed
@@ -1411,6 +1428,191 @@ export function createArtifactMcpServer(
         ),
       );
       return {...deletion};
+    }),
+  );
+
+  registerNudgedTool(
+    "asset_create_upload",
+    {
+      title: "Begin an asset upload",
+      description:
+        "Add one image, video, PDF, font, stylesheet, script, or text data file to an artifact's asset store without saving a version. Supply the file's name, byte size, SHA-256 fingerprint, and media type. PUT the exact bytes to the returned uploadUrl with the MCP bearer credential, then call asset_commit_upload. HTML and XML are refused.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        mediaType: z.string().min(1).max(200),
+        name: z.string().min(1).max(1_024),
+        projectId: optionalProjectIdSchema,
+        sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+        size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+      }).strict(),
+      outputSchema: z.object({
+        commit: z.object({
+          mcpTool: z.literal("asset_commit_upload"),
+          uploadId: z.string(),
+        }).strict(),
+        expiresAt: z.string(),
+        file: z.object({
+          authorization: z.object({
+            credential: z.literal("reuse_the_mcp_bearer_credential"),
+            scheme: z.literal("Bearer"),
+          }).strict(),
+          method: z.literal("PUT"),
+          size: z.number().int().nonnegative(),
+          uploadUrl: z.url(),
+        }).strict(),
+        projectId: z.string(),
+        uploadId: z.string(),
+      }).strict(),
+      annotations: additiveWriteAnnotations,
+    },
+    async ({projectId, ...declared}) => toolResult(async () => {
+      assertAssetStoreAvailable(dependencies.contentDomain);
+      const upload = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.createUpload({...declared, principal: identity.principal, projectId})
+        ),
+      );
+      const [file] = uploadPlan(applicationUrl, upload).files;
+      if (file === undefined) {
+        throw new Error("An asset upload plan has no file slot.");
+      }
+      return {
+        commit: {mcpTool: "asset_commit_upload" as const, uploadId: upload.id},
+        expiresAt: upload.expiresAt,
+        file: {
+          authorization: file.authorization,
+          method: file.method,
+          size: file.size,
+          uploadUrl: file.uploadUrl,
+        },
+        projectId: upload.projectId,
+        uploadId: upload.id,
+      };
+    }),
+  );
+
+  registerNudgedTool(
+    "asset_commit_upload",
+    {
+      title: "Commit an uploaded asset",
+      description:
+        "After the asset's uploadUrl has received its exact bytes, store it in the artifact's asset store. Returns the asset with its /_blob URL. Retrying the same idempotency key and input returns the original asset.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        idempotencyKey: idempotencyKeySchema,
+        projectId: optionalProjectIdSchema,
+        uploadId: z.string().min(1).max(200),
+      }).strict(),
+      outputSchema: committedAssetSchema,
+      annotations: idempotentWriteAnnotations,
+    },
+    async (input) => toolResult(async () => {
+      assertAssetStoreAvailable(dependencies.contentDomain);
+      const committed = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.commitUpload({...input, principal: identity.principal})
+        ),
+      );
+      return {
+        asset: assetProjection(applicationUrl, committed.asset),
+        replayed: committed.replayed,
+      };
+    }),
+  );
+
+  registerNudgedTool(
+    "asset_list",
+    {
+      title: "List an artifact's assets",
+      description:
+        "List the files in an artifact's asset store, oldest first, with each /_blob URL, the artifact's quota, and what the assets use of it.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        projectId: optionalProjectIdSchema,
+      }).strict(),
+      outputSchema: z.object({
+        assets: z.array(assetSchema),
+        quota: z.object({
+          maximumAssets: z.number().int().positive(),
+          maximumBytes: z.number().int().positive(),
+        }).strict(),
+        usage: z.object({
+          assetCount: z.number().int().nonnegative(),
+          byteCount: z.number().int().nonnegative(),
+        }).strict(),
+      }).strict(),
+      annotations: readOnlyAnnotations,
+    },
+    async (input) => toolResult(async () => {
+      const listing = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.listAssets({...input, principal: identity.principal})
+        ),
+      );
+      return {
+        assets: listing.assets.map((asset) => assetProjection(applicationUrl, asset)),
+        quota: listing.quota,
+        usage: listing.usage,
+      };
+    }),
+  );
+
+  registerNudgedTool(
+    "asset_delete",
+    {
+      title: "Delete an asset",
+      description:
+        "Remove one file from an artifact's asset store. Its /_blob URL stops answering. Saved versions and their files are not changed.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        assetId: z.string().min(1).max(200),
+        projectId: optionalProjectIdSchema,
+      }).strict(),
+      outputSchema: z.object({asset: assetSchema}).strict(),
+      annotations: destructiveWriteAnnotations,
+    },
+    async (input) => toolResult(async () => {
+      const deleted = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.deleteAsset({...input, principal: identity.principal})
+        ),
+      );
+      return {asset: assetProjection(applicationUrl, deleted)};
+    }),
+  );
+
+  registerNudgedTool(
+    "asset_copy",
+    {
+      title: "Copy an asset from another artifact",
+      description:
+        "Add an asset of another artifact in the same project, which the caller can read, to this artifact's asset store. No bytes are uploaded; the copy gets its own ID and URL.",
+      inputSchema: z.object({
+        artifactId: artifactIdSchema,
+        idempotencyKey: idempotencyKeySchema,
+        projectId: optionalProjectIdSchema,
+        sourceArtifactId: artifactIdSchema,
+        sourceAssetId: z.string().min(1).max(200),
+      }).strict(),
+      outputSchema: committedAssetSchema,
+      annotations: idempotentWriteAnnotations,
+    },
+    async (input) => toolResult(async () => {
+      assertAssetStoreAvailable(dependencies.contentDomain);
+      const copied = await runMcpApplicationEffect(
+        dependencies,
+        ArtifactAssetService.use((assets) =>
+          assets.copyAsset({...input, principal: identity.principal})
+        ),
+      );
+      return {
+        asset: assetProjection(applicationUrl, copied.asset),
+        replayed: copied.replayed,
+      };
     }),
   );
 
