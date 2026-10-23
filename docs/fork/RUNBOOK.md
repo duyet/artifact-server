@@ -2,7 +2,7 @@
 
 This runbook releases, installs, publishes to, and backs up the same-host fork of Artifact Server. [DESIGN.md](./DESIGN.md) explains why each step exists.
 
-The examples use `artifacts.example.internal` for the application host, `http://s3.example.internal:7070` for the S3 gateway, the namespace `artifact-server`, and the Helm release `artifact-server`. Real values belong in the deployment repository, not here.
+The examples use `artifacts.example.internal` for the application host, `http://s3.example.internal:7070` for the S3 gateway, the namespace `artifact-server`, and the Helm release `artifact-server`. Real values belong in your own deployment configuration, not here.
 
 ## Before the first release
 
@@ -14,7 +14,7 @@ Do these steps once.
    aws --endpoint-url http://s3.example.internal:7070 s3api create-bucket --bucket artifact-server
    ```
 
-2. Create the database and role in the CloudNativePG cluster. Two replicas with a pool of 10, plus the migration and cleanup jobs, use 22 connections. A rolling update briefly runs a third pod, so the role needs a limit of at least 32.
+2. Create the database and role in Postgres. Two replicas with a pool of 10, plus the migration and cleanup jobs, use 22 connections. A rolling update briefly runs a third pod, so the role needs a limit of at least 32.
 
    ```sql
    CREATE ROLE artifact_server LOGIN PASSWORD '<password>' CONNECTION LIMIT 32;
@@ -94,7 +94,7 @@ secret:
 ingress:
   enabled: true
   className: nginx
-  applicationTlsSecretName: wildcard-example-internal-tls # the existing wildcard secret
+  applicationTlsSecretName: artifacts-example-internal-tls # a TLS secret that covers the host
   contentTlsSecretName: ""
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
@@ -198,9 +198,9 @@ Artifact pages run in a CSP sandbox on the application host. Tell publishers thr
 - `localStorage`, `sessionStorage`, IndexedDB, and cookies throw. Wrap them in `try`.
 - Reload after a publish if a page mixes two versions.
 
-### Move the static reports
+### Migrate static reports
 
-Each report in `docs/artifacts/<yyyy>/<mm>/<slug>.html` keeps a URL of the same shape, such as `https://artifacts.example.internal/2026/10/release-checklist/`. Publish each one with `--path <yyyy>/<mm>/<slug>`.
+If you keep static reports as `<root>/<yyyy>/<mm>/<slug>.html`, each one can keep a URL of the same shape, such as `https://artifacts.example.internal/2026/10/release-checklist/`. Publish each one with `--path <yyyy>/<mm>/<slug>`.
 
 1. Stage the report as a directory. Copy `<slug>.html` to `index.html`, and copy the contents of its sibling folder `<slug>/`, if there is one, next to it.
 2. Remove the `<slug>/` prefix from links into that folder. The page is served at `/<yyyy>/<mm>/<slug>/`, so the document's base URL is the artifact itself, and `release-checklist/shots/a.jpg` must become `shots/a.jpg`.
@@ -216,11 +216,11 @@ Each report in `docs/artifacts/<yyyy>/<mm>/<slug>.html` keeps a URL of the same 
 
    The command prints `https://artifacts.example.internal/2026/10/release-checklist/`.
 
-Step 2 is inferred from the report layout and was not checked against all 29 files. Open each published report and check that its images load.
+Step 2 is inferred from this layout. Your reports may link differently, so open each published report and check that its images load.
 
 A publish fails with `ARTIFACT_PATH_TAKEN` when another live artifact holds the same path, an ancestor such as `2026/10`, or a descendant. A path cannot change. To move a report, delete the artifact and publish it again, because deletion frees the path. The folder link of an artifact with a path keeps working.
 
-A path is guessable, so anyone who can reach the host can read a report at its path.
+A path is guessable, so anyone who can reach the host can read a report at its path. On a private network that may be acceptable. If it is not, publish without `--path` and share the folder link.
 
 ## The home page
 
@@ -257,7 +257,7 @@ Treat the database and the bucket prefix as one backup unit.
    printf 'installations/%s/\n' "$(printf '%s' 'artifacts-internal' | sha256sum | cut -d ' ' -f 1)"
    ```
 
-   The Versity posix backend keeps metadata in `user.` extended attributes, or in sidecar files when the gateway runs with `--sidecar`. A copy on the gateway's filesystem must keep them, for example `rsync -aX` or `tar --xattrs`. A bucket-to-bucket copy through the S3 API keeps them.
+   With Versity and its posix backend, the gateway keeps metadata in `user.` extended attributes, or in sidecar files when the gateway runs with `--sidecar`. A copy on the gateway's filesystem must keep them, for example `rsync -aX` or `tar --xattrs`. A bucket-to-bucket copy through the S3 API keeps them.
 
 Database first is safe because the application writes every blob before the row that references it, and it never deletes a committed blob. Copying the bucket first is not safe, because a row committed during the copy could point at a blob the copy missed.
 
@@ -281,7 +281,7 @@ Backing up while the application runs is a new claim. Upstream procedures stop t
 Run this once before the first install.
 
 1. Read the gateway's `--region` and set `configuration.s3.region` to it. A different signing region fails with `AuthorizationHeaderMalformed`. The contract test fixes the region at `us-east-1`, so on a gateway with another region it fails for that reason alone.
-2. Check that the gateway's data directory supports `user.` extended attributes, or that the gateway runs with `--sidecar`. Note the filesystem type. The current gateway passed this check on 2026-10-17: its data directory is ext4 on a local LVM volume, `user.` attributes work, and it needs no `--sidecar`. Repeat the check after any storage change.
+2. Check that the gateway's data directory supports `user.` extended attributes, or that the gateway runs with `--sidecar`. Note the filesystem type. Repeat the check after any storage change.
 
    ```sh
    df -T <gateway data dir>
@@ -290,7 +290,7 @@ Run this once before the first install.
 
    Run the second command inside the gateway's data directory.
 
-   On ext4, one file is capped near 11 GiB (versity/versitygw#2424). XFS is not reported. The current gateway is ext4, so this cap applies.
+   On ext4, one file is capped near 11 GiB (versity/versitygw#2424). XFS is not reported.
 3. Run the contract test from a fork checkout, after `pnpm install`. Use a key that may create buckets. The test creates the throwaway buckets `artifact-server-integration` and `artifact-server-frk-000`. The three `MINIO` variables are required but unused, because the MinIO restart case is excluded.
 
    ```sh
