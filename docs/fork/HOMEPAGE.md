@@ -13,7 +13,7 @@ The Artifact Server web app already has that token set (`apps/web/src/theme-toke
 
 ## 1. Data shape
 
-Views are counts of one thing: a browser asked for an artifact's entry document. They are not events, so they are one table and no event log. The table has exactly the three columns the brief names, and nothing else.
+Views are counts of one thing: a browser asked for an artifact's entry document. They are not events, so they are one table and no event log. The table has exactly the three columns issue 5 names, and nothing else.
 
 ```sql
 -- SQLite, in the #migrate baseline next to the other artifact-scoped tables
@@ -38,7 +38,7 @@ CREATE TABLE artifact_views (
 
 Three decisions:
 
-1. **`day` is a `TEXT` UTC calendar day, `YYYY-MM-DD`.** Not a timestamp and not a date type, so SQLite and Postgres agree byte for byte and a row is comparable with `<=` and `>=` as text. Day boundaries are UTC because that is the only zone the deployment's logs and the artifact `createdAt` values are already normalized to. A local-time zone would need a stored offset and a calendar library for no product gain.
+1. **`day` is a `TEXT` UTC calendar day, `YYYY-MM-DD`.** Not a timestamp and not a date type, so SQLite and Postgres agree byte for byte and a row is comparable with `<=` and `>=` as text. Day boundaries are UTC because that is the only zone the server's logs and the artifact `createdAt` values are already normalized to. A local-time zone would need a stored offset and a calendar library for no product gain.
 2. **No `installation_id` in SQLite.** `artifacts.id` is `TEXT PRIMARY KEY` there (`src/storage/sqlite-artifact-repository.ts:4778`), so one artifact ID names one artifact in one database. Postgres has the composite key `(installation_id, id)` (`src/storage/postgres-migrations.ts`), so its view rows carry the installation, exactly as `versions`, `actions`, and `comment_threads` do.
 3. **No foreign-key cascade and no `ON DELETE`.** Deletion is a one-way tombstone (`src/storage/postgres-artifact-repository.ts:1505`), so the parent row never disappears and the counters never need a cascade. A deleted artifact's rows stay and are simply unreachable, because every reader filters on a live artifact.
 
@@ -110,7 +110,7 @@ The drain is a background loop, built exactly like `src/lifecycle/staging-cleanu
 
 The drain writes in chunks of at most 500 rows. SQLite binds 2 parameters per row (the value plus nothing, since `ON CONFLICT` names its own columns), and `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds; 500 rows stay under it on any build. A drain with more pending rows than the chunk size runs several statements inside one transaction, so a burst is one writer acquisition.
 
-Losses are bounded and stated: a process killed between a record and its drain loses at most one interval of counts. This is acceptable for a view counter, and the alternative — writing inline — puts a write on the hot content path, which the brief forbids and which the single SQLite writer makes worse.
+Losses are bounded and stated: a process killed between a record and its drain loses at most one interval of counts. This is acceptable for a view counter, and the alternative — writing inline — puts a write on the hot content path, which issue 5 forbids and which the single SQLite writer makes worse.
 
 `close()` interrupts the fiber, then flushes what is pending, then lets the repository close. A flush that fails is logged and dropped; it never fails a shutdown that already answered every request.
 
@@ -120,7 +120,7 @@ Losses are bounded and stated: a process killed between a record and its drain l
 
 ### Why `/api/v1/public/` is anonymous
 
-Every `/api/*` request runs the bearer-or-session middleware (`src/http/create-http-app.ts:873`). The tree must be readable by a VPN viewer holding nothing, so that middleware skips one prefix:
+Every `/api/*` request runs the bearer-or-session middleware (`src/http/create-http-app.ts:873`). The tree must be readable by an anonymous viewer holding nothing, so that middleware skips one prefix:
 
 ```ts
 app.use("/api/*", async (context, next) => {
@@ -145,7 +145,7 @@ A prefix rule rather than an allowlist of exact paths, so the next anonymous rea
       "series": [{"count": 2, "day": "2026-10-17"}],
       "updatedAt": "2026-10-17T07:41:02.113Z",
       "url": "https://artifacts.example.internal/2026/10/release-checklist/",
-      "views": {"last7Days": 3, "last30Days": 9, "total": 41}
+      "views": {"last7Days": 2, "last30Days": 2, "total": 2}
     }
   ],
   "generatedAt": "2026-10-17T08:00:00.000Z",
@@ -159,7 +159,7 @@ A flat list, not a nested tree. The endpoint reads and shapes; the browser group
 
 Field decisions:
 
-- **`name`, not `title`.** The brief says title; the artifact record's field is `name` (`src/core/model.ts:76`) and the page has no other title to show. A renamed field would be a second name for one value.
+- **`name`, not `title`.** Issue 5 says title; the artifact record's field is `name` (`src/core/model.ts:76`) and the page has no other title to show. A renamed field would be a second name for one value.
 - **`updatedAt` is the current version's `createdAt`** (`VersionRecord.createdAt`, `src/core/model.ts`). Artifacts have no `updated_at`, and a version's creation is the last change to the artifact. A restored version keeps its own `createdAt`, which is the honest answer for when the visible content was produced.
 - **`series` is sparse and ascending.** Days with no views are absent, so the payload stays small on a quiet server. The client densifies against `windowDays`. A dense 30-element array per artifact would be 30 times the bytes for the same information.
 - **`url` is absolute** and comes from `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`), the same builder `links.artifact` uses, so the home page can never advertise a URL the server would not serve. In path mode it is `/<path>/`, otherwise `/<folder>/`.
@@ -204,7 +204,7 @@ The grouping is a pure function on the client, because it is display order and d
 3. Folders are keyed by their full path, so `2026` and `2026/10` are separate nodes and a child always has exactly one parent.
 4. Order artifacts by `updatedAt` descending, then `id`. That is "newest first", and `id` breaks ties so the order is total.
 5. Order sibling folders by the newest `updatedAt` anywhere beneath them, descending, then `label`. A folder with no artifacts cannot occur, because a folder exists only when an artifact creates it.
-6. Label a folder with its last segment, so `2026/10` reads `10` under `2026`, as the brief's `2026` › `10` requires.
+6. Label a folder with its last segment, so `2026/10` reads `10` under `2026`, as issue 5's `2026` › `10` requires.
 
 Prefix-free paths (section 11) make step 3 unambiguous: no folder path is also an artifact path, so no node is both a leaf and a branch.
 
@@ -212,7 +212,7 @@ The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPub
 
 ### The chart
 
-`views` is a per-day count, not a rate, and one internal server is not busy enough for a log scale to matter.
+`views` is a per-day count, not a rate, and a single installation is rarely busy enough for a log scale to matter.
 
 - **Home page.** One bar per day summed across every public artifact, 30 days, on `--chart-2`. The client sums the sparse series it already received, so the headline chart and the rows can never disagree. Rendered as inline SVG from `sparklineBars`: no chart library, no layout measurement, no client code beyond 30 `<rect>` elements.
 - **Each artifact row.** The same function at 30 bars in a fixed 96×24 box beside the total. A row with no views draws the bars at zero height, so the column stays aligned instead of collapsing.
