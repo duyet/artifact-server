@@ -508,6 +508,10 @@ From this commit on, the fork owns migration numbers. Upstream's next migrations
 
 `docs/fork/HOMEPAGE.md` is the design for the home page at `/`: public artifacts as a folder tree built from the readable paths of section 11, plus per-artifact view counts from one three-column table. It follows issue 5 and depends on FRK-006 and FRK-007.
 
+## 13. Asset store
+
+`docs/fork/ASSETS.md` describes the per-artifact asset store: files outside versions, served at `/_blob/<id>`, with an allowlist, per-file caps, and a per-artifact quota. It is phase 1 of issue 19 and covers FRK-018, FRK-019, and FRK-020.
+
 ## Decisions
 
 All seven open decisions from revision 1 are settled:
