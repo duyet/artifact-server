@@ -36,6 +36,7 @@ export const errorCodes = {
   uploadFileNotFound: "UPLOAD_FILE_NOT_FOUND",
   uploadIncomplete: "UPLOAD_INCOMPLETE",
   uploadNotFound: "UPLOAD_NOT_FOUND",
+  uploadTooLarge: "UPLOAD_TOO_LARGE",
   versionNotFound: "VERSION_NOT_FOUND",
 } as const;
 
@@ -245,6 +246,12 @@ export class InvalidManifestPath extends Schema.TaggedError<InvalidManifestPath>
 /** Uploaded bytes do not match their declared length or fingerprint. */
 export class UploadedFileMismatch extends Schema.TaggedError<UploadedFileMismatch>()(
   "UploadedFileMismatch",
+  messageField,
+) {}
+
+/** An upload request announces more bytes than its file declared. */
+export class UploadTooLarge extends Schema.TaggedError<UploadTooLarge>()(
+  "UploadTooLarge",
   messageField,
 ) {}
 
@@ -464,6 +471,7 @@ const artifactServerFailureSchema = Schema.Union([
   UploadFileNotFound,
   UploadIncomplete,
   UploadNotFound,
+  UploadTooLarge,
   VersionNotFound,
   ContentNotPublic,
   CapabilityUnavailable,

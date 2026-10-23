@@ -4351,3 +4351,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The Postgres migration 0016 and rename, and the D1 table rebuilds and rename, compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
     depends_on: [FRK-010, ARC-006]
     evidence: []
+
+  - id: FRK-018
+    kind: security
+    behavior: A version upload PUT accepts at most the byte length its file declared. A request that announces a longer body is refused with 413 UPLOAD_TOO_LARGE before any byte is read, and a body without a length stops at the declared size, so no client can store more than it declared.
+    owner: publishing
+    source: {file: ../../docs/fork/ASSETS.md, anchor: version-upload-byte-cap}
+    acceptance:
+      behavior: {id: FRK-018-B, description: "A PUT of exactly the declared bytes is verified and the upload commits."}
+      failure: {id: FRK-018-F, description: "A PUT whose Content-Length is one byte over the declaration is 413 UPLOAD_TOO_LARGE, a streamed body one byte over is 422 INVALID_INPUT, the slot stays unverified so the commit is 409, and the server keeps answering."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a compact SQLite installation over a real server. The S3 staging adapter shares the same verified stream but has no run here.
+    depends_on: [PUB-003]
+    evidence: []

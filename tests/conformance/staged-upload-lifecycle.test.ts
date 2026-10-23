@@ -89,6 +89,7 @@ describe("staged upload lifecycle", () => {
     await expectStagedFailure(runtime, "UploadNotFound", (service) =>
       service.uploadFile({
         body: byteStream(bytes),
+        declaredLength: null,
         principal: testPrincipal("principal-b"),
         storageToken: slot.storageToken,
         uploadId: upload.id,
@@ -140,6 +141,7 @@ describe("staged upload lifecycle", () => {
           "UploadNotFound",
           (service) => service.uploadFile({
             body: byteStream(bytes),
+            declaredLength: null,
             principal: testPrincipal(
               upload.principalId,
               "foreign-installation",
@@ -198,6 +200,7 @@ describe("staged upload lifecycle", () => {
     await expectStagedFailure(runtime, "UploadExpired", (service) =>
       service.uploadFile({
         body: byteStream(bytes),
+        declaredLength: null,
         principal: testPrincipal(expired.principalId),
         storageToken: expiredSlot.storageToken,
         uploadId: expired.id,
@@ -229,6 +232,7 @@ describe("staged upload lifecycle", () => {
     if (liveSlot === undefined) throw new Error("The commit fixture has no file slot.");
     await runStaged(runtime, (service) => service.uploadFile({
       body: byteStream(bytes),
+      declaredLength: null,
       principal: testPrincipal(live.principalId),
       storageToken: liveSlot.storageToken,
       uploadId: live.id,
@@ -287,6 +291,7 @@ describe("staged upload lifecycle", () => {
     if (expiredFile === undefined) throw new Error("The cleanup fixture has no file.");
     await runStaged(runtime, (service) => service.uploadFile({
       body: byteStream(bytes),
+      declaredLength: null,
       principal: testPrincipal(expired.principalId),
       storageToken: expiredFile.storageToken,
       uploadId: expired.id,
@@ -303,6 +308,7 @@ describe("staged upload lifecycle", () => {
     }
     await runStaged(runtime, (service) => service.uploadFile({
       body: byteStream(bytes),
+      declaredLength: null,
       principal: testPrincipal(committedUpload.principalId),
       storageToken: committedFile.storageToken,
       uploadId: committedUpload.id,

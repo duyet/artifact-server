@@ -2214,6 +2214,7 @@ export function createHttpApp(
       StagedUploadService.use((stagedUploads) =>
         stagedUploads.uploadFile({
           body,
+          declaredLength: announcedBodyLength(context.req.header("content-length")),
           principal: context.get("principal"),
           projectId: requestedProjectId(context),
           storageToken: context.req.param("storageToken"),
@@ -3906,6 +3907,12 @@ function emptyByteStream(): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function announcedBodyLength(header: string | undefined): number | null {
+  if (header === undefined || !/^\d+$/u.test(header)) return null;
+  const length = Number(header);
+  return Number.isSafeInteger(length) ? length : null;
 }
 
 function tokenFromContentHost(
