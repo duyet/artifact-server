@@ -529,6 +529,10 @@ From this commit on, the fork owns migration numbers. Upstream's next migrations
 
 `docs/fork/ASSETS.md` describes the per-artifact asset store: files outside versions, served at `/_blob/<id>`, with an allowlist, per-file caps, and a per-artifact quota. It is phase 1 of issue 19 and covers FRK-018, FRK-019, and FRK-020.
 
+## 14. Viewer bar
+
+`docs/fork/VIEWER.md` describes the bar above an artifact in Review's viewer: where it lives and why artifact code cannot reach it, the info endpoint, the visibility model, who may change visibility, and the logo variables. It follows issue 37 and covers FRK-026 and FRK-028.
+
 ## Decisions
 
 All seven open decisions from revision 1 are settled:

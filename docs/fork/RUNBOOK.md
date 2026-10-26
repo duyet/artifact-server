@@ -171,7 +171,7 @@ kubectl --context <cluster> -n artifact-server exec deploy/artifact-server -c ar
   --key-name "Ada Lovelace @ laptop" > member-key.json
 ```
 
-- `--role member` makes a key that creates artifacts, reads, comments, and opens review sessions. It publishes new versions only of artifacts its member created. It cannot manage other people's artifacts or projects. `--role` defaults to `administrator`.
+- `--role member` makes a key that creates artifacts, reads, comments, and opens review sessions. It publishes new versions only of artifacts its member created, and it can change who can open those artifacts. It cannot manage other people's artifacts or projects. `--role` defaults to `administrator`.
 - `--key-name` is the author shown on the key's writes. It defaults to `--name`.
 - All keys of one member own the same artifacts, so any of that person's machines can publish a new version.
 - Running the command again with the same email and key name revokes that key and prints a new one. The member's other keys keep working. The running server may accept the old key for up to 30 seconds.
@@ -299,6 +299,40 @@ kubectl --namespace artifact-server exec statefulset/artifact-server -- \
   psql "$ARTIFACT_SERVER_DATABASE_URL" -c \
   'SELECT day, SUM(count) FROM artifact_views GROUP BY day ORDER BY day DESC LIMIT 30'
 ```
+
+## Viewer logo
+
+Review's artifact viewer shows a 40px bar above each artifact with the installation's logo, the artifact name, an info button, and an actions menu. Without configuration, the bar shows the Artifact Server mark. To show your own logo, set these variables on the server and restart it:
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `ARTIFACT_SERVER_LOGO` | no | An `https://` URL without credentials, or an absolute path to a `.svg`, `.png`, `.webp`, `.jpg`, or `.jpeg` file of at most 256 KiB. |
+| `ARTIFACT_SERVER_LOGO_ALT` | with a logo | The image's alternative text, 1 to 100 characters. |
+| `ARTIFACT_SERVER_LOGO_LINK` | no | Where the logo links: an `https://` URL, or a path on this server such as `/`. |
+
+A file logo, mounted from a ConfigMap:
+
+```yaml
+env:
+  - name: ARTIFACT_SERVER_LOGO
+    value: /etc/artifact-server/branding/logo.svg
+  - name: ARTIFACT_SERVER_LOGO_ALT
+    value: Example Org
+  - name: ARTIFACT_SERVER_LOGO_LINK
+    value: /
+```
+
+The server reads a logo file once at startup and serves it from memory at `/api/v1/public/logo`, so a changed file needs a restart. A URL logo loads from its own host, and the server adds that host's origin to the application pages' `img-src` policy. Use a host that viewers' browsers can reach.
+
+A bad value stops startup with the variable's name and a reason, for example an `http://` URL, a missing file, or a link that starts with `//`. Check the result before a rollout:
+
+```sh
+artifactserver config check --mode compact --data /var/lib/artifact-server
+```
+
+The output reports `logo` as `{source, location, alt, link}`, or `null` when no logo is set.
+
+The info button shows who made the artifact, its version, its visibility, when it last changed, and its views over 30 days. The artifact's owner and administrators can switch it between public, unlisted, and private there. Everyone else sees the visibility without the control. See `docs/fork/VIEWER.md` for the rule.
 
 ## Backup and restore
 

@@ -81,7 +81,7 @@ Before this change, any direct human member could change any artifact's access, 
 - `views.daily` is the sparse series of `readArtifactActivity`, ascending, with only the days that have views. The popover fills the missing days with zero to draw 30 bars that end today.
 - `canManage` is `canManageArtifact` for the reader. The popover offers the visibility control only when it is true, and Share's access screen turns read-only when it is false.
 
-The viewer reads the info when the artifact opens, and again whenever the artifact's access, tags, or current version change, whether the change came from the popover, from Share, or from a new version.
+The viewer reads the info when the artifact opens, and again whenever the artifact's access, tags, name, or current version change, whether the change came from the popover, from Share, a rename, or a new version. The visibility control reads the artifact record the viewer already holds, which each write updates at once, so it never shows the old value while the info reloads.
 
 ## Viewer logo
 
