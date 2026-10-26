@@ -214,9 +214,10 @@ Before you turn it on:
 
 - **Emails must match.** A person whose directory `mail` differs from their member's email is refused. Compare them first, or set `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS=admit` and accept new members.
 - **The email attribute is the trust boundary.** A directory user who can change their own `mail` can sign in as any member, including an administrator. FreeIPA's default `User Self service` rule leaves `mail` out; confirm with `ipa selfservice-show "User Self service"`. On other directories, check the access rules or require a group.
-- **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_credentials`, `no_member`, `missing_email`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain.
+- **Administrators sign in with a password too.** A directory user whose email matches an administrator member gets an administrator session. Protect those accounts in the directory (strong passwords, lockout), or require a group.
+- **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_credentials`, `no_member`, `missing_email`, `entry_unreadable`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain. `entry_unreadable` means the password was right but the user may not read their own entry, which is a directory access rule to fix.
 
-Failed LDAP and API-key sign-ins share one limit, five per client address per minute. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+Failed LDAP sign-ins are limited to five per minute per client address and, separately, per username. A username that hits the limit is locked out of this server for the rest of the minute, whoever is guessing. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
 
 ## Publishing
 
