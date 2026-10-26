@@ -1,19 +1,20 @@
-import type {ReactNode} from "react";
+import {type ReactNode, useSyncExternalStore} from "react";
 import {
-  IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconCopy,
+  IconCursorText,
+  IconDots,
   IconDownload,
   IconExternalLink,
   IconFileText,
   IconHistory,
   IconLayoutSidebarRight,
+  IconLink,
   IconMaximize,
   IconPencil,
   IconShare,
   IconTrash,
-  IconCursorText,
 } from "@tabler/icons-react";
 import {toast} from "sonner";
 
@@ -22,6 +23,7 @@ import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -32,10 +34,11 @@ import {Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVal
 import {Separator} from "@/components/ui/separator";
 import {SidebarTrigger} from "@/components/ui/sidebar";
 import type {VersionListItem} from "../inspectors/versions-inspector.tsx";
-import {OwnerAvatar} from "../owner-avatar.tsx";
-import {OwnerHoverCard} from "../owner-hover-card.tsx";
-import {ReviewDownloadControl, type ReviewDownload} from "../review-download.tsx";
+import type {ReviewDownload} from "../review-download.tsx";
 import {IconButton} from "../review-primitives.tsx";
+import {ArtifactInfoPopover} from "./artifact-info-popover.tsx";
+import type {ArtifactInfoState} from "./use-artifact-info.ts";
+import {ViewerLogo} from "./viewer-logo.tsx";
 
 /** The artifact menu's actions; absent ones are hidden or disabled. */
 export interface ViewerMenuActions {
@@ -44,18 +47,33 @@ export interface ViewerMenuActions {
   readonly onEditFile: (() => void) | null;
   readonly onRename: (() => void) | null;
   readonly onShare: () => void;
-  readonly onShowHistory: () => void;
+  readonly onShowVersions: () => void;
+}
+
+/** Tailwind's `sm` breakpoint, where the bar has room for its view buttons. */
+const narrowViewport = "(width < 40rem)";
+
+function subscribeNarrowViewport(onChange: () => void): () => void {
+  const query = window.matchMedia(narrowViewport);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function isNarrowViewport(): boolean {
+  return window.matchMedia(narrowViewport).matches;
 }
 
 /**
- * The viewer's single compact bar: where you are, which version, and what you
- * can do with it. Modeled on Claude's artifact viewer.
+ * The viewer's 40px bar: the installation logo, the artifact's name and info,
+ * which version, and what you can do with it. It is application markup
+ * outside the sandboxed review frame, so artifact code never reaches it.
  */
 export function ViewerTopBar({
   annotate,
   currentVersionId,
   download,
   fullScreenDisabled,
+  info,
   inspectorOpen,
   menu,
   name,
@@ -75,6 +93,7 @@ export function ViewerTopBar({
   readonly currentVersionId: string | null;
   readonly download: ReviewDownload | null;
   readonly fullScreenDisabled: boolean;
+  readonly info: ArtifactInfoState;
   readonly inspectorOpen: boolean;
   readonly menu: ViewerMenuActions;
   readonly name: string;
@@ -90,6 +109,9 @@ export function ViewerTopBar({
   readonly versions: readonly VersionListItem[];
   readonly viewerPrincipalId: string;
 }) {
+  // Below `sm` the view buttons leave the bar for the menu. Rendering those
+  // items only then keeps the menu's keyboard order free of hidden entries.
+  const narrow = useSyncExternalStore(subscribeNarrowViewport, isNarrowViewport);
   const copyLink = async (): Promise<void> => {
     if (selectedVersion === null) return;
     try {
@@ -101,16 +123,102 @@ export function ViewerTopBar({
   };
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
+    <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
       <SidebarTrigger aria-keyshortcuts="[" />
       <Separator className="mx-1 data-vertical:h-4 data-vertical:self-center" orientation="vertical" />
-      <div className="flex min-w-0 items-center">
-        <h1 className="truncate px-1.5 text-sm font-medium">{name}</h1>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ViewerLogo />
+        <h1 className="truncate text-sm font-medium">{name}</h1>
+        <ArtifactInfoPopover owner={owner} state={info} viewerPrincipalId={viewerPrincipalId} />
+      </div>
+      <VersionNavigator
+        currentVersionId={currentVersionId}
+        onSelect={onSelectVersion}
+        selectedVersionId={selectedVersionId}
+        versions={versions}
+      />
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {annotate === null ? null : (
+          <span className="hidden sm:flex">
+            <IconButton
+              active={annotate.active}
+              label={annotate.active
+                ? "Annotate mode: click an element or select text to comment. Press Escape to interact."
+                : "Interact mode: links and controls work normally. Select text or turn annotation mode back on to comment."}
+              onClick={annotate.toggle}
+            >
+              <IconPencil />
+            </IconButton>
+          </span>
+        )}
+        <span className="hidden sm:flex">
+          <IconButton
+            disabled={fullScreenDisabled}
+            keyShortcuts="F"
+            label="Full screen"
+            onClick={onFullScreen}
+            shortcut="F"
+          >
+            <IconMaximize />
+          </IconButton>
+        </span>
+        {inspectorOpen ? null : (
+          <span className="hidden sm:flex">
+            <IconButton keyShortcuts="]" label="Open inspector" onClick={onOpenInspector} shortcut="]">
+              <IconLayoutSidebarRight />
+            </IconButton>
+          </span>
+        )}
+        {share}
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button aria-label="Artifact actions" size="icon-xs" variant="ghost" />}>
-            <IconChevronDown />
+          <DropdownMenuTrigger render={<Button aria-label="Artifact actions" size="icon-sm" variant="ghost" />}>
+            <IconDots />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
+          <DropdownMenuContent align="end" className="w-52">
+            {narrow ? (
+              <>
+                <DropdownMenuGroup>
+                  {annotate === null ? null : (
+                    <DropdownMenuCheckboxItem checked={annotate.active} onCheckedChange={annotate.toggle}>
+                      <IconPencil />
+                      Annotate
+                    </DropdownMenuCheckboxItem>
+                  )}
+                  <DropdownMenuItem disabled={fullScreenDisabled} onClick={onFullScreen}>
+                    <IconMaximize />
+                    Full screen
+                  </DropdownMenuItem>
+                  {inspectorOpen ? null : (
+                    <DropdownMenuItem onClick={onOpenInspector}>
+                      <IconLayoutSidebarRight />
+                      Open inspector
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            <DropdownMenuGroup>
+              <DropdownMenuItem disabled={selectedVersion === null} onClick={() => void copyLink()}>
+                <IconLink />
+                Copy link
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={menu.onShowVersions}>
+                <IconHistory />
+                Versions
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={selectedVersionId === null || opening} onClick={onOpenRaw}>
+                <IconExternalLink />
+                Open raw
+              </DropdownMenuItem>
+              {download === null ? null : (
+                <DropdownMenuItem render={<a download href={download.href} title={download.title} />}>
+                  <IconDownload />
+                  Download
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem disabled={menu.onRename === null} onClick={() => menu.onRename?.()}>
                 <IconCursorText />
@@ -124,26 +232,9 @@ export function ViewerTopBar({
                 <IconCopy />
                 Duplicate
               </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {download === null ? null : (
-                <DropdownMenuItem render={<a download href={download.href} />}>
-                  <IconDownload />
-                  Download
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem disabled={selectedVersion === null} onClick={() => void copyLink()}>
-                <IconExternalLink />
-                Copy link
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={menu.onShare}>
                 <IconShare />
                 Share
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={menu.onShowHistory}>
-                <IconHistory />
-                Version history
               </DropdownMenuItem>
             </DropdownMenuGroup>
             {menu.onDelete === null ? null : (
@@ -159,55 +250,6 @@ export function ViewerTopBar({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
-      <VersionNavigator
-        currentVersionId={currentVersionId}
-        onSelect={onSelectVersion}
-        selectedVersionId={selectedVersionId}
-        versions={versions}
-      />
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        {owner === null ? null : (
-          <span className="mr-1 flex">
-            <OwnerHoverCard identity={owner} viewerPrincipalId={viewerPrincipalId}>
-              <OwnerAvatar identity={owner} />
-            </OwnerHoverCard>
-          </span>
-        )}
-        {annotate === null ? null : (
-          <IconButton
-            active={annotate.active}
-            label={annotate.active
-              ? "Annotate mode: click an element or select text to comment. Press Escape to interact."
-              : "Interact mode: links and controls work normally. Select text or turn annotation mode back on to comment."}
-            onClick={annotate.toggle}
-          >
-            <IconPencil />
-          </IconButton>
-        )}
-        <IconButton
-          disabled={selectedVersionId === null || opening}
-          label={opening ? "Opening raw artifact" : "Open raw artifact"}
-          onClick={onOpenRaw}
-        >
-          <IconExternalLink />
-        </IconButton>
-        <ReviewDownloadControl download={download} />
-        <IconButton
-          disabled={fullScreenDisabled}
-          keyShortcuts="F"
-          label="Full screen"
-          onClick={onFullScreen}
-          shortcut="F"
-        >
-          <IconMaximize />
-        </IconButton>
-        {inspectorOpen ? null : (
-          <IconButton keyShortcuts="]" label="Open inspector" onClick={onOpenInspector} shortcut="]">
-            <IconLayoutSidebarRight />
-          </IconButton>
-        )}
-        {share}
       </div>
     </header>
   );

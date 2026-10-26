@@ -13,6 +13,7 @@ import {
 import type {BearerCredentialVerifier} from "../../src/application/authentication.js";
 import type {AssetQuota} from "../../src/core/asset-policy.js";
 import type {Clock} from "../../src/core/ports.js";
+import type {ViewerLogo} from "../../src/core/viewer-logo.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
 import {defaultCompletedRequestLogSampleRate} from
@@ -85,6 +86,7 @@ export async function startTestServer(
     readonly externalApiBearerVerifier?: BearerCredentialVerifier;
     readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
     readonly hostname?: string;
+    readonly logo?: ViewerLogo;
     readonly observability?: boolean;
     readonly port?: number;
     readonly webAssetsRoot?: string;
@@ -142,6 +144,9 @@ export async function startTestServer(
   }
   if (options.hostname !== undefined) {
     config = {...config, hostname: options.hostname};
+  }
+  if (options.logo !== undefined) {
+    config = {...config, logo: options.logo};
   }
   if (options.webAssetsRoot !== undefined) {
     config = {...config, webAssetsRoot: options.webAssetsRoot};
