@@ -213,7 +213,7 @@ describe("day filter", () => {
 });
 
 describe("daily chart tones and summary", () => {
-  test("FRK-029-F: no selection keeps every bar full, a selection tints the rest, and an empty window names no busiest day", () => {
+  test("FRK-025-F: no selection keeps every bar full, a selection tints the rest, and an empty window names no busiest day", () => {
     const days = ["2026-10-15", "2026-10-16", "2026-10-17"];
     // With nothing selected the chart wears its accent, and only the day
     // under the pointer steps down.

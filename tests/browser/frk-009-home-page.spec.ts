@@ -159,7 +159,7 @@ test.describe("public home page", () => {
     }
   });
 
-  test("FRK-029-B: each measure wears its accent, a selected day keeps it while the rest tint, hover and focus show the day's tooltip, and today is marked", async ({browser}) => {
+  test("FRK-025-B: each measure wears its accent, a selected day keeps it while the rest tint, hover and focus show the day's tooltip, and today is marked", async ({browser}) => {
     const installation = await createTestInstallation();
     const today = new Date();
     const yesterday = new Date(today.getTime() - 86_400_000);
