@@ -4,9 +4,28 @@ import {setDraftPrincipal} from "@/components/comments/comment-drafts";
 import {api, ApiError, type AccessContext, type Project, type Session} from "@/api/client";
 import {ApiKeySignIn} from "./api-key-sign-in.tsx";
 import {Button, ButtonLink} from "@/components/ui/button";
+import {Separator} from "@/components/ui/separator";
 import {useTheme} from "@/hooks/use-theme";
 import {ReviewGate} from "./review-primitives.tsx";
 import {ReviewShell} from "./review-shell.tsx";
+
+const ssoFailureMessages = {
+  failed: "Single sign-on did not sign you in. Try again, or use an API key.",
+  unavailable: "Single sign-on is unavailable right now. Try again later, or use an API key.",
+} as const;
+
+/** The outcome the OIDC callback left in the address, if it names one. */
+function readSsoFailure(): keyof typeof ssoFailureMessages | null {
+  const outcome = new URLSearchParams(window.location.search).get("sso");
+  return outcome === "failed" || outcome === "unavailable" ? outcome : null;
+}
+
+/** The current Review address without the OIDC outcome. */
+function reviewReturnPath(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("sso");
+  return `${url.pathname}${url.search}`;
+}
 
 /** Start the artifact-first Artifact Server review application. */
 export function ReviewApp() {
@@ -18,6 +37,12 @@ export function ReviewApp() {
   const [loginKind, setLoginKind] = useState<
     AccessContext["login"]["kind"] | null
   >(null);
+  const [oidcSignIn, setOidcSignIn] = useState(false);
+  const [ssoFailure] = useState(readSsoFailure);
+  useEffect(() => {
+    // Drop the outcome from the address so a reload does not show it again.
+    if (ssoFailure !== null) window.history.replaceState(window.history.state, "", reviewReturnPath());
+  }, [ssoFailure]);
   const bootstrapInFlightRef = useRef(false);
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [sessionState, setSessionState] = useState<
@@ -41,6 +66,9 @@ export function ReviewApp() {
       ]);
       accessContextRef.current = loadedAccessContext;
       setLoginKind(loadedAccessContext.login.kind);
+      setOidcSignIn(
+        loadedAccessContext.accessMode === "private_team" && loadedAccessContext.login.oidc,
+      );
       let loadedSession: Session;
       if (initialSession.kind === "authenticated") {
         loadedSession = initialSession.value;
@@ -105,6 +133,35 @@ export function ReviewApp() {
 
   if (sessionState === "loading") {
     return <ReviewGate description="Opening the local artifact catalog." title="Loading Artifact Server" />;
+  }
+  if (sessionState === "unauthenticated" && loginKind === "none" && oidcSignIn) {
+    return (
+      <ReviewGate
+        action={(
+          <div className="grid gap-6">
+            {ssoFailure === null ? null : (
+              <div className="text-sm text-destructive" role="alert">
+                {ssoFailureMessages[ssoFailure]}
+              </div>
+            )}
+            <ButtonLink
+              className="w-full"
+              href={`/auth/oidc/start?returnTo=${encodeURIComponent(reviewReturnPath())}`}
+            >
+              Sign in with SSO
+            </ButtonLink>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <Separator className="flex-1" />
+              <span className="whitespace-nowrap">or use an API key</span>
+              <Separator className="flex-1" />
+            </div>
+            <ApiKeySignIn onSignedIn={() => void bootstrap()} />
+          </div>
+        )}
+        description="Sign in with your organization's single sign-on to review artifacts in this browser."
+        title="Sign in"
+      />
+    );
   }
   if (sessionState === "unauthenticated" && loginKind === "none") {
     return (
