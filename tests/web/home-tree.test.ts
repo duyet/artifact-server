@@ -7,9 +7,9 @@ import {
   densifyDailySeries,
   entriesOnDay,
   sumDailySeries,
-  windowDays,
   type PublicArtifactTreeEntry,
 } from "../../apps/web/src/home/home-tree.js";
+import {windowDays} from "../../apps/web/src/lib/utc-days.js";
 
 function entry(
   name: string,

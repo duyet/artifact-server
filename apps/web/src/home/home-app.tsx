@@ -40,6 +40,7 @@ import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
 import {Toggle} from "@/components/ui/toggle";
 import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
+import {windowDays} from "@/lib/utc-days";
 import {VisibilityBadge} from "@/review/access-badge";
 
 import {
@@ -50,7 +51,6 @@ import {
   entriesOnDay,
   sumDailySeries,
   treeSorts,
-  windowDays,
   type DailyMetric,
   type DayTone,
   type PublicArtifactTreeEntry,
