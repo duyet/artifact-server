@@ -131,7 +131,6 @@ const apiErrorBodySchema = z.object({
 const noContentStatuses = new Set([204, 205]);
 
 export type AccessSetting = z.infer<typeof accessSettingSchema>;
-export type DeploymentCapabilities = z.infer<typeof deploymentCapabilitiesSchema>;
 export type PrincipalCapability = z.infer<typeof capabilitySchema>;
 export type Principal = z.infer<typeof principalSchema>;
 export type Session = z.infer<typeof sessionSchema>;
@@ -342,18 +341,6 @@ const projectAnalyticsSchema = z.object({
   windowDays: z.number().int().positive(),
 });
 
-const artifactAnalyticsSchema = z.object({
-  artifactId: z.string(),
-  daily: z.array(z.object({day: dayStringSchema, views: viewCountSchema})),
-  today: dayStringSchema,
-  views: z.object({
-    last7Days: viewCountSchema,
-    last30Days: viewCountSchema,
-    total: viewCountSchema,
-  }),
-  windowDays: z.number().int().positive(),
-});
-
 const artifactInfoSchema = z.object({
   artifactId: z.string(),
   canManage: z.boolean(),
@@ -382,8 +369,6 @@ const brandingSchema = z.object({
 
 /** One project's activity: totals, a sparse yearly series, its most viewed. */
 export type ProjectAnalytics = z.infer<typeof projectAnalyticsSchema>;
-/** One artifact's 7-day, 30-day, and all-time views with a sparse series. */
-export type ArtifactAnalytics = z.infer<typeof artifactAnalyticsSchema>;
 /** What the viewer's info popover shows about one artifact. */
 export type ArtifactInfo = z.infer<typeof artifactInfoSchema>;
 /** The info of the public artifact a readable URL serves, read with no credential. */
@@ -559,21 +544,6 @@ export interface CommentThreadEdit {
   readonly state?: CommentThreadState;
 }
 
-const registeredAgentSchema = z.object({
-  agentSessionId: z.string().nullable(),
-  /** Derived from the agent's own claim polling; the poll is the heartbeat. */
-  connected: z.boolean(),
-  connectionKey: z.string(),
-  createdAt: z.string(),
-  displayName: z.string(),
-  id: z.string(),
-  /** Open slug, matching the server (`registeredAgentKindPattern`): nothing branches on it. */
-  kind: z.string(),
-  lastSeenAt: z.string(),
-  principalId: z.string(),
-  workingDirectory: z.string(),
-});
-
 const agentDispatchStateSchema = z.enum([
   "addressed",
   "canceled",
@@ -614,7 +584,6 @@ const createdAgentDispatchSchema = z.object({
   replayed: z.boolean(),
 });
 
-export type RegisteredAgent = z.infer<typeof registeredAgentSchema>;
 export type AgentDispatchState = z.infer<typeof agentDispatchStateSchema>;
 export type AgentDispatch = z.infer<typeof agentDispatchSchema>;
 export type AgentDispatchPage = z.infer<typeof agentDispatchPageSchema>;
@@ -678,14 +647,6 @@ export type AgentActivity = z.infer<typeof agentActivitySchema>;
 export type AgentBeacon = z.infer<typeof agentBeaconSchema>;
 export type AgentPresence = z.infer<typeof agentPresenceSchema>;
 
-/** What one bulk clear removed, and what an active send kept out of reach. */
-const commentClearResultSchema = z.object({
-  deleted: z.number().int().nonnegative(),
-  skippedDispatched: z.number().int().nonnegative(),
-});
-
-export type CommentClearResult = z.infer<typeof commentClearResultSchema>;
-
 const memberSchema = z.object({
   createdAt: z.string(),
   displayName: z.string(),
@@ -745,7 +706,7 @@ export function hasBrowserSession(): boolean {
   return csrfCookieValue() !== null;
 }
 
-function readCsrfToken(): string {
+export function readCsrfToken(): string {
   const token = csrfCookieValue();
   if (token !== null) return token;
   throw new ApiError(
@@ -768,7 +729,7 @@ function csrfCookieValue(): string | null {
   return null;
 }
 
-async function parseFailure(response: Response): Promise<ApiError> {
+export async function parseFailure(response: Response): Promise<ApiError> {
   try {
     const parsed = apiErrorBodySchema.safeParse(await response.json());
     if (parsed.success) {
@@ -1069,10 +1030,6 @@ export const api = {
     projectAnalyticsSchema,
     `/api/v1/analytics?${projectQuery(projectId)}`,
   ),
-  artifactAnalytics: (artifactId: string, projectId: string) => request(
-    artifactAnalyticsSchema,
-    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/analytics?${projectQuery(projectId)}`,
-  ),
   artifactInfo: (projectId: string, artifactId: string) => request(
     artifactInfoSchema,
     `/api/v1/artifacts/${encodeURIComponent(artifactId)}/info?${projectQuery(projectId)}`,
@@ -1081,22 +1038,6 @@ export const api = {
   publicArtifactInfo: (pathname: string) => request(
     publicArtifactInfoSchema,
     `/api/v1/public/artifact-info?${new URLSearchParams({path: pathname})}`,
-  ),
-  /** Change the display name; no version is saved and links stay the same. */
-  rename: (
-    projectId: string,
-    artifactId: string,
-    expectedCurrentVersionId: string,
-    name: string,
-    idempotencyKey: string,
-  ) => request(
-    artifactStateSchema,
-    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/name?${projectQuery(projectId)}`,
-    {
-      body: JSON.stringify({ expectedCurrentVersionId, name }),
-      headers: mutationHeaders(idempotencyKey),
-      method: "PATCH",
-    },
   ),
   changeTags: (
     projectId: string,
@@ -1260,11 +1201,6 @@ export const api = {
       method: "PATCH",
     },
   ).then(({ thread }) => thread),
-  deleteComment: (projectId: string, artifactId: string, threadId: string) =>
-    requestNoContent(
-      `/api/v1/artifacts/${encodeURIComponent(artifactId)}/comments/${encodeURIComponent(threadId)}?${projectQuery(projectId)}`,
-      { headers: mutationHeaders(), method: "DELETE" },
-    ),
   createCommentReply: (
     projectId: string,
     artifactId: string,
@@ -1304,10 +1240,6 @@ export const api = {
     `/api/v1/artifacts/${encodeURIComponent(artifactId)}/comments/${encodeURIComponent(threadId)}/replies/${encodeURIComponent(replyId)}?${projectQuery(projectId)}`,
     { headers: mutationHeaders(), method: "DELETE" },
   ),
-  agents: () => request(
-    z.object({ items: z.array(registeredAgentSchema) }),
-    "/api/v1/agents",
-  ).then(({ items }) => items),
   agentDispatches: (projectId: string, query: AgentDispatchQuery) => {
     const search = new URLSearchParams({ projectId });
     if (query.agentId !== null) search.set("agentId", query.agentId);
@@ -1397,24 +1329,4 @@ export const api = {
     z.object({ items: z.array(agentPresenceSchema) }),
     "/api/v1/agents",
   ).then(({ items }) => items),
-  /**
-   * Delete this artifact's resolved (or all) comment threads in one action.
-   * Threads an active send carries are skipped and counted, never deleted.
-   */
-  clearComments: (
-    projectId: string,
-    artifactId: string,
-    state: "all" | "resolved",
-    versionId: string | null,
-  ) => request(
-    commentClearResultSchema,
-    `/api/v1/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/comments/clear`,
-    {
-      body: JSON.stringify(
-        versionId === null ? { state } : { state, versionId },
-      ),
-      headers: mutationHeaders(),
-      method: "POST",
-    },
-  ),
 };

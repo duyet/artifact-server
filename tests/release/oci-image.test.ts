@@ -420,7 +420,6 @@ function externalRuntimeEnvironment(input: {
     ARTIFACT_SERVER_CONTENT_DOMAIN: contentDomain,
     ARTIFACT_SERVER_DATABASE_URL: input.providers.dockerDatabaseUrl,
     ARTIFACT_SERVER_INSTALLATION_ID: input.installationId,
-    ARTIFACT_SERVER_LOCAL_BOOTSTRAP_TOKEN: browserToken,
     ARTIFACT_SERVER_ORIGIN: applicationOrigin,
     ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "0",
     ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE: "0",

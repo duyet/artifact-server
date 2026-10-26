@@ -119,24 +119,6 @@ export function StatusBadge({
   );
 }
 
-/** Label-value metadata row that tolerates long identifiers. */
-export function MetadataRow({
-  children,
-  label,
-}: {
-  readonly children: ReactNode;
-  readonly label: string;
-}) {
-  return (
-    <div className="grid gap-1 border-b py-3 last:border-b-0 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-      <dt className="text-sm text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="min-w-0 break-words text-sm">{children}</dd>
-    </div>
-  );
-}
-
 /** Inline-start spinner for a pending button; hidden so it never changes the button's accessible name. */
 export function ButtonSpinner() {
   return <Spinner aria-hidden="true" data-icon="inline-start" role="presentation" />;

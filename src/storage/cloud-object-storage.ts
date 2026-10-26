@@ -1,7 +1,6 @@
 import {createHash} from "node:crypto";
-import type {Readable} from "node:stream";
 
-import {Predicate, Schema} from "effect";
+import {Schema} from "effect";
 
 import type {StoredBlob} from "../core/ports.js";
 
@@ -141,34 +140,4 @@ export function verifyCloudObjectWriteSize(
     );
   }
   return stored;
-}
-
-/** Convert a provider Node stream into a byte-only Web stream. */
-export function nodeByteStream(readable: Readable): ReadableStream<Uint8Array> {
-  const iterator: AsyncIterator<unknown> = readable[Symbol.asyncIterator]();
-  return new ReadableStream<Uint8Array>({
-    cancel: async (reason) => {
-      readable.destroy(reason instanceof Error ? reason : undefined);
-      await iterator.return?.();
-    },
-    pull: async (controller) => {
-      try {
-        const result = await iterator.next();
-        if (result.done === true) {
-          controller.close();
-          return;
-        }
-        if (Predicate.isUint8Array(result.value)) {
-          controller.enqueue(result.value);
-          return;
-        }
-        readable.destroy();
-        controller.error(new TypeError(
-          "Cloud storage returned a non-byte stream chunk.",
-        ));
-      } catch (error) {
-        controller.error(error);
-      }
-    },
-  });
 }

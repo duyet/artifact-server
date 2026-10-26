@@ -1,6 +1,6 @@
 import {z} from "zod";
 
-import {ApiError} from "../api/client.js";
+import {ApiError, parseFailure, readCsrfToken} from "../api/client.js";
 import type {Bytes} from "./bytes.js";
 import type {UploadPlanRequest} from "./upload-plan.js";
 
@@ -15,25 +15,11 @@ export interface ActionTransport {
 
 const uploadsPathPrefix = "/api/v1/uploads/";
 
-function readBrowserCsrfToken(): string {
-  for (const candidate of document.cookie.split(";")) {
-    const [rawName, ...rawValue] = candidate.trim().split("=");
-    if (rawName === "artifact_csrf" || rawName === "__Host-artifact_csrf") {
-      return decodeURIComponent(rawValue.join("="));
-    }
-  }
-  throw new ApiError(
-    "CSRF_TOKEN_MISSING",
-    "Your browser session cannot authorize changes. Sign in again.",
-    403,
-  );
-}
-
 /** Same-origin requests under the signed-in browser session. */
 export function createBrowserTransport(): ActionTransport {
   return {
     authorize(headers, mutating) {
-      if (mutating) headers.set("X-CSRF-Token", readBrowserCsrfToken());
+      if (mutating) headers.set("X-CSRF-Token", readCsrfToken());
     },
     onUnauthorized() {
       window.dispatchEvent(new Event("artifact-session-expired"));
@@ -110,32 +96,6 @@ export interface StagedUpload {
   readonly files: ReadonlyMap<string, {readonly size: number; readonly uploadUrl: string}>;
   readonly projectId: string;
   readonly uploadId: string;
-}
-
-async function parseFailure(response: Response): Promise<ApiError> {
-  try {
-    const parsed = z.object({
-      error: z.object({code: z.string(), message: z.string()}),
-    }).safeParse(await response.json());
-    if (parsed.success) {
-      return new ApiError(
-        parsed.data.error.code,
-        parsed.data.error.message,
-        response.status,
-      );
-    }
-  } catch {
-    return new ApiError(
-      "INVALID_ERROR_RESPONSE",
-      "Artifact Server returned an unreadable error response.",
-      response.status,
-    );
-  }
-  return new ApiError(
-    "UNEXPECTED_ERROR_RESPONSE",
-    "Artifact Server could not complete the request.",
-    response.status,
-  );
 }
 
 interface RequestSpec {
