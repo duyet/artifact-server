@@ -17,6 +17,33 @@ const whitespace = /\s+/gu;
  */
 export const unlistedArtifactTag = "unlisted";
 
+/** What replacing an artifact's tag set changes, judged on normalized tags. */
+export interface ArtifactTagChanges {
+  /** The unlisted tag is added or removed. */
+  readonly unlisted: boolean;
+  /** Any other tag is added or removed. */
+  readonly others: boolean;
+}
+
+/**
+ * Compare stored tags with a requested replacement. Candidates are normalized
+ * the way {@link parseArtifactTags} stores them, so a spelling such as
+ * "Unlisted" counts as the unlisted tag before the full parse runs.
+ */
+export function artifactTagChanges(
+  current: readonly string[],
+  candidates: readonly string[],
+): ArtifactTagChanges {
+  const before = new Set(current);
+  const after = new Set(candidates.map(normalizeArtifactTag));
+  const others = (tags: ReadonlySet<string>) =>
+    [...tags].filter((tag) => tag !== unlistedArtifactTag).toSorted().join("\u0000");
+  return {
+    others: others(before) !== others(after),
+    unlisted: before.has(unlistedArtifactTag) !== after.has(unlistedArtifactTag),
+  };
+}
+
 /** Normalize and validate the complete artifact tag set. */
 export function parseArtifactTags(
   candidates: readonly string[],

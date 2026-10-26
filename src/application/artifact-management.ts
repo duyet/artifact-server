@@ -9,6 +9,7 @@ import {
 } from "./authorization.js";
 import { parseIdempotencyKey } from "./idempotency-key.js";
 import {
+  artifactTagChanges,
   normalizeArtifactTag,
   parseArtifactTags,
 } from "./artifact-tags.js";
@@ -578,7 +579,7 @@ function makeArtifactManagementService(
         command.projectId,
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
-      yield* authorization.requireArtifactManagement(command.principal);
+      yield* authorization.requireArtifactOwnership(command.principal, artifact);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.changeAccessSetting({
@@ -609,7 +610,21 @@ function makeArtifactManagementService(
         command.projectId,
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
-      yield* authorization.requireArtifactManagement(command.principal);
+      // Hiding an artifact from the public tree is a visibility change, so the
+      // unlisted tag follows the access rule; other tags keep the management
+      // rule. A replacement that changes nothing, such as a replayed request,
+      // passes with either, so a retry never fails where its first call passed.
+      const changes = artifactTagChanges(artifact.tags, command.tags);
+      if (changes.unlisted) {
+        yield* authorization.requireArtifactOwnership(command.principal, artifact);
+      }
+      if (
+        changes.others ||
+        (!changes.unlisted &&
+          !authorization.canManageArtifact(command.principal, artifact))
+      ) {
+        yield* authorization.requireArtifactManagement(command.principal);
+      }
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const tags = yield* parseArtifactTags(command.tags);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);

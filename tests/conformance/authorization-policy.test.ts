@@ -117,6 +117,57 @@ describe("authorization policy", () => {
     );
   });
 
+  test("artifact visibility belongs to the owner, an administrator, or an artifact manager", async () => {
+    expect.hasAssertions();
+    const artifact = artifactFixture();
+    const owner = artifact.owner.principalId;
+    const ownMemberKey: Principal = {
+      ...humanPrincipal(owner, membershipRoles.member),
+      authorizedByPrincipalId: "administrator",
+      capabilities: [principalCapabilities.createArtifact],
+    };
+    const otherMember = humanPrincipal("other-member", membershipRoles.member);
+    const otherMemberKey: Principal = {
+      ...ownMemberKey,
+      id: "other-member",
+    };
+    const administrator = humanPrincipal(
+      "administrator",
+      membershipRoles.administrator,
+    );
+    const manager = servicePrincipal(
+      "manager",
+      [principalCapabilities.manageAnyArtifact],
+    );
+    const foreignOwner: Principal = {
+      ...humanPrincipal(owner, membershipRoles.member),
+      installationId: "installation-b",
+    };
+
+    await Promise.all([ownMemberKey, administrator, manager].map((allowed) =>
+      expectAllowed((authorization) =>
+        authorization.requireArtifactOwnership(allowed, artifact)
+      )
+    ));
+    await Promise.all([otherMember, otherMemberKey, foreignOwner].map((refused) =>
+      expectDenied((authorization) =>
+        authorization.requireArtifactOwnership(refused, artifact)
+      )
+    ));
+    // A direct human member who does not own the artifact still manages its
+    // other metadata, which is what keeps non-visibility tag edits open.
+    await expectAllowed((authorization) =>
+      authorization.requireArtifactManagement(otherMember)
+    );
+    const decisions = await runtime.runPromise(AuthorizationService.use(
+      (authorization) => Effect.succeed([
+        authorization.canManageArtifact(ownMemberKey, artifact),
+        authorization.canManageArtifact(otherMember, artifact),
+      ]),
+    ));
+    expect(decisions).toEqual([true, false]);
+  });
+
   test("project discovery follows membership and explicit service authority", async () => {
     expect.hasAssertions();
     const member = humanPrincipal("member", membershipRoles.member);
