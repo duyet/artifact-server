@@ -190,6 +190,10 @@ const publicArtifactTreeSchema = z.object({
       count: z.number().int().nonnegative(),
       day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
     })),
+    updates: z.array(z.object({
+      count: z.number().int().positive(),
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    })),
     views: publicArtifactViewCountsSchema,
   })),
   truncated: z.boolean(),
@@ -2541,6 +2545,9 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const counted = publicTreeEntry(await readTree(), "Viewed proof");
     expect(counted.views).toEqual({last7Days: 1, last30Days: 1, total: 1});
     expect(counted.series).toEqual([{count: 1, day: viewDay}]);
+    // The one publish counts as one update on the pinned day, read through
+    // the Postgres version index.
+    expect(counted.updates).toEqual([{count: 1, day: viewDay}]);
 
     const database = await PostgresDatabase.inspect({
       applicationName: "artifact-server-view-collection-test",

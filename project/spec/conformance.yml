@@ -4407,3 +4407,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server and the MCP endpoint. The Postgres migration 0020 and its queries run only in CI with Docker, the browser case runs only in CI, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
+
+  - id: FRK-023
+    kind: behavior
+    behavior: The public tree carries each artifact's sparse count of versions published per UTC day in its window, and the home page chart switches between views per day and updated per day, where a day's bar filters the tree to the artifacts viewed or updated on that day by mouse and keyboard.
+    owner: web-application
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-chart}
+    acceptance:
+      behavior: {id: FRK-023-B, description: "Publish versions of two public artifacts across three days with a pinned clock and read each artifact's sparse ascending updates, with two versions on one day counted as two and no view rows added. In a browser, switch the chart between views and updates, click a day's bar to keep only the matching artifacts and their folders with a chip naming the filter, click it again to clear, and toggle a day with the arrow keys and Enter or Space, clearing it with the chip that returns focus to the day."}
+      failure: {id: FRK-023-F, description: "A version published one day before the 30-day window is absent, a restore adds no update, and a private artifact and an unlisted artifact carry no updates because neither is in the tree."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server, and the pure day filter and per-measure sums with no server and no browser. The Postgres read and the browser toggle, bar click, and keyboard path run only in CI, and no deployed run exists.
+    depends_on: [FRK-009]
+    evidence: []

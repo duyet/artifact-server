@@ -57,6 +57,7 @@ import {
   type ArtifactState,
   type ArtifactTombstone,
   type ArtifactVersion,
+  type ArtifactVersionDay,
   type ArtifactViewDay,
   type ArtifactViewTotal,
   type CommentAuthor,
@@ -1246,6 +1247,34 @@ export class SqliteArtifactRepository implements
            LIMIT ?`,
         )
         .all(unlistedArtifactTag, limit)));
+  }
+
+  readArtifactVersionDays(
+    command: ReadArtifactViewDays,
+  ): Promise<readonly ArtifactVersionDay[]> {
+    if (command.artifactIds.length === 0) return Promise.resolve([]);
+    return Promise.resolve().then(() => {
+      const placeholders = command.artifactIds.map(() => "?").join(", ");
+      // Joining through the artifact keeps the read on the
+      // (project_id, artifact_id) version index.
+      const rows = this.#database
+        .prepare(
+          `SELECT
+             versions.artifact_id AS artifactId,
+             substr(versions.created_at, 1, 10) AS day,
+             COUNT(*) AS count
+           FROM artifacts
+           JOIN versions
+             ON versions.project_id = artifacts.project_id
+            AND versions.artifact_id = artifacts.id
+           WHERE artifacts.id IN (${placeholders})
+             AND substr(versions.created_at, 1, 10) BETWEEN ? AND ?
+           GROUP BY versions.artifact_id, day
+           ORDER BY versions.artifact_id, day`,
+        )
+        .all(...command.artifactIds, command.sinceDay, command.untilDay);
+      return z.array(artifactViewDayRowSchema).parse(rows);
+    });
   }
 
   readArtifactViewDays(

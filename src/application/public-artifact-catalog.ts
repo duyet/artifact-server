@@ -17,6 +17,7 @@ import type {
   CollapsedFolderRepository,
 } from "../core/ports.js";
 import type {
+  ArtifactVersionDay,
   ArtifactViewCounts,
   ArtifactViewDay,
   ArtifactViewTotal,
@@ -51,6 +52,7 @@ export interface SetFolderDefaultStateCommand {
 export interface PublicArtifactCatalogRepository {
   readonly listCollapsedFolders: CollapsedFolderRepository["listCollapsedFolders"];
   readonly listPublicArtifacts: ArtifactRepository["listPublicArtifacts"];
+  readonly readArtifactVersionDays: ArtifactRepository["readArtifactVersionDays"];
   readonly readArtifactViewDays: ArtifactViewRepository["readArtifactViewDays"];
   readonly readArtifactViewTotals: ArtifactViewRepository["readArtifactViewTotals"];
   readonly setFolderDefaultState: CollapsedFolderRepository["setFolderDefaultState"];
@@ -123,7 +125,7 @@ function makePublicArtifactCatalogService(
       const recentSinceDay = dayOf(
         DateTime.subtractDuration(now, Duration.days(dependencies.recentDays - 1)),
       );
-      const [days, totals] = yield* readCounts(
+      const [days, totals, versionDays] = yield* readCounts(
         dependencies.repository,
         artifactIds,
         sinceDay,
@@ -142,6 +144,7 @@ function makePublicArtifactCatalogService(
           return {
             artifact,
             series,
+            updates: versionDays.filter((day) => day.artifactId === artifact.id),
             views: countViews(series, total, recentSinceDay),
           };
         }),
@@ -214,13 +217,17 @@ function readCounts(
   sinceDay: string,
   untilDay: string,
 ): Effect.Effect<
-  [readonly ArtifactViewDay[], readonly ArtifactViewTotal[]],
+  [
+    readonly ArtifactViewDay[],
+    readonly ArtifactViewTotal[],
+    readonly ArtifactVersionDay[],
+  ],
   ArtifactRepositoryFailure
 > {
   // The window is read in one pass. An empty catalog reads nothing, so an
-  // installation with no public artifacts issues no view queries at all.
+  // installation with no public artifacts issues no count queries at all.
   return Effect.gen(function*() {
-    if (artifactIds.length === 0) return [[], []] as const;
+    if (artifactIds.length === 0) return [[], [], []] as const;
     const days = yield* Effect.tryPromise({
       catch: (cause) => repositoryFailure("readArtifactViewDays", cause),
       try: () => repository.readArtifactViewDays({
@@ -233,7 +240,15 @@ function readCounts(
       catch: (cause) => repositoryFailure("readArtifactViewTotals", cause),
       try: () => repository.readArtifactViewTotals(artifactIds),
     });
-    return [days, totals] as const;
+    const versionDays = yield* Effect.tryPromise({
+      catch: (cause) => repositoryFailure("readArtifactVersionDays", cause),
+      try: () => repository.readArtifactVersionDays({
+        artifactIds,
+        sinceDay,
+        untilDay,
+      }),
+    });
+    return [days, totals, versionDays] as const;
   });
 }
 
