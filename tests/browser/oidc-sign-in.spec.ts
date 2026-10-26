@@ -41,14 +41,20 @@ test.describe("OIDC sign-in button", () => {
       expect(fixture.server.baseUrl).toBe(`http://127.0.0.1:${port}`);
       const page = fixture.page;
       let answer: "approve" | "deny" = "deny";
-      // The browser's leg of the flow: the provider page sends it straight back.
-      await page.route((url) => url.origin === provider.issuer, (route) => {
+      // Playwright never routes the request a redirect leads to, so the
+      // start response is answered here: the server's own pending cookie,
+      // and a provider page that sends the browser straight to the callback.
+      await page.route((url) => url.pathname === "/auth/oidc/start", async (route) => {
+        const started = await route.fetch({maxRedirects: 0});
+        const authorizationUrl = started.headers()["location"] ?? "";
         const back = answer === "approve"
-          ? provider.approve(route.request().url(), carol)
-          : provider.deny(route.request().url(), "access_denied");
-        return route.fulfill({
+          ? provider.approve(authorizationUrl, carol)
+          : provider.deny(authorizationUrl, "access_denied");
+        await route.fulfill({
           body: `<!doctype html><meta http-equiv="refresh" content="0; url=${back.replaceAll("&", "&amp;")}">`,
           contentType: "text/html",
+          headers: {"set-cookie": started.headers()["set-cookie"] ?? ""},
+          status: 200,
         });
       });
 
