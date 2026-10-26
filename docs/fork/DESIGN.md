@@ -606,7 +606,7 @@ The viewer adds no `message` listener. The page can post messages to it, and not
 
 ### After the frame navigates
 
-The frame's first `load` is the artifact the bar names. Any later `load` means the page left that document: a followed link, a form, or a reload. The viewer cannot read an opaque frame's URL, so it cannot say where the frame went. The bar then drops the name, the info popover, Copy link, Open raw, and Open in Review, all of which describe the first artifact, and shows **Navigated away** with a **Back to** link to the URL the tab opened. Full screen and Hide bar stay. In-page anchors and an SPA's `history.pushState` fire no `load`, so they keep the bar as it was.
+The frame's first `load` is the artifact the bar names. Any later `load` means the page left that document: a followed link, a form, or a reload. The viewer cannot read an opaque frame's URL, so it cannot say where the frame went. The bar then drops the name, the info popover with its visibility control, Copy link, and Open in Review, so nothing on it can describe or change the first artifact while the frame shows another page. It shows **Navigated away** and an **Open this page** link that reloads the tab at the URL it opened, which shows the first artifact again. Open raw stays and still opens the first artifact's page alone, as do Full screen and Hide bar. In-page anchors and an SPA's `history.pushState` fire no `load`, so they keep the bar as it was.
 
 ### Views
 
@@ -623,7 +623,7 @@ A browser that holds a session (its CSRF cookie is readable) also reads `/api/v1
 | Change | Why | Escape |
 | --- | --- | --- |
 | `location.search` carries `raw=1` | The frame's URL must differ from the viewer's. The viewer sets the parameter, so an existing `raw` value is replaced. | None needed for most pages. |
-| The address bar keeps the first URL while the page navigates inside the frame, and the bar says **Navigated away** | The viewer cannot read an opaque frame's location. | **Back to** the first artifact, or a `target=_top` link in the page. |
+| The address bar keeps the first URL while the page navigates inside the frame, and the bar says **Navigated away** | The viewer cannot read an opaque frame's location. | **Open this page** to reload the first artifact, or a `target=_top` link in the page. |
 | A page that checks `window.top === window` sees a frame | It is one. | **Open raw**. |
 
 ### Residual risk
