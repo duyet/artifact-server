@@ -1,6 +1,7 @@
 import {AxeBuilder} from "@axe-core/playwright";
-import {expect, test, type Browser} from "@playwright/test";
+import {expect, test, type Browser, type Page} from "@playwright/test";
 
+import {publishVersion} from "../support/publishing.js";
 import {publishSite} from "../support/same-host-site.js";
 import {
   createTestInstallation,
@@ -29,7 +30,161 @@ test.describe("public home page", () => {
       await removeTestInstallation(installation);
     }
   });
+
+  test("FRK-023-B: the chart switches between views and updates, and a day's bar filters the tree by mouse and keyboard", async ({browser}) => {
+    const installation = await createTestInstallation();
+    // The page draws the window that ends on the browser's UTC today, so the
+    // server clock stays on the real day and steps back one day by hand.
+    const today = new Date();
+    const yesterday = new Date(today.getTime() - 86_400_000);
+    const clock = {instant: yesterday, now() {
+      return this.instant;
+    }};
+    const server = await startTestServer(installation, {clock, contentDomain: null});
+    const context = await browser.newContext({colorScheme: "light"});
+    try {
+      await publishSite(server, installation, {
+        accessSetting: "public_link",
+        name: "Capacity plan",
+        path: "2026/11/capacity-plan",
+      });
+      clock.instant = today;
+      const agentConsole = await publishSite(server, installation, {
+        accessSetting: "public_link",
+        name: "Agent console",
+        path: "2026/10/agent-console",
+      });
+      await publishSite(server, installation, {
+        accessSetting: "public_link",
+        name: "Incident summary",
+      });
+      const revised = await publishVersion(server, installation, {
+        artifactId: agentConsole.artifact.id,
+        content: "<!doctype html><title>Agent console v2</title>",
+        expectedCurrentVersionId: agentConsole.version.id,
+        idempotencyKey: "frk-009-browser-console-v2",
+      });
+      expect(revised.response.status).toBe(201);
+      // A folder that starts collapsed must still open while a day filter
+      // matches inside it.
+      const collapsed = await fetch(`${server.baseUrl}/api/v1/folder-defaults`, {
+        body: JSON.stringify({defaultState: "collapsed", path: "2026/11"}),
+        headers: {
+          Authorization: `Bearer ${installation.apiToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "PUT",
+      });
+      expect(collapsed.status).toBe(200);
+      await fetch(`${server.baseUrl}/2026/10/agent-console/`);
+      await fetch(`${server.baseUrl}/2026/10/agent-console/`);
+      await server.flushArtifactViews();
+
+      const page = await context.newPage();
+      await page.goto(server.baseUrl);
+      await expect(page.getByText("Views per day")).toBeVisible();
+      const todayLabel = dayLabel(today);
+      const yesterdayLabel = dayLabel(yesterday);
+
+      // Views: a click on today's bar keeps only the viewed artifact and the
+      // folders above it.
+      const viewedToday = page.getByRole("button", {name: `${todayLabel}: 2 views`});
+      const todayBar = page.locator("[data-slot=chart] .recharts-bar-rectangle").last();
+      await expectColumnCovers(viewedToday, todayBar);
+      await todayBar.click();
+      await expect(viewedToday).toHaveAttribute("aria-pressed", "true");
+      const viewedChip = page.getByRole("button", {name: `Viewed on ${todayLabel}, clear`});
+      await expect(viewedChip).toBeVisible();
+      await expect(visibleArtifacts(page)).toHaveText(["Agent console"]);
+      await expect(page.getByRole("heading", {name: "2026/10"})).toBeVisible();
+      await expect(page.getByRole("heading", {name: "2026/11"})).toHaveCount(0);
+      await expect(page.getByRole("heading", {name: "Without a path"})).toHaveCount(0);
+      const violations = await new AxeBuilder({page}).analyze();
+      expect(violations.violations).toEqual([]);
+      await page.screenshot({
+        fullPage: true,
+        path: "test-results/browser/home-page-viewed-filter.png",
+      });
+
+      // The same bar again clears the filter.
+      await todayBar.click();
+      await expect(viewedChip).toHaveCount(0);
+      await expect(viewedToday).toHaveAttribute("aria-pressed", "false");
+      await expect(visibleArtifacts(page)).toHaveText(["Agent console", "Incident summary"]);
+
+      // Updates: the chart now counts versions, and a day narrows the tree to
+      // what was published on it.
+      await page.getByRole("button", {exact: true, name: "Updated"}).click();
+      await expect(page.getByText("Updated per day")).toBeVisible();
+      const updatedToday = page.getByRole("button", {name: `${todayLabel}: 3 versions`});
+      const updatedYesterday = page.getByRole("button", {name: `${yesterdayLabel}: 1 version`});
+      await expect(updatedYesterday).toBeVisible();
+
+      // The keyboard path: one tab stop on the newest day, arrows to move,
+      // Enter or Space to toggle.
+      await updatedToday.focus();
+      await page.keyboard.press("ArrowLeft");
+      await expect(updatedYesterday).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(updatedYesterday).toHaveAttribute("aria-pressed", "true");
+      const updatedChip = page.getByRole("button", {name: `Updated on ${yesterdayLabel}, clear`});
+      await expect(updatedChip).toBeVisible();
+      await expect(visibleArtifacts(page)).toHaveText(["Capacity plan"]);
+      await expect(page.getByRole("button", {name: "2026/11"}))
+        .toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByRole("heading", {name: "2026/10"})).toHaveCount(0);
+      await page.screenshot({
+        fullPage: true,
+        path: "test-results/browser/home-page-updated-filter.png",
+      });
+      await page.keyboard.press("Enter");
+      await expect(updatedChip).toHaveCount(0);
+      // Without the filter the folder returns to its collapsed default.
+      await expect(page.getByRole("button", {name: "2026/11"}))
+        .toHaveAttribute("aria-expanded", "false");
+
+      await page.keyboard.press("ArrowRight");
+      await expect(updatedToday).toBeFocused();
+      await page.keyboard.press("Space");
+      await expect(visibleArtifacts(page)).toHaveText(["Agent console", "Incident summary"]);
+      // The chip clears too, and hands focus back to the day it named.
+      await page.getByRole("button", {name: `Updated on ${todayLabel}, clear`}).click();
+      await expect(visibleArtifacts(page)).toHaveText(["Agent console", "Incident summary"]);
+      await expect(updatedToday).toBeFocused();
+    } finally {
+      await context.close();
+      await server.stop();
+      await removeTestInstallation(installation);
+    }
+  });
 });
+
+/** The day as the page prints it: "26 Oct", on the UTC calendar. */
+function dayLabel(instant: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(instant);
+}
+
+/** The artifact links the tree currently shows, in page order. */
+function visibleArtifacts(page: Page) {
+  return page.getByRole("main").getByRole("link").filter({hasNotText: "Workbench"});
+}
+
+/** A day's keyboard target must sit over the bar it names. */
+async function expectColumnCovers(
+  dayButton: ReturnType<Page["locator"]>,
+  bar: ReturnType<Page["locator"]>,
+): Promise<void> {
+  const column = await dayButton.boundingBox();
+  const mark = await bar.boundingBox();
+  if (column === null || mark === null) throw new Error("The day column or its bar is not drawn.");
+  const centre = mark.x + mark.width / 2;
+  expect(centre).toBeGreaterThan(column.x);
+  expect(centre).toBeLessThan(column.x + column.width);
+}
 
 /** Publish one artifact per month, plus one with no readable path. */
 async function publishFixture(

@@ -3,6 +3,7 @@ import {describe, expect, test} from "vitest";
 import {
   buildPublicArtifactTree,
   densifyDailySeries,
+  entriesOnDay,
   sparklineBars,
   sparklineBox,
   sumDailySeries,
@@ -21,6 +22,7 @@ function entry(
     path,
     series: [],
     updatedAt,
+    updates: [],
     url: `https://artifacts.example.internal/${path ?? `loose-${name}`}/`,
     views: {last7Days: 0, last30Days: 0, total: 0},
     ...overrides,
@@ -134,19 +136,77 @@ describe("daily view series", () => {
     expect(densifyDailySeries([], days)).toEqual([0, 0, 0, 0, 0]);
   });
 
-  test("the page chart sums the rows, so it cannot disagree with them", () => {
-    const summed = sumDailySeries([
+  test("the page chart sums the rows of the chosen measure, so it cannot disagree with them", () => {
+    const entries = [
       entry("A", "2026/10/a", "2026-10-17T00:00:00.000Z", {
         series: [{count: 2, day: "2026-10-17"}, {count: 1, day: "2026-10-15"}],
+        updates: [{count: 3, day: "2026-10-16"}],
       }),
       entry("B", "2026/10/b", "2026-10-17T00:00:00.000Z", {
         series: [{count: 5, day: "2026-10-17"}],
+        updates: [{count: 1, day: "2026-10-16"}, {count: 1, day: "2026-10-17"}],
       }),
-    ]);
-    expect(summed).toEqual([
+    ];
+    expect(sumDailySeries(entries, "views")).toEqual([
       {count: 1, day: "2026-10-15"},
       {count: 7, day: "2026-10-17"},
     ]);
+    expect(sumDailySeries(entries, "updates")).toEqual([
+      {count: 4, day: "2026-10-16"},
+      {count: 1, day: "2026-10-17"},
+    ]);
+  });
+});
+
+function names(list: readonly PublicArtifactTreeEntry[]): readonly string[] {
+  return list.map((item) => item.name);
+}
+
+describe("day filter", () => {
+  const entries = [
+    entry("Agent console", "2026/10/agent-console", "2026-10-16T00:00:00.000Z", {
+      series: [{count: 4, day: "2026-10-17"}],
+      updates: [{count: 1, day: "2026-10-16"}],
+    }),
+    entry("Cost report", "2026/10/cost-report", "2026-10-17T00:00:00.000Z", {
+      updates: [{count: 2, day: "2026-10-17"}],
+    }),
+    entry("Capacity plan", "2026/11/capacity-plan", "2026-10-17T00:00:00.000Z", {
+      series: [{count: 1, day: "2026-10-16"}],
+      updates: [{count: 1, day: "2026-10-17"}],
+    }),
+    entry("Loose report", null, "2026-10-17T00:00:00.000Z", {
+      series: [{count: 1, day: "2026-10-17"}],
+    }),
+  ];
+  test("views and updates on one day pick different artifacts", () => {
+    expect(names(entriesOnDay(entries, "views", "2026-10-17")))
+      .toEqual(["Agent console", "Loose report"]);
+    expect(names(entriesOnDay(entries, "updates", "2026-10-17")))
+      .toEqual(["Cost report", "Capacity plan"]);
+    expect(names(entriesOnDay(entries, "updates", "2026-10-16")))
+      .toEqual(["Agent console"]);
+    expect(entriesOnDay(entries, "views", "2026-10-01")).toEqual([]);
+  });
+
+  test("the filtered tree keeps the folder path to each match and drops empty folders", () => {
+    const tree = buildPublicArtifactTree(
+      entriesOnDay(entries, "views", "2026-10-17"),
+    );
+    expect(tree.folders.map((folder) => folder.path)).toEqual(["2026"]);
+    expect(tree.folders[0]?.folders.map((folder) => folder.path))
+      .toEqual(["2026/10"]);
+    expect(names(tree.folders[0]?.folders[0]?.artifacts ?? []))
+      .toEqual(["Agent console"]);
+    expect(names(tree.ungrouped)).toEqual(["Loose report"]);
+
+    const updated = buildPublicArtifactTree(
+      entriesOnDay(entries, "updates", "2026-10-17"),
+    );
+    // Both folders' newest artifact shares one instant, so the label decides.
+    expect(updated.folders[0]?.folders.map((folder) => folder.path))
+      .toEqual(["2026/10", "2026/11"]);
+    expect(updated.ungrouped).toEqual([]);
   });
 });
 
