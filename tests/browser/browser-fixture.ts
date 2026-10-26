@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 
 import type {BrowserAccess} from "../../src/core/browser-access.js";
+import type {ViewerLogo} from "../../src/core/viewer-logo.js";
 import {
   createTestInstallation,
   removeTestInstallation,
@@ -28,15 +29,18 @@ export async function startBrowserFixture(
   browser: Browser,
   options: {
     readonly browserAccess?: BrowserAccess;
+    readonly colorScheme?: "dark" | "light";
     readonly contentDomain?: string | null;
+    readonly logo?: ViewerLogo;
     readonly timezoneId?: string;
   } = {},
 ): Promise<BrowserFixture> {
-  const {browserAccess, contentDomain, ...contextOptions} = options;
+  const {browserAccess, contentDomain, logo, ...contextOptions} = options;
   const installation = await createTestInstallation();
   let serverOptions: Parameters<typeof startTestServer>[1] = {};
   if (browserAccess !== undefined) serverOptions = {...serverOptions, browserAccess};
   if (contentDomain !== undefined) serverOptions = {...serverOptions, contentDomain};
+  if (logo !== undefined) serverOptions = {...serverOptions, logo};
   const server = await startTestServer(installation, serverOptions);
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
