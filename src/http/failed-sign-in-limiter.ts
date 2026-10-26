@@ -13,11 +13,11 @@ export const defaultFailedSignInPolicy: FailedSignInPolicy = {
   windowMilliseconds: 60_000,
 };
 
-/** Failed directory sign-ins per username, kept long so a spray across clients stays slow. */
-export const directoryUsernameFailedSignInPolicy: FailedSignInPolicy = {
+/** Failed OIDC callbacks per client address. Nothing is guessed, so the bound is loose. */
+export const oidcCallbackFailedSignInPolicy: FailedSignInPolicy = {
   maximumAddresses: 10_000,
-  maximumFailures: 10,
-  windowMilliseconds: 15 * 60_000,
+  maximumFailures: 20,
+  windowMilliseconds: 60_000,
 };
 
 interface FailureWindow {

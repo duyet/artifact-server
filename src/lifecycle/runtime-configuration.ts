@@ -15,11 +15,9 @@ import {
   type ViewerLogoSource,
 } from "../core/viewer-logo.js";
 import {
-  unknownDirectoryUserPolicies,
-  type UnknownDirectoryUserPolicy,
-} from "../core/directory-sign-in.js";
-import type {LdapDirectoryConfiguration} from
-  "../directory/ldap-directory-authenticator.js";
+  unknownOidcUserPolicies,
+  type UnknownOidcUserPolicy,
+} from "../core/oidc-sign-in.js";
 
 import type {
   ObjectStorageProviderFactory,
@@ -65,11 +63,13 @@ const urlStringSchema = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^\s]+$/u),
 );
 const systemErrorSchema = Schema.Struct({code: Schema.optional(Schema.String)});
-// Exactly one `{username}`, as the whole value of one attribute, so the
-// escaped username can never become a second RDN or a SASL mechanism name.
-const ldapUserDnTemplatePattern =
-  /^(?:[^{}]*[,+])?[A-Za-z][A-Za-z0-9.-]*=\{username\}(?:[,+][^{}]*)?$/u;
-const ldapAttributeNamePattern = /^[A-Za-z][A-Za-z0-9-]{0,63}$/u;
+const oidcClientIdSchema = Schema.String.check(Schema.isPattern(/^[\x21-\x7E]{1,256}$/u));
+const oidcClientSecretSchema = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(1_024),
+);
+// Space-separated scope tokens (RFC 6749 section 3.3).
+const oidcScopesPattern = /^[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*$/u;
 
 /** Runtime mode selected by one lifecycle command. */
 export type DeploymentMode = "compact" | "external-storage";
@@ -82,10 +82,25 @@ export type CredentialSource =
   | "provider_chain";
 type ConfiguredCredentialSource = "environment" | "file";
 
-/** LDAP browser sign-in, present only when `ARTIFACT_SERVER_LDAP_URL` is set. */
-export interface LdapSignInConfiguration {
-  readonly directory: LdapDirectoryConfiguration;
-  readonly unknownUsers: UnknownDirectoryUserPolicy;
+/** OIDC browser sign-in, present only when `ARTIFACT_SERVER_OIDC_ISSUER` is set. */
+export interface OidcSignInConfiguration {
+  readonly clientId: string;
+  readonly clientSecret: LoadedSecret;
+  /** An https URL without a trailing slash. */
+  readonly issuer: string;
+  readonly redirectUri: string;
+  readonly scopes: string;
+  readonly unknownUsers: UnknownOidcUserPolicy;
+}
+
+/** What `config check` reports about OIDC sign-in. The secret appears only as its source. */
+export interface OidcSignInSummary {
+  readonly clientId: string;
+  readonly clientSecret: ConfiguredCredentialSource;
+  readonly issuer: string;
+  readonly redirectUri: string;
+  readonly scopes: string;
+  readonly unknownUsers: UnknownOidcUserPolicy;
 }
 
 /** Parsed compact configuration used by serving and lifecycle commands. */
@@ -100,8 +115,8 @@ export interface CompactRuntimeConfiguration {
   readonly deploymentMode: "compact";
   readonly hostname: string;
   readonly installation: CompactInstallationMetadata;
-  readonly ldapSignIn: LdapSignInConfiguration | null;
   readonly logo: ViewerLogo | null;
+  readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -124,9 +139,9 @@ export interface ExternalStorageRuntimeConfiguration {
   readonly deploymentMode: "external-storage";
   readonly hostname: string;
   readonly installationId: string;
-  readonly ldapSignIn: LdapSignInConfiguration | null;
   readonly logo: ViewerLogo | null;
   readonly objectStorage: ObjectStorageProviderFactory;
+  readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
   readonly postgresMaxConnections: number;
   readonly readinessWithdrawalMilliseconds: number;
@@ -139,14 +154,6 @@ export interface ExternalMigrationConfiguration {
   readonly databaseCredentialSource: ConfiguredCredentialSource;
   readonly databaseUrl: Redacted.Redacted;
   readonly installationId: string;
-}
-
-/** What `config check` reports about LDAP sign-in. */
-export interface LdapSignInSummary {
-  readonly caFile: boolean;
-  readonly requiredGroup: string | null;
-  readonly unknownUsers: UnknownDirectoryUserPolicy;
-  readonly url: string;
 }
 
 /** What `config check` reports about the viewer logo. */
@@ -167,9 +174,9 @@ export interface RuntimeConfigurationSummary {
   readonly deploymentMode: DeploymentMode;
   readonly hostname: string;
   readonly installationId: string;
-  readonly ldapSignIn: LdapSignInSummary | null;
   readonly logo: ViewerLogoSummary | null;
   readonly objectStorageProvider: "filesystem" | ObjectStorageProviderKind;
+  readonly oidcSignIn: OidcSignInSummary | null;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -260,8 +267,8 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     deploymentMode: "compact",
     hostname: yield* parseHostname(input.hostname),
     installation,
-    ldapSignIn: yield* parseLdapSignIn(input.environment),
     logo: yield* parseViewerLogo(input.environment),
+    oidcSignIn: yield* parseOidcSignIn(input.environment, applicationOrigin),
     port: yield* parsePort(input.port),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
       input.environment,
@@ -276,6 +283,76 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     stagingCleanupPolicy: yield* parseStagingCleanupPolicy(input.environment),
   };
 });
+
+const parseOidcSignIn = Effect.fn("parseOidcSignIn")(function*(
+  environment: NodeJS.ProcessEnv,
+  applicationOrigin: string,
+): Effect.fn.Return<OidcSignInConfiguration | null, RuntimeConfigurationError> {
+  const issuer = environment["ARTIFACT_SERVER_OIDC_ISSUER"];
+  if (issuer === undefined || issuer === "") return null;
+  const scopes = environment["ARTIFACT_SERVER_OIDC_SCOPES"] ?? "";
+  if (scopes !== "" && (!oidcScopesPattern.test(scopes) || !scopes.split(" ").includes("openid"))) {
+    return yield* invalidValue(
+      "ARTIFACT_SERVER_OIDC_SCOPES",
+      "ARTIFACT_SERVER_OIDC_SCOPES must be space-separated scopes that include openid.",
+    );
+  }
+  return {
+    clientId: yield* parseRequiredEnvironment(
+      "ARTIFACT_SERVER_OIDC_CLIENT_ID",
+      environment["ARTIFACT_SERVER_OIDC_CLIENT_ID"],
+      oidcClientIdSchema,
+    ),
+    clientSecret: yield* readSecret(
+      environment,
+      "ARTIFACT_SERVER_OIDC_CLIENT_SECRET",
+      oidcClientSecretSchema,
+    ),
+    issuer: yield* parseOidcIssuer(issuer),
+    redirectUri: new URL("/auth/oidc/callback", applicationOrigin).toString(),
+    scopes: scopes === "" ? "openid email profile" : scopes,
+    unknownUsers: yield* parseChoice(
+      environment,
+      "ARTIFACT_SERVER_OIDC_UNKNOWN_USERS",
+      [unknownOidcUserPolicies.reject, unknownOidcUserPolicies.admit],
+    ),
+  };
+});
+
+function parseOidcIssuer(value: string): Effect.Effect<string, RuntimeConfigurationError> {
+  const field = "ARTIFACT_SERVER_OIDC_ISSUER";
+  const refused = invalidValue(
+    field,
+    `${field} must be an https URL without credentials, query, or fragment.`,
+  );
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return refused;
+  }
+  if (
+    url.protocol !== "https:" || url.username !== "" || url.password !== "" ||
+    url.search !== "" || url.hash !== ""
+  ) {
+    return refused;
+  }
+  return Effect.succeed(url.toString().replace(/\/+$/u, ""));
+}
+
+/** The first allowed value is the default. */
+function parseChoice<const T extends string>(
+  environment: NodeJS.ProcessEnv,
+  field: string,
+  allowed: readonly [T, ...T[]],
+): Effect.Effect<T, RuntimeConfigurationError> {
+  const value = environment[field];
+  if (value === undefined || value === "") return Effect.succeed(allowed[0]);
+  const choice = allowed.find((candidate) => candidate === value);
+  return choice === undefined
+    ? invalidValue(field, `${field} must be one of ${allowed.join(", ")}.`)
+    : Effect.succeed(choice);
+}
 
 /** Parse external-storage configuration and secret files without connecting. */
 export const parseExternalStorageRuntimeConfiguration = Effect.fn(
@@ -333,9 +410,9 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
       environment["ARTIFACT_SERVER_INSTALLATION_ID"],
       installationIdSchema,
     ),
-    ldapSignIn: yield* parseLdapSignIn(environment),
     logo: yield* parseViewerLogo(environment),
     objectStorage: configuredObjectStorage.factory,
+    oidcSignIn: yield* parseOidcSignIn(environment, applicationOrigin),
     port: yield* parsePort(input.port),
     postgresMaxConnections: yield* parsePostgresMaxConnections(environment),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
@@ -351,135 +428,6 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
     stagingCleanupPolicy: yield* parseStagingCleanupPolicy(environment),
   };
 });
-
-const parseLdapSignIn = Effect.fn("parseLdapSignIn")(function*(
-  environment: NodeJS.ProcessEnv,
-): Effect.fn.Return<LdapSignInConfiguration | null, RuntimeConfigurationError> {
-  const url = environment["ARTIFACT_SERVER_LDAP_URL"];
-  if (url === undefined || url === "") return null;
-  const allowInsecure = yield* parseLdapChoice(
-    environment,
-    "ARTIFACT_SERVER_LDAP_ALLOW_INSECURE",
-    ["false", "true"],
-  );
-  yield* assertLdapUrl(url, allowInsecure === "true");
-  const userDnTemplate = environment["ARTIFACT_SERVER_LDAP_USER_DN"];
-  if (userDnTemplate === undefined || userDnTemplate === "") {
-    return yield* missingValue("ARTIFACT_SERVER_LDAP_USER_DN");
-  }
-  if (!ldapUserDnTemplatePattern.test(userDnTemplate)) {
-    return yield* invalidValue(
-      "ARTIFACT_SERVER_LDAP_USER_DN",
-      "ARTIFACT_SERVER_LDAP_USER_DN must be a DN with {username} as one whole attribute value, such as uid={username},cn=users,dc=example,dc=com.",
-    );
-  }
-  const caFile = environment["ARTIFACT_SERVER_LDAP_CA_FILE"];
-  const requiredGroupDn = environment["ARTIFACT_SERVER_LDAP_REQUIRED_GROUP"]?.trim();
-  return {
-    directory: {
-      caCertificates: caFile === undefined || caFile === ""
-        ? null
-        : yield* readLdapCaCertificates(caFile),
-      displayNameAttribute: yield* parseLdapAttribute(
-        environment,
-        "ARTIFACT_SERVER_LDAP_NAME_ATTRIBUTE",
-        "displayName",
-      ),
-      emailAttribute: yield* parseLdapAttribute(
-        environment,
-        "ARTIFACT_SERVER_LDAP_EMAIL_ATTRIBUTE",
-        "mail",
-      ),
-      requiredGroupDn: requiredGroupDn === undefined || requiredGroupDn === ""
-        ? null
-        : requiredGroupDn,
-      timeoutMilliseconds: yield* parsePositiveInteger(
-        environment,
-        "ARTIFACT_SERVER_LDAP_TIMEOUT_MS",
-        5_000,
-      ),
-      url,
-      userDnTemplate,
-    },
-    unknownUsers: yield* parseLdapChoice(
-      environment,
-      "ARTIFACT_SERVER_LDAP_UNKNOWN_USERS",
-      [unknownDirectoryUserPolicies.reject, unknownDirectoryUserPolicies.admit],
-    ),
-  };
-});
-
-function assertLdapUrl(
-  value: string,
-  allowInsecure: boolean,
-): Effect.Effect<void, RuntimeConfigurationError> {
-  const field = "ARTIFACT_SERVER_LDAP_URL";
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return invalidValue(field, `${field} must be an ldaps:// URL.`);
-  }
-  if (
-    url.hostname === "" || url.username !== "" || url.password !== "" ||
-    (url.pathname !== "" && url.pathname !== "/") || url.search !== "" || url.hash !== ""
-  ) {
-    return invalidValue(field, `${field} must name only a host and port.`);
-  }
-  if (url.protocol === "ldaps:") return Effect.void;
-  if (url.protocol === "ldap:" && allowInsecure) return Effect.void;
-  return invalidValue(
-    field,
-    url.protocol === "ldap:"
-      ? `${field} sends passwords in clear text with ldap://. Use ldaps://, or set ARTIFACT_SERVER_LDAP_ALLOW_INSECURE=true for a test directory.`
-      : `${field} must be an ldaps:// URL.`,
-  );
-}
-
-/** The first allowed value is the default. */
-function parseLdapChoice<const T extends string>(
-  environment: NodeJS.ProcessEnv,
-  field: string,
-  allowed: readonly [T, ...T[]],
-): Effect.Effect<T, RuntimeConfigurationError> {
-  const value = environment[field];
-  if (value === undefined || value === "") return Effect.succeed(allowed[0]);
-  const choice = allowed.find((candidate) => candidate === value);
-  return choice === undefined
-    ? invalidValue(field, `${field} must be one of ${allowed.join(", ")}.`)
-    : Effect.succeed(choice);
-}
-
-function parseLdapAttribute(
-  environment: NodeJS.ProcessEnv,
-  field: string,
-  fallback: string,
-): Effect.Effect<string, RuntimeConfigurationError> {
-  const value = environment[field];
-  if (value === undefined || value === "") return Effect.succeed(fallback);
-  return ldapAttributeNamePattern.test(value)
-    ? Effect.succeed(value)
-    : invalidValue(field, `${field} must be an LDAP attribute name.`);
-}
-
-function readLdapCaCertificates(
-  caFile: string,
-): Effect.Effect<string, RuntimeConfigurationError> {
-  const field = "ARTIFACT_SERVER_LDAP_CA_FILE";
-  return Effect.tryPromise({
-    catch: () => new RuntimeConfigurationError({
-      field,
-      message: `${field} is not a readable file.`,
-      reason: "path_unavailable",
-    }),
-    try: () => readFile(caFile, "utf8"),
-  }).pipe(
-    Effect.flatMap((pem) =>
-      pem.includes("-----BEGIN CERTIFICATE-----")
-        ? Effect.succeed(pem)
-        : invalidValue(field, `${field} must hold PEM certificates.`)),
-  );
-}
 
 interface ParsedObjectStorage {
   readonly accessKeySource: CredentialSource;
@@ -576,18 +524,20 @@ const parseS3ObjectStorage = Effect.fn("parseS3ObjectStorage")(
   },
 );
 
-/** Render the safe, stable subset of one parsed runtime configuration. */
-function summarizeLdapSignIn(
-  configuration: LdapSignInConfiguration | null,
-): LdapSignInSummary | null {
+function summarizeOidcSignIn(
+  configuration: OidcSignInConfiguration | null,
+): OidcSignInSummary | null {
   return configuration === null ? null : {
-    caFile: configuration.directory.caCertificates !== null,
-    requiredGroup: configuration.directory.requiredGroupDn,
+    clientId: configuration.clientId,
+    clientSecret: configuration.clientSecret.source,
+    issuer: configuration.issuer,
+    redirectUri: configuration.redirectUri,
+    scopes: configuration.scopes,
     unknownUsers: configuration.unknownUsers,
-    url: configuration.directory.url,
   };
 }
 
+/** Render the safe, stable subset of one parsed runtime configuration. */
 export function summarizeRuntimeConfiguration(
   configuration: CompactRuntimeConfiguration | ExternalStorageRuntimeConfiguration,
 ): RuntimeConfigurationSummary {
@@ -602,9 +552,9 @@ export function summarizeRuntimeConfiguration(
       deploymentMode: configuration.deploymentMode,
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
-      ldapSignIn: summarizeLdapSignIn(configuration.ldapSignIn),
       logo: summarizeViewerLogo(configuration.logo),
       objectStorageProvider: "filesystem",
+      oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
       port: configuration.port,
       readinessWithdrawalMilliseconds:
         configuration.readinessWithdrawalMilliseconds,
@@ -623,9 +573,9 @@ export function summarizeRuntimeConfiguration(
     deploymentMode: configuration.deploymentMode,
     hostname: configuration.hostname,
     installationId: configuration.installationId,
-    ldapSignIn: summarizeLdapSignIn(configuration.ldapSignIn),
     logo: summarizeViewerLogo(configuration.logo),
     objectStorageProvider: configuration.objectStorage.kind,
+    oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
     port: configuration.port,
     readinessWithdrawalMilliseconds:
       configuration.readinessWithdrawalMilliseconds,

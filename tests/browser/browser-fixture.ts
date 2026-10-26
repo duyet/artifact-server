@@ -32,15 +32,17 @@ export async function startBrowserFixture(
     readonly colorScheme?: "dark" | "light";
     readonly contentDomain?: string | null;
     readonly logo?: ViewerLogo;
+    readonly port?: number;
     readonly timezoneId?: string;
   } = {},
 ): Promise<BrowserFixture> {
-  const {browserAccess, contentDomain, logo, ...contextOptions} = options;
+  const {browserAccess, contentDomain, logo, port, ...contextOptions} = options;
   const installation = await createTestInstallation();
   let serverOptions: Parameters<typeof startTestServer>[1] = {};
   if (browserAccess !== undefined) serverOptions = {...serverOptions, browserAccess};
   if (contentDomain !== undefined) serverOptions = {...serverOptions, contentDomain};
   if (logo !== undefined) serverOptions = {...serverOptions, logo};
+  if (port !== undefined) serverOptions = {...serverOptions, port};
   const server = await startTestServer(installation, serverOptions);
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();

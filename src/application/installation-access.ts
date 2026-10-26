@@ -18,14 +18,11 @@ import type {
   IdentityRepositoryFailure,
   LoginAttemptRejected,
 } from "../core/errors.js";
-import {
-  type DirectoryIdentity,
-  directoryRejectionReasons,
-  DirectorySignInRejected,
-  unknownDirectoryUserPolicies,
-  type UnknownDirectoryUserPolicy,
-} from "../core/directory-sign-in.js";
 import type {CreateApplicationSessionRecord} from "../core/identity-ports.js";
+import {
+  unknownOidcUserPolicies,
+  type UnknownOidcUserPolicy,
+} from "../core/oidc-sign-in.js";
 import {
   type ApplicationSession,
   type InstallationMember,
@@ -287,16 +284,18 @@ export interface InstallationAccessOperations {
     IdentityConflict | IdentityRepositoryFailure
   >;
   /**
-   * Issue a member session for a directory user the directory has already
-   * verified. The first email that names an active member wins. With no such
-   * member, `admit` creates one with role member and `reject` refuses.
+   * Issue a member session for an email an identity provider has verified.
+   * Only an active member with that email matches. With none, `admit` creates
+   * one with role member and `reject` refuses. A deactivated member's email
+   * stays refused either way.
    */
-  readonly loginWithDirectoryIdentity: (
-    identity: DirectoryIdentity,
-    unknownUsers: UnknownDirectoryUserPolicy,
+  readonly loginWithVerifiedEmail: (
+    email: string,
+    displayName: string | null,
+    unknownUsers: UnknownOidcUserPolicy,
   ) => Effect.Effect<
     IssuedApplicationSession,
-    DirectorySignInRejected | IdentityRepositoryFailure
+    IdentityNotFound | IdentityRepositoryFailure
   >;
   /** Issue a browser session that acts as the presented managed API key. */
   readonly loginWithApiKey: (
@@ -560,51 +559,36 @@ function makeInstallationAccessService(
     );
   });
 
-  const loginWithDirectoryIdentity = Effect.fn(
-    "InstallationAccessService.loginWithDirectoryIdentity",
-  )(function*(identity: DirectoryIdentity, unknownUsers: UnknownDirectoryUserPolicy) {
-    const emails: string[] = [];
-    for (const email of identity.emails) {
-      const normalized = yield* normalizeEmail(email).pipe(Effect.option);
-      if (normalized._tag === "Some") emails.push(normalized.value);
-    }
-    const noMember = new DirectorySignInRejected({
-      reason: directoryRejectionReasons.noMember,
-    });
-    // Only the entry's first email names its member. Other values may be
-    // aliases or delegated mailboxes that belong to someone else.
-    const firstEmail = yield* normalizeEmail(identity.emails[0]).pipe(
-      Effect.mapError(() => noMember),
-    );
+  const loginWithVerifiedEmail = Effect.fn(
+    "InstallationAccessService.loginWithVerifiedEmail",
+  )(function*(
+    rawEmail: string,
+    displayName: string | null,
+    unknownUsers: UnknownOidcUserPolicy,
+  ) {
+    const noMember = new IdentityNotFound({message: "No active member has this email."});
+    // Lowercasing folds some non-ASCII letters onto ASCII ones (U+212A to k),
+    // so only an ASCII email may name a member.
+    if (!asciiPattern.test(rawEmail)) return yield* noMember;
+    const email = yield* normalizeEmail(rawEmail).pipe(Effect.mapError(() => noMember));
     const findMember = () =>
-      dependencies.repository.findActiveMemberByEmail(
-        dependencies.installationId,
-        firstEmail,
-      );
+      dependencies.repository.findActiveMemberByEmail(dependencies.installationId, email);
     let member = yield* findMember();
-    if (member === null) {
-      if (unknownUsers === unknownDirectoryUserPolicies.reject) {
-        return yield* noMember;
-      }
-      // Any email of an existing member, active or deactivated, keeps the whole
-      // entry out, whatever order the directory returns its values in.
-      const members = yield* dependencies.repository.listMembers(dependencies.installationId);
-      if (members.some((existing) => emails.includes(existing.email))) {
-        return yield* noMember;
-      }
-      // A concurrent sign-in may admit the same email first; then it is a member.
+    if (member === null && unknownUsers === unknownOidcUserPolicies.admit) {
+      // A deactivated member's email conflicts, and so does a concurrent
+      // admission; the second lookup then finds only an active member.
       member = yield* dependencies.repository.admitMember({
         createdAt: dependencies.clock.now().toISOString(),
-        displayName: identity.displayName ?? identity.username,
-        email: firstEmail,
+        displayName: displayName ?? email,
+        email,
         id: dependencies.ids.memberId(),
         installationId: dependencies.installationId,
         role: membershipRoles.member,
       }).pipe(
         Effect.catchTag("IdentityConflict", () => findMember()),
       );
-      if (member === null) return yield* noMember;
     }
+    if (member === null) return yield* noMember;
     return yield* issueMemberSession(member);
   });
 
@@ -889,7 +873,7 @@ function makeInstallationAccessService(
     listApiKeys,
     listMembers,
     loginWithApiKey,
-    loginWithDirectoryIdentity,
+    loginWithVerifiedEmail,
     loginWithLocalBrowserToken,
     revokeApiKey,
     revokeSession,
@@ -938,6 +922,8 @@ function invalidApiKey(): Effect.Effect<never, AuthenticationRequired> {
     message: "A valid Artifact Server API key is required.",
   }));
 }
+
+const asciiPattern = /^[\x20-\x7E]*$/u;
 
 const normalizeEmail = Effect.fn("InstallationAccessService.normalizeEmail")(
   function*(value: string): Effect.fn.Return<string, IdentityConflict> {

@@ -62,21 +62,28 @@ import {
   AuthorizationDenied,
   type ArtifactServerFailure,
   ContentBootstrapRejected,
-  DirectoryUnavailable,
   errorCodes,
   InvalidPagination,
   isArtifactServerFailure,
   VersionNotFound,
 } from "../core/errors.js";
 import type { IssuedApplicationSession } from "../core/installation-identity.js";
-import { signInWithDirectory } from "../application/directory-sign-in.js";
 import {
   browserAccessModes,
   browserLoginKinds,
   defaultAccessSetting,
-  directorySignIn,
+  oidcSignIn,
   type BrowserAccess,
 } from "../core/browser-access.js";
+import {oidcFailureReports} from "../core/oidc-sign-in.js";
+import {
+  completeOidcSignIn,
+  type OidcCallback,
+  type PendingOidcSignIn,
+  pendingOidcSignInLifetimeMilliseconds,
+  safeReturnTo,
+  startOidcSignIn,
+} from "../application/oidc-sign-in.js";
 import {
   membershipRoles,
   principalCapabilities,
@@ -154,8 +161,8 @@ import {
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
 import {
-  directoryUsernameFailedSignInPolicy,
   FailedSignInLimiter,
+  oidcCallbackFailedSignInPolicy,
 } from "./failed-sign-in-limiter.js";
 import {
   attachmentContentDisposition,
@@ -475,31 +482,19 @@ const issueApiKeySchema = z.object({
 const apiKeySignInSchema = z.object({
   apiKey: z.string().min(1).max(1_024),
 }).strict();
-// Letters, digits, and `._@-` only, so a username carries no DN syntax and
-// nothing a directory might drop or fold into another user's name.
-const directoryUsernamePattern = /^[\p{L}\p{N}._@-]{1,200}$/u;
-const directorySignInSchema = z.object({
-  password: z.string().min(1).max(1_024),
-  // Null for a username outside the pattern, which is refused like a wrong password.
-  username: z.string().transform((username) => {
-    const normalized = username.normalize("NFC");
-    return directoryUsernamePattern.test(normalized) ? normalized : null;
-  }),
+const oidcCodeCallbackSchema = z.object({
+  code: z.string().min(1).max(4_096),
+  state: z.string().min(16).max(256),
+});
+// RFC 6749 error codes. Anything else is logged as unrecognized, never echoed.
+const oidcErrorCodePattern = /^[a-z_]{1,64}$/u;
+const pendingOidcSignInSchema = z.object({
+  codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/u),
+  expiresAt: z.number().int(),
+  nonce: z.string().min(16).max(256),
+  returnTo: z.string().max(1_024),
+  state: z.string().min(16).max(256),
 }).strict();
-
-// Characters RFC 4518 section 2.2 maps to nothing before a directory compares names.
-const ignoredUsernameCharacters =
-  /[\u00AD\u200B-\u200D\u2060\uFEFF]|\u034F|[\u180B-\u180D]|[\uFE00-\uFE0F]/gu;
-
-/** One failed-sign-in key for every spelling a directory treats as the same username. */
-function directoryUsernameKey(username: string): string {
-  return username
-    .normalize("NFKC")
-    .replaceAll(ignoredUsernameCharacters, "")
-    .replaceAll(/\s+/gu, " ")
-    .trim()
-    .toLowerCase();
-}
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -510,6 +505,9 @@ const applicationSessionCookie = "artifact_session";
 const applicationCsrfCookie = "artifact_csrf";
 const secureApplicationSessionCookie = "__Host-artifact_session";
 const secureApplicationCsrfCookie = "__Host-artifact_csrf";
+const oidcPendingCookie = "artifact_oidc";
+// __Host- stops a sibling subdomain from planting its own pending sign-in.
+const secureOidcPendingCookie = "__Host-artifact_oidc";
 /** Upper bound on one held claim poll, per the dispatch transport contract. */
 const maximumClaimWaitSeconds = 25;
 /** Spacing of the bounded re-checks inside one held claim poll. */
@@ -624,10 +622,9 @@ export function createHttpApp(
       ),
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
-  const failedDirectorySignIns = new FailedSignInLimiter(dependencies.clock);
-  const failedDirectoryUsers = new FailedSignInLimiter(
+  const failedOidcCallbacks = new FailedSignInLimiter(
     dependencies.clock,
-    directoryUsernameFailedSignInPolicy,
+    oidcCallbackFailedSignInPolicy,
   );
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
@@ -996,11 +993,77 @@ export function createHttpApp(
       accessMode: dependencies.browserAccess.mode,
       login: dependencies.browserAccess.mode === browserAccessModes.privateTeam
         ? {
-          directory: dependencies.browserAccess.directory !== null,
           kind: dependencies.browserAccess.loginKind,
+          oidc: dependencies.browserAccess.oidc !== null,
         }
         : {kind: dependencies.browserAccess.loginKind},
     });
+  });
+
+  app.get("/auth/oidc/start", async (context) => {
+    const oidc = oidcSignIn(dependencies.browserAccess);
+    if (oidc === null) return context.notFound();
+    context.header("Cache-Control", "private, no-store");
+    const started = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      startOidcSignIn(
+        oidc,
+        safeReturnTo(context.req.query("returnTo")),
+        dependencies.clock.now(),
+      ).pipe(
+        Effect.map((value) => ({...value, kind: "started" as const})),
+        Effect.catchTag("OidcSignInFailed", (failed) =>
+          Effect.succeed({browser: oidcFailureReports[failed.reason].browser, kind: "refused" as const})),
+        Effect.annotateLogs({client_address: signInClientAddress(context, dependencies)}),
+      ),
+    );
+    if (started.kind === "refused") return context.redirect(`/review?sso=${started.browser}`, 303);
+    setCookie(context, oidcPendingCookieName(dependencies), encodePendingOidcSignIn(started.pending), {
+      httpOnly: true,
+      maxAge: pendingOidcSignInLifetimeMilliseconds / 1_000,
+      path: "/",
+      sameSite: "Lax",
+      secure: usesSecureApplicationCookies(dependencies),
+    });
+    return context.redirect(started.authorizationUrl, 302);
+  });
+
+  app.get("/auth/oidc/callback", async (context) => {
+    const oidc = oidcSignIn(dependencies.browserAccess);
+    if (oidc === null) return context.notFound();
+    const pending = readPendingOidcSignIn(context, dependencies);
+    deleteCookie(context, oidcPendingCookieName(dependencies), {
+      path: "/",
+      secure: usesSecureApplicationCookies(dependencies),
+    });
+    context.header("Cache-Control", "private, no-store");
+    context.header("Referrer-Policy", "no-referrer");
+    const clientAddress = signInClientAddress(context, dependencies);
+    const rateLimited = failedOidcCallbacks.retryAfterSeconds(clientAddress) !== null;
+    // Charged before it runs, because each callback can cost a request to
+    // the provider that carries the client secret.
+    if (!rateLimited) failedOidcCallbacks.recordFailure(clientAddress);
+    const completed = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      completeOidcSignIn(
+        oidc,
+        {callback: oidcCallback(context.req.query()), pending, rateLimited},
+        dependencies.clock.now(),
+      ).pipe(
+        Effect.map((value) => ({...value, kind: "signed_in" as const})),
+        Effect.catchTag("OidcSignInFailed", (failed) =>
+          Effect.succeed({browser: oidcFailureReports[failed.reason].browser, kind: "refused" as const})),
+        // A failure of this server's own, already logged, still lands on the gate.
+        Effect.catch(() => Effect.succeed({browser: "unavailable" as const, kind: "refused" as const})),
+        Effect.annotateLogs({client_address: clientAddress}),
+      ),
+    );
+    if (completed.kind === "refused") return context.redirect(`/review?sso=${completed.browser}`, 303);
+    failedOidcCallbacks.refund(clientAddress);
+    setApplicationSessionCookies(context, dependencies, completed.issued);
+    return context.redirect(completed.returnTo, 303);
   });
 
   app.post("/auth/local-owner", async (context) => {
@@ -1031,21 +1094,14 @@ export function createHttpApp(
     return context.body(null, 204);
   });
 
-  // Each attempt is counted before it runs, so concurrent guesses cannot all
-  // pass the check. A refused credential keeps its charge, and so does an
-  // unavailable directory, which may have checked the password before its
-  // answer was lost; refunding that would let a client bind without limit.
-  // A success, or a failure of this server's own, returns the charge.
-  const limitedSignIn = async <E>(
-    context: Context<HttpEnvironment>,
-    counters: readonly SignInCounter[],
-    signIn: Effect.Effect<IssuedApplicationSession, E, ApplicationServices>,
-  ): Promise<Response> => {
-    const retryAfterSeconds = Math.max(
-      0,
-      ...counters.map((counter) => counter.limiter.retryAfterSeconds(counter.key) ?? 0),
-    );
-    if (retryAfterSeconds > 0) {
+  app.post("/auth/api-key", boundedSignInBody, async (context) => {
+    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
+      return context.notFound();
+    }
+    requireApplicationOrigin(context, dependencies);
+    const clientAddress = signInClientAddress(context, dependencies);
+    const retryAfterSeconds = failedSignIns.retryAfterSeconds(clientAddress);
+    if (retryAfterSeconds !== null) {
       context.header("Retry-After", String(retryAfterSeconds));
       context.header("Cache-Control", "private, no-store");
       return context.json({
@@ -1055,79 +1111,31 @@ export function createHttpApp(
         },
       }, 429);
     }
-    for (const counter of counters) counter.limiter.recordFailure(counter.key);
+    const body = apiKeySignInSchema.parse(await context.req.json());
+    // Each attempt is counted before it runs, so concurrent guesses cannot all
+    // pass the check. A refused key keeps its charge; a failure of this
+    // server's own returns it.
+    failedSignIns.recordFailure(clientAddress);
     let issued: IssuedApplicationSession;
     try {
-      issued = await runHttpApplicationEffect(context, dependencies, signIn);
+      issued = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        InstallationAccessService.use((access) =>
+          access.loginWithApiKey(
+            Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
+          )
+        ),
+      );
     } catch (failure) {
-      if (
-        !(failure instanceof AuthenticationRequired) &&
-        !(failure instanceof DirectoryUnavailable)
-      ) {
-        for (const counter of counters) counter.limiter.refund(counter.key);
-      }
+      if (!(failure instanceof AuthenticationRequired)) failedSignIns.refund(clientAddress);
       throw failure;
     }
-    for (const counter of counters) {
-      if (counter.onSuccess === "clear") counter.limiter.clear(counter.key);
-      else counter.limiter.refund(counter.key);
-    }
+    failedSignIns.clear(clientAddress);
     setApplicationSessionCookies(context, dependencies, issued);
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
     return context.body(null, 204);
-  };
-
-  app.post("/auth/api-key", boundedSignInBody, async (context) => {
-    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
-      return context.notFound();
-    }
-    requireApplicationOrigin(context, dependencies);
-    const body = apiKeySignInSchema.parse(await context.req.json());
-    return limitedSignIn(
-      context,
-      [{
-        key: signInClientAddress(context, dependencies),
-        limiter: failedSignIns,
-        onSuccess: "clear",
-      }],
-      InstallationAccessService.use((access) =>
-        access.loginWithApiKey(
-          Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
-        )
-      ),
-    );
-  });
-
-  app.post("/auth/ldap", boundedSignInBody, async (context) => {
-    const directory = directorySignIn(dependencies.browserAccess);
-    if (directory === null) return context.notFound();
-    requireApplicationOrigin(context, dependencies);
-    const body = directorySignInSchema.parse(await context.req.json());
-    const clientAddress = signInClientAddress(context, dependencies);
-    // Passwords are guessable, unlike keys, so a success resets neither
-    // count: not the client's, and not the username's, which a victim's own
-    // sign-in would otherwise clear for whoever is guessing at it.
-    const counters: SignInCounter[] = [
-      {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
-    ];
-    // A refused username never reaches the directory, so only the client pays.
-    if (body.username !== null) {
-      counters.push({
-        key: directoryUsernameKey(body.username),
-        limiter: failedDirectoryUsers,
-        onSuccess: "refund",
-      });
-    }
-    return limitedSignIn(
-      context,
-      counters,
-      signInWithDirectory(
-        directory,
-        body.username,
-        Redacted.make(body.password, {label: "directory-password"}),
-      ).pipe(Effect.annotateLogs({client_address: clientAddress})),
-    );
   });
 
   app.post("/auth/local", async (context) => {
@@ -2804,6 +2812,39 @@ function setApplicationSessionCookies(
   });
 }
 
+function oidcPendingCookieName(dependencies: HttpAppDependencies): string {
+  return usesSecureApplicationCookies(dependencies) ? secureOidcPendingCookie : oidcPendingCookie;
+}
+
+function encodePendingOidcSignIn(pending: PendingOidcSignIn): string {
+  return Buffer.from(JSON.stringify(pending)).toString("base64url");
+}
+
+function readPendingOidcSignIn(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+): PendingOidcSignIn | null {
+  const raw = getCookie(context, oidcPendingCookieName(dependencies));
+  if (raw === undefined) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  const parsed = pendingOidcSignInSchema.safeParse(decoded);
+  return parsed.success ? {...parsed.data, returnTo: safeReturnTo(parsed.data.returnTo)} : null;
+}
+
+function oidcCallback(query: Readonly<Record<string, string>>): OidcCallback {
+  const error = query["error"];
+  if (error !== undefined) {
+    return {error: oidcErrorCodePattern.test(error) ? error : "unrecognized", kind: "error"};
+  }
+  const parsed = oidcCodeCallbackSchema.safeParse(query);
+  return parsed.success ? {...parsed.data, kind: "code"} : {kind: "invalid"};
+}
+
 function clearApplicationSessionCookies(
   context: Context<HttpEnvironment>,
   dependencies: HttpAppDependencies,
@@ -2860,14 +2901,6 @@ function isForwardedFrom(
   return `${forwardedProtocol}:` === trustedUrl.protocol &&
     forwardedHost?.toLocaleLowerCase("en-US") ===
       trustedUrl.host.toLocaleLowerCase("en-US");
-}
-
-/** One failed sign-in count that an attempt is charged to. */
-interface SignInCounter {
-  readonly key: string;
-  readonly limiter: FailedSignInLimiter;
-  /** `clear` forgets earlier failures; `refund` returns only this attempt's charge. */
-  readonly onSuccess: "clear" | "refund";
 }
 
 function signInClientAddress(
