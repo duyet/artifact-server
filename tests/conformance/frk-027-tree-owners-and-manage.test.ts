@@ -142,7 +142,7 @@ describe("artifact tree owners and manage handles", () => {
     email: string,
     keyName: string,
     role: "administrator" | "member" = "member",
-  ): Promise<string> {
+  ): Promise<{readonly memberId: string; readonly token: string}> {
     const runtime = await createLocalRuntime({
       apiToken: installation.apiToken,
       bootstrapAdministratorEmail,
@@ -151,13 +151,14 @@ describe("artifact tree owners and manage handles", () => {
       dataDirectory: installation.dataDirectory,
     });
     try {
-      return (await runtime.issueOperatorKey({
+      const {issued, member} = await runtime.issueOperatorKey({
         displayName,
         email,
         expiresAt: "2099-01-01T00:00:00.000Z",
         keyName,
         role,
-      })).issued.token;
+      });
+      return {memberId: member.id, token: issued.token};
     } finally {
       await runtime.close();
     }
@@ -170,12 +171,14 @@ describe("artifact tree owners and manage handles", () => {
    */
   async function seed(): Promise<{
     readonly alice: string;
+    readonly aliceMemberId: string;
     readonly administrator: string;
     readonly carol: string;
   }> {
-    const alice = await issueMemberKey("Alice Example", "alice@example.com", "Alice Example @ laptop");
-    const carol = await issueMemberKey("carol@example.com", "carol@example.com", "carol@example.com");
-    const administrator = await issueMemberKey(
+    const aliceKey = await issueMemberKey("Alice Example", "alice@example.com", "Alice Example @ laptop");
+    const alice = aliceKey.token;
+    const carol = (await issueMemberKey("carol@example.com", "carol@example.com", "carol@example.com")).token;
+    const {token: administrator} = await issueMemberKey(
       "Admin Example",
       "admin@example.test",
       "Admin Example",
@@ -224,7 +227,28 @@ describe("artifact tree owners and manage handles", () => {
       },
     );
     expect(tagged.status).toBe(200);
-    return {administrator, alice, carol};
+    return {administrator, alice, aliceMemberId: aliceKey.memberId, carol};
+  }
+
+  /** A key an administrator issues for one member, with the given scope. */
+  async function issueMemberApiKey(
+    administrator: BrowserCookies,
+    memberId: string,
+    capabilities: readonly string[],
+    name: string,
+  ): Promise<string> {
+    const issued = await fetch(`${running().baseUrl}/api/v1/api-keys`, {
+      body: JSON.stringify({
+        capabilities,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        memberId,
+        name,
+      }),
+      headers: cookieMutation(running(), administrator, `frk-027-key-${crypto.randomUUID()}`),
+      method: "POST",
+    });
+    expect(issued.status).toBe(201);
+    return z.object({token: z.string()}).parse(await issued.json()).token;
   }
 
   beforeEach(async () => {
@@ -244,7 +268,7 @@ describe("artifact tree owners and manage handles", () => {
   });
 
   test("FRK-027-B: anonymous rows name their owner and are public; a member reads every live artifact with visibility, mine, and a manage handle that changes it", async () => {
-    const {alice} = await seed();
+    const {administrator: administratorKey, alice} = await seed();
 
     const anonymous = await readTree(running());
     expect(anonymous.viewer).toBeNull();
@@ -277,13 +301,17 @@ describe("artifact tree owners and manage handles", () => {
       {access: "account_required", mine: true, name: "Alice private", owner: "Alice Example @ laptop", visibility: "private"},
       {access: "public_link", mine: true, name: "Alice public", owner: "Alice Example @ laptop", visibility: "public"},
     ]);
-    // A member may change any artifact's visibility, as the access and tags
-    // APIs allow, so every row carries a handle, with its tags sorted.
-    expect(manageHandle(member, "Carol unlisted").tags).toEqual(["archive", "unlisted"]);
+    // A member may change the visibility of what they own, so only their
+    // own rows carry a handle.
     expect(manageHandle(member, "Alice public").tags).toEqual([]);
-    for (const artifact of member.artifacts) {
-      expect(artifact.manage).not.toBeNull();
-    }
+    expect(manageHandle(member, "Alice private").tags).toEqual([]);
+    expect(row(member, "Carol unlisted").manage).toBeNull();
+    expect(row(member, "Carol report").manage).toBeNull();
+    // An administrator may change any artifact, with its tags sorted.
+    const administrator = await signIn(running(), administratorKey);
+    const administratorTree = await readTree(running(), administrator);
+    expect(manageHandle(administratorTree, "Carol unlisted").tags).toEqual(["archive", "unlisted"]);
+    expect(administratorTree.artifacts.every((artifact) => artifact.manage !== null)).toBe(true);
     // A collapsed folder that holds only the unlisted artifact is named to
     // the member, who sees that artifact, and never to an anonymous reader.
     const collapsed = await fetch(`${running().baseUrl}/api/v1/folder-defaults`, {
@@ -317,7 +345,7 @@ describe("artifact tree owners and manage handles", () => {
 
     // Listing an unlisted artifact again is a tags change that keeps every
     // other tag the handle carried.
-    const carolUnlisted = manageHandle(member, "Carol unlisted");
+    const carolUnlisted = manageHandle(administratorTree, "Carol unlisted");
     const listed = await fetch(
       `${running().baseUrl}/api/v1/artifacts/${carolUnlisted.artifactId}/tags` +
         `?projectId=${carolUnlisted.projectId}`,
@@ -326,13 +354,13 @@ describe("artifact tree owners and manage handles", () => {
           expectedCurrentVersionId: carolUnlisted.currentVersionId,
           tags: carolUnlisted.tags.filter((tag) => tag !== "unlisted"),
         }),
-        headers: cookieMutation(running(), cookies, "frk-027-carol-listed"),
+        headers: cookieMutation(running(), administrator, "frk-027-carol-listed"),
         method: "PATCH",
       },
     );
     expect(listed.status).toBe(200);
 
-    const changed = await readTree(running(), cookies);
+    const changed = await readTree(running(), administrator);
     expect(row(changed, "Alice public")).toMatchObject({
       access: "account_required",
       visibility: "private",
@@ -346,7 +374,7 @@ describe("artifact tree owners and manage handles", () => {
   });
 
   test("FRK-027-F: anonymous reads hide private, unlisted, emails, and handles; a bad session reads as anonymous; a session that cannot manage gets no handle", async () => {
-    const {administrator: administratorKey, alice} = await seed();
+    const {administrator: administratorKey, alice, aliceMemberId} = await seed();
 
     const anonymous = await fetchTree(running());
     expect(anonymous.tree.viewer).toBeNull();
@@ -366,13 +394,12 @@ describe("artifact tree owners and manage handles", () => {
 
     // A malformed cookie, a well-formed unknown token, and a bearer header
     // with no cookie all read as anonymous with 200, never 401.
-    for (const headers of [
+    const strangers = await Promise.all([
       {Cookie: "artifact_session=not a token"},
       {Cookie: `artifact_session=${"a".repeat(43)}`},
       {Authorization: `Bearer ${installation.apiToken}`},
-    ]) {
-      // eslint-disable-next-line no-await-in-loop
-      const read = await fetchTree(running(), headers);
+    ].map((headers) => fetchTree(running(), headers)));
+    for (const read of strangers) {
       expect(read.tree.viewer).toBeNull();
       expect(read.tree.artifacts.map((artifact) => artifact.name)).toEqual(anonymousNames);
       expect(read.tree.artifacts.every((artifact) => artifact.manage === null)).toBe(true);
@@ -427,6 +454,31 @@ describe("artifact tree owners and manage handles", () => {
       },
     );
     expect(refused.status).toBe(403);
+
+    // A key on Alice's own principal that may only read is not her: it sees
+    // her artifacts as hers, but gets no handle on them.
+    const ownerReader = await signIn(
+      running(),
+      await issueMemberApiKey(administrator, aliceMemberId, ["artifact:read"], "Alice reader"),
+    );
+    const ownerReaderTree = await readTree(running(), ownerReader);
+    expect(row(ownerReaderTree, "Alice private")).toMatchObject({manage: null, mine: true});
+    expect(row(ownerReaderTree, "Alice public")).toMatchObject({manage: null, mine: true});
+    expect(ownerReaderTree.artifacts.every((artifact) => artifact.manage === null)).toBe(true);
+    const ownPrivate = administratorHandle;
+    const ownRefused = await fetch(
+      `${running().baseUrl}/api/v1/artifacts/${ownPrivate.artifactId}/access` +
+        `?projectId=${ownPrivate.projectId}`,
+      {
+        body: JSON.stringify({
+          accessSetting: "public_link",
+          expectedCurrentVersionId: ownPrivate.currentVersionId,
+        }),
+        headers: cookieMutation(running(), ownerReader, "frk-027-owner-reader-refused"),
+        method: "PATCH",
+      },
+    );
+    expect(ownRefused.status).toBe(403);
 
     // A key that may not list artifacts reads only the anonymous set.
     const commenter = await signIn(

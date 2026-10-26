@@ -167,32 +167,6 @@ describe("authorization policy", () => {
     );
   });
 
-  test("foundation: the tree offers a manage handle exactly when the management write would accept it", async () => {
-    const member = humanPrincipal("member", membershipRoles.member);
-    const principals: readonly Principal[] = [
-      member,
-      humanPrincipal("administrator", membershipRoles.administrator),
-      // A person's key used on their behalf is not the person.
-      {...member, authorizedByPrincipalId: "administrator"},
-      {...member, installationId: "installation-b"},
-      servicePrincipal("manager", [principalCapabilities.manageAnyArtifact]),
-      servicePrincipal("reader", [principalCapabilities.readArtifacts]),
-      servicePrincipal("unscoped", []),
-    ];
-    const answers = await runtime.runPromise(AuthorizationService.use((authorization) =>
-      Effect.forEach(principals, (principal) =>
-        Effect.result(authorization.requireArtifactManagement(principal)).pipe(
-          Effect.map((result) => ({
-            offered: authorization.canManageArtifacts(principal),
-            written: Result.isSuccess(result),
-          })),
-        ))
-    ));
-    expect(answers.map(({written}) => written))
-      .toEqual([true, true, false, false, true, false, false]);
-    for (const answer of answers) expect(answer.offered).toBe(answer.written);
-  });
-
   async function expectAllowed(
     operation: (
       authorization: AuthorizationService["Service"],

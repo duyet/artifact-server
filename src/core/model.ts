@@ -256,19 +256,14 @@ export interface ViewedArtifact {
   readonly windowViews: number;
 }
 
-/** A live artifact with the facts the home page tree shows. */
-export interface PublicArtifactSummary {
-  readonly accessSetting: AccessSetting;
+/**
+ * A live artifact with the facts the home page tree shows: the artifact
+ * itself, with its tags sorted as stored, and when its current version was
+ * made.
+ */
+export interface PublicArtifactSummary extends ArtifactRecord {
   /** The current version's creation time, which is the artifact's last change. */
   readonly currentVersionCreatedAt: string;
-  readonly currentVersionId: string;
-  readonly id: string;
-  readonly name: string;
-  readonly owner: ArtifactOwner;
-  readonly path: string | null;
-  readonly projectId: string;
-  /** Sorted, as stored. */
-  readonly tags: readonly string[];
 }
 
 /** One listed artifact with its counts and what the viewer may do with it. */

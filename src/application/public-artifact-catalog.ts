@@ -128,10 +128,6 @@ function makePublicArtifactCatalogService(
       const now = yield* dependencies.clock.now;
       const viewer = command.viewer;
       const scope = yield* catalogScopeFor(authorization, viewer);
-      // The same rule the access and tags writes apply, so the tree offers a
-      // visibility change exactly when the write would accept it.
-      const manageable = viewer !== null &&
-        authorization.canManageArtifacts(viewer);
       const summaries = yield* readSummaries(
         dependencies.repository,
         command.limit,
@@ -163,7 +159,11 @@ function makePublicArtifactCatalogService(
           );
           return {
             artifact,
-            manageable,
+            // The owner-or-administrator rule for who may change an
+            // artifact's visibility, so the tree offers a change only to a
+            // viewer that rule admits.
+            manageable: viewer !== null &&
+              authorization.canManageArtifact(viewer, artifact),
             mine: viewer !== null && viewer.id === artifact.owner.principalId,
             ownerName: ownerName(artifact.owner.displayName),
             series,

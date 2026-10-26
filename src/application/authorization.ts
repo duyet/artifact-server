@@ -18,12 +18,6 @@ export interface AuthorizationDependencies {
 
 /** Authorization decisions shared by every application operation. */
 export interface AuthorizationOperations {
-  /**
-   * Whether the principal may change artifact settings such as access and
-   * tags. `requireArtifactManagement` enforces exactly this answer, so a
-   * reader that only shows the choice cannot drift from the write it guards.
-   */
-  readonly canManageArtifacts: (principal: Principal) => boolean;
   readonly requireAgentConnection: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -42,6 +36,11 @@ export interface AuthorizationOperations {
   readonly requireArtifactManagement: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
+  /** {@link canManageArtifact} in this installation. */
+  readonly canManageArtifact: (
+    principal: Principal,
+    artifact: ArtifactRecord,
+  ) => boolean;
   readonly requireArtifactRead: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -83,6 +82,32 @@ export class AuthorizationService extends Context.Service<
       AuthorizationService,
       makeAuthorizationService(dependencies),
     );
+}
+
+/**
+ * Whether a principal may change who can open an artifact: the artifact's
+ * owner, a direct human administrator, or a key that manages any artifact,
+ * always inside the artifact's own installation. A member's own key carries
+ * the member's principal ID, but it owns what the member published only when
+ * it may also create artifacts: a key scoped to reading or commenting must not
+ * make its member's private artifacts public.
+ */
+export function canManageArtifact(
+  principal: Principal,
+  artifact: ArtifactRecord,
+  installationId: string,
+): boolean {
+  return principal.installationId === installationId && (
+    (
+      principal.id === artifact.owner.principalId &&
+      (
+        isDirectHumanPrincipal(principal) ||
+        hasCapability(principal, principalCapabilities.createArtifact)
+      )
+    ) ||
+    isHumanAdministrator(principal) ||
+    hasCapability(principal, principalCapabilities.manageAnyArtifact)
+  );
 }
 
 function makeAuthorizationService(
@@ -214,16 +239,16 @@ function makeAuthorizationService(
     yield* denied();
   });
 
-  const canManageArtifacts = (principal: Principal): boolean =>
-    principal.installationId === dependencies.installationId && (
-      isDirectHumanPrincipal(principal) ||
-      hasCapability(principal, principalCapabilities.manageAnyArtifact)
-    );
-
   const requireArtifactManagement = Effect.fn(
     "AuthorizationService.requireArtifactManagement",
   )(function*(principal: Principal) {
-    if (canManageArtifacts(principal)) return;
+    yield* requireInstallation(principal);
+    if (isDirectHumanPrincipal(principal)) return;
+    if (
+      hasCapability(principal, principalCapabilities.manageAnyArtifact)
+    ) {
+      return;
+    }
     yield* denied();
   });
 
@@ -292,7 +317,8 @@ function makeAuthorizationService(
   });
 
   return AuthorizationService.of({
-    canManageArtifacts,
+    canManageArtifact: (principal, artifact) =>
+      canManageArtifact(principal, artifact, dependencies.installationId),
     requireAgentConnection,
     requireDispatchSend,
     requireInstallationAdministration,

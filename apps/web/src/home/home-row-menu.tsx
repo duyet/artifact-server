@@ -174,7 +174,7 @@ export function ArtifactRowMenu({
               )}
             >
               <IconHistory />
-              View versions
+              Versions
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void openRename()}>
               <IconPencil />
