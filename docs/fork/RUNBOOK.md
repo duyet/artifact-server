@@ -238,6 +238,18 @@ What the page needs from an operator:
 - **One grant for private artifacts.** Issue 4 adds browser sign-in with the API key. After it merges, a signed-in operator sees the private artifacts too.
 - **The drain interval, if you ever need it changed.** Counts are buffered in memory and written every five seconds. A pod that is killed without draining loses at most five seconds of counts. Nothing else is configurable, and nothing needs to be.
 
+Every folder starts expanded. To make one start collapsed, for example an archive that viewers rarely open, set it with a key that can manage artifacts, the same access that tags need:
+
+```sh
+curl -sS -X PUT https://artifacts.example.internal/api/v1/folder-defaults \
+  -H "Authorization: Bearer $(cat api-token)" -H 'Content-Type: application/json' \
+  -d '{"path": "team/archive", "defaultState": "collapsed"}'
+```
+
+Send `"defaultState": "expanded"` to undo it. Agents use the MCP tool `folder_set_default` with the same two fields. The tree response lists the collapsed folders in `collapsedFolders`, but only those that hold a public artifact, so a folder of private work is never named to an anonymous viewer. A viewer can still open a collapsed folder.
+
+Postgres migration `0020_collapsed_folders` adds the `collapsed_folders` table. It is additive. A build older than this release refuses to start against the migrated database, so a rollback must also drop the table and delete row 20 from `artifact_server_postgres_migrations`. SQLite creates the table at start and keeps its schema version, so a compact installation can roll back without a step.
+
 Nothing about a viewer is stored. The counter table is three columns, `artifact_id`, `day`, and `count`, and it holds no address, session, referrer, or user agent. To read the totals straight from the database:
 
 ```sh
