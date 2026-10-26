@@ -296,6 +296,7 @@ function DailyChart({
   // day a keyboard reader just moved to.
   const [active, setActive] = useState<ActiveDay | null>(null);
   const activeDay = active?.day ?? null;
+  const pressedDay = useRef<string | null>(null);
   const release = (source: ActiveDay["source"]) => {
     setActive((current) => (current?.source === source ? null : current));
   };
@@ -316,7 +317,7 @@ function DailyChart({
     onFilterChange({day: filter.day === day ? null : day, metric: filter.metric});
   };
   // The column under the pointer, from the same equal split the buttons use.
-  const dayAt = (event: React.PointerEvent<HTMLElement> | React.MouseEvent<HTMLElement>) => {
+  const dayAt = (event: React.PointerEvent<HTMLElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
     return data[Math.floor(((event.clientX - box.left) / box.width) * data.length)]?.day ?? null;
   };
@@ -358,11 +359,16 @@ function DailyChart({
             // must not take the pointer from the bars.
             className="aspect-auto h-32 w-full cursor-pointer [&_.recharts-yAxis]:pointer-events-none"
             config={config}
-            // Recharts' own click state lags a fast click by a frame, so the
-            // column is read from the pointer position instead.
-            onClick={(event) => {
+            // A press and release on one column toggles it. Recharts remounts
+            // every bar when a tone changes, so the bar pressed on hover can be
+            // gone before the release and the browser then sends no click.
+            onPointerDown={(event) => {
+              pressedDay.current = event.button === 0 ? dayAt(event) : null;
+            }}
+            onPointerUp={(event) => {
               const day = dayAt(event);
-              if (day !== null) toggleDay(day);
+              if (day !== null && day === pressedDay.current) toggleDay(day);
+              pressedDay.current = null;
             }}
             onPointerLeave={() => {
               release("pointer");
@@ -443,7 +449,7 @@ function DailyChart({
             <DayTooltip
               count={data[activeIndex]?.count ?? 0}
               day={data[activeIndex]?.day ?? ""}
-              position={(activeIndex + 0.5) / data.length}
+              column={{index: activeIndex, of: data.length}}
               today={data[activeIndex]?.day === today}
               unit={unit(data[activeIndex]?.count ?? 0)}
             />
@@ -473,33 +479,32 @@ function DailyChart({
 }
 
 /**
- * The date and count of the day under the pointer or keyboard focus, drawn
- * above its column. Near either edge it anchors to that edge so it stays
- * inside the card.
+ * The date and count of the day under the pointer or keyboard focus. It sits
+ * at the top of the plot beside its column, on the side with more room, so it
+ * never covers the column it names or the card header.
  */
 function DayTooltip({
+  column,
   count,
   day,
-  position,
   today,
   unit,
 }: {
+  readonly column: {readonly index: number; readonly of: number};
   readonly count: number;
   readonly day: string;
-  /** The column centre as a fraction of the chart width. */
-  readonly position: number;
   readonly today: boolean;
   readonly unit: string;
 }) {
-  const shift = position < 0.15 ? "0%" : position > 0.85 ? "-100%" : "-50%";
+  const leftHalf = column.index < column.of / 2;
+  const edge = ((leftHalf ? column.index + 1 : column.index) / column.of) * 100;
   return (
     <div
-      className="pointer-events-none absolute top-0 z-10 flex flex-col rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm"
+      className="pointer-events-none absolute top-0 z-10 flex w-max flex-col rounded-md border bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground shadow-sm"
       role="tooltip"
-      style={{
-        left: `${position * 100}%`,
-        transform: `translate(${shift}, calc(-100% - 4px))`,
-      }}
+      style={leftHalf
+        ? {left: `calc(${edge}% + 6px)`}
+        : {left: `calc(${edge}% - 6px)`, transform: "translateX(-100%)"}}
     >
       <span className="font-medium">{today ? `Today, ${formatDay(day)}` : formatDay(day)}</span>
       <span className="text-muted-foreground tabular-nums">{`${formatCount(count)} ${unit}`}</span>
