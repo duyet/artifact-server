@@ -135,6 +135,16 @@ An artifact's asset store holds images, video, PDFs, fonts, stylesheets, scripts
 
 HTML and XML are refused with `ASSET_TYPE_UNSUPPORTED`. A file over its type's cap, or past the artifact's quota, is refused with `ASSET_LIMIT_EXCEEDED` before any byte is stored. `docs/fork/ASSETS.md` lists the types, caps, quota, REST routes, and response headers.
 
+## Start a home page folder collapsed
+
+The home page tree starts every folder expanded. `folder_set_default` makes one folder start collapsed, or expanded again:
+
+```json
+{"defaultState": "collapsed", "path": "team/archive"}
+```
+
+The path uses the same rules as an artifact path. A viewer can still open the folder. The setting applies to that folder only, and it needs the same access as `artifact_set_tags`.
+
 ## Tool groups
 
 | Group | Tools |
@@ -144,7 +154,7 @@ HTML and XML are refused with `ASSET_TYPE_UNSUPPORTED`. A file over its type's c
 | Artifacts | `artifact_list`, `artifact_get`, `artifact_open`, `artifact_version_list`, `artifact_diff`, `artifact_check_assets` |
 | Publication | `artifact_create_upload`, `artifact_commit_upload` |
 | Assets | `asset_create_upload`, `asset_commit_upload`, `asset_list`, `asset_copy`, `asset_delete` |
-| Management | `artifact_set_visibility`, `artifact_set_tags`, `artifact_restore_version`, `artifact_delete` |
+| Management | `artifact_set_visibility`, `artifact_set_tags`, `artifact_restore_version`, `artifact_delete`, `folder_set_default` |
 | Comments | `comment_list`, `comment_get`, `comment_create`, `comment_reply`, `comment_update`, `comment_resolve`, `comment_delete` |
 
 ## Install the Artifact Server skill

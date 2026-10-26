@@ -78,6 +78,7 @@ import {
 import {
   accessSettings,
   agentBeaconStates,
+  folderDefaultStates,
   type AgentDispatchPage,
   type AgentDispatchRecord,
   agentDispatchStates,
@@ -134,6 +135,7 @@ import {
   assetProjection,
   canonicalFolderLocation,
   isolateSameHostResponse,
+  parseArtifactPath,
   parseSameHostContentRequest,
   requestedArtifactPath,
   sameHostContentSource,
@@ -259,6 +261,13 @@ const changeTagsSchema = z.object({
   expectedCurrentVersionId: z.string().min(1).max(200),
   tags: artifactTagsSchema,
 });
+const setFolderDefaultSchema = z.object({
+  defaultState: z.enum([
+    folderDefaultStates.collapsed,
+    folderDefaultStates.expanded,
+  ]),
+  path: z.string().min(1).max(200),
+}).strict();
 const comparisonQuerySchema = z.object({
   fromVersionId: z.string().min(1).max(200),
   toVersionId: z.string().min(1).max(200),
@@ -2263,6 +2272,22 @@ export function createHttpApp(
       ));
     },
   );
+
+  app.put("/api/v1/folder-defaults", boundedJsonBody, async (context) => {
+    const body = setFolderDefaultSchema.parse(await context.req.json());
+    const path = parseArtifactPath(body.path);
+    await runHttpApplicationEffect(
+      context,
+      dependencies,
+      PublicArtifactCatalogService.use((catalogService) =>
+        catalogService.setFolderDefaultState({
+          path,
+          principal: context.get("principal"),
+          state: body.defaultState,
+        })),
+    );
+    return context.json({defaultState: body.defaultState, path});
+  });
 
   app.patch(
     "/api/v1/artifacts/:artifactId/name",

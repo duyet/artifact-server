@@ -32,11 +32,13 @@ import {
   dispatchHoldsCommentThread,
   dispatchedThreadFilters,
   fileDispositions,
+  folderDefaultStates,
   parseStoredAgentCapabilities,
   routingModes,
   uploadStatuses,
   type AgentDispatchCreation,
   type AgentDispatchPage,
+  type FolderDefaultState,
   type AgentDispatchRecord,
   type ArtifactActionPage,
   type ArtifactActionRecord,
@@ -86,6 +88,7 @@ import type {
   ChangeArtifactAccessSetting,
   ChangeArtifactTags,
   ClearCommentThreads,
+  CollapsedFolderRepository,
   CommentRepository,
   CommitArtifactVersion,
   ArtifactAssetRepository,
@@ -525,6 +528,7 @@ export class PostgresArtifactRepository implements
   ArtifactAssetRepository,
   ArtifactRepository,
   ArtifactViewRepository,
+  CollapsedFolderRepository,
   CommentRepository,
   ContentSessionRepository,
   ProjectActivityRepository,
@@ -1439,6 +1443,39 @@ export class PostgresArtifactRepository implements
           );
         }
       }));
+    }));
+  }
+
+  async listCollapsedFolders(): Promise<readonly string[]> {
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql.unsafe<object>(
+        "SELECT path FROM collapsed_folders WHERE installation_id = $1",
+        [installationId],
+      );
+      return z.array(z.object({path: z.string()})).parse(rows)
+        .map((row) => row.path);
+    }));
+  }
+
+  async setFolderDefaultState(
+    path: string,
+    state: FolderDefaultState,
+  ): Promise<void> {
+    const installationId = this.#installationId;
+    await this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      yield* state === folderDefaultStates.collapsed
+        ? sql.unsafe(
+          `INSERT INTO collapsed_folders (installation_id, path) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [installationId, path],
+        )
+        : sql.unsafe(
+          "DELETE FROM collapsed_folders WHERE installation_id = $1 AND path = $2",
+          [installationId, path],
+        );
     }));
   }
 

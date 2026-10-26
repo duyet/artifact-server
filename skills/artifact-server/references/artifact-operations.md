@@ -55,6 +55,7 @@ Call `artifact_get` immediately before a write to obtain the current version ID.
 - `artifact_set_tags`: replace the complete tag set. Preserve existing tags the user did not ask to remove.
 - `artifact_restore_version`: make an existing saved version current. This restores an artifact version; it does not restore a server backup. When the user identifies the target relatively, such as "the older of the latest two," run `artifact_version_list` again immediately before the restore and confirm that the chosen version still has that relationship to the current version. An optimistic current-version guard alone does not preserve a relative description.
 - `artifact_delete`: use only for an explicit request to delete one artifact. Repeat the artifact name, server, and project before the destructive call. This does not delete the installation.
+- `folder_set_default`: make one folder of the public home page tree, such as `team/archive`, start `collapsed` or `expanded`. It needs no version ID or idempotency key, and repeating it changes nothing.
 
 Assets are files a page loads, kept outside versions:
 

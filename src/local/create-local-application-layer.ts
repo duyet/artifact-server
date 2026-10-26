@@ -111,6 +111,7 @@ import type {
   ProjectActivityRepository,
   BlobStore,
   Clock,
+  CollapsedFolderRepository,
   CommentRepository,
   ContentSessionRepository,
   IdGenerator,
@@ -148,6 +149,7 @@ export interface ApplicationAdapters {
   readonly repository: ArtifactRepository &
     ArtifactAssetRepository &
     ArtifactViewRepository &
+    CollapsedFolderRepository &
     ProjectActivityRepository &
     CommentRepository &
     ContentSessionRepository &
@@ -976,7 +978,7 @@ export function createApplicationLayer(
     recentDays: publicCatalogRecentDays,
     repository: adapters.repository,
     windowDays: publicCatalogWindowDays,
-  });
+  }).pipe(Layer.provideMerge(authorizationLayer));
   const projectAnalyticsLayer = ProjectAnalyticsService.layer({
     clock,
     repository: {

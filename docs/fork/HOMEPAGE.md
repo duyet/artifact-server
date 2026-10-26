@@ -252,6 +252,42 @@ The table is shorter than the shape of the change suggested. The counters, the e
 | 3 | `test(web): screenshot the home page light and dark` | CI only. `tests/browser/frk-009-home-page.spec.ts` captures the page in both themes and requires a clean axe run in each. |
 | 4 | `docs: document the home page tree` | `docs/fork/RUNBOOK.md`. The upstream `README.md` is untouched, because the fork does not modify it. |
 
+## 6. Folder default state
+
+An owner can make one folder of the tree start collapsed, for example `team/archive`. Every other folder starts expanded, as before. A viewer can still open or close any folder.
+
+### Data shape
+
+A folder is not an entity. It exists only while an artifact path names it. So the setting is a set of folder paths that start collapsed, one table with one key:
+
+```sql
+-- SQLite, in the #migrate baseline
+CREATE TABLE IF NOT EXISTS collapsed_folders (path TEXT PRIMARY KEY) STRICT;
+
+-- Postgres, migration 0020_collapsed_folders
+CREATE TABLE collapsed_folders (
+  installation_id TEXT NOT NULL,
+  path TEXT COLLATE "C" NOT NULL,
+  PRIMARY KEY (installation_id, path)
+);
+```
+
+1. **A set, not a state column.** Expanded and unset are the same state, so expanding a folder deletes its row. No row can hold a setting that changes nothing.
+2. **Keyed by path across projects.** Readable paths are unique across the installation, and the tree lists every project.
+3. **One folder, no inheritance.** A collapsed folder already hides its subfolders. When a viewer opens it, each subfolder starts in its own state.
+4. **No foreign key.** A setting can name a folder before an artifact lands there, and it stays when the folder empties.
+5. **Not a tag, not configuration.** A tag sits on one artifact, and a new artifact in the folder would not inherit it. A configuration value cannot be set over REST or MCP.
+
+SQLite keeps schema version 17, as `artifact_views` and `assets` did. Postgres needs migration 0020, which is additive and one-way: an older build refuses the newer schema.
+
+### Setting it
+
+`PUT /api/v1/folder-defaults` with `{"path": "team/archive", "defaultState": "collapsed"}`, or the MCP tool `folder_set_default` with the same fields. The path is parsed by the same rules as an artifact path. The caller needs the access that `artifact_set_tags` needs, because folders have no owner and tagging an artifact `unlisted` already does more to the tree than collapsing its folder. The CLI has no command, because it has none for tags or visibility either.
+
+### Reading it
+
+The tree response gains `collapsedFolders`, sorted. It names a folder only when a listed artifact's path is that folder or sits inside it, so an anonymous viewer never learns a folder that holds only private or unlisted work. The page passes `defaultOpen={false}` to those folders. The page keeps no per-viewer folder state, so a viewer's clicks last until the next load, as they did before.
+
 ## Open decisions
 
 1. **The anonymous prefix is `/api/v1/public/`, not a `/public` first segment.** A first-segment route would need an entry in `reservedPathRoots` (section 11), and the reserved list is deliberately short.

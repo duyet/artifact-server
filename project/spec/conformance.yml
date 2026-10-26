@@ -4393,3 +4393,17 @@ requirements:
     proof_gap: Proved locally against SQLite over the MCP endpoint. No Postgres or deployed run exists.
     depends_on: [FRK-019]
     evidence: []
+
+  - id: FRK-021
+    kind: behavior
+    behavior: An owner sets a folder of the public tree to start collapsed or expanded over REST or MCP, the anonymous tree endpoint names the collapsed folders it lists, and the home page starts those folders closed while the viewer can still open them.
+    owner: content-delivery
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: 6-folder-default-state}
+    acceptance:
+      behavior: {id: FRK-021-B, description: "Publish public artifacts under team/archive, team/archive/2025, and 2026/10, set /team/archive/ collapsed over REST and repeat it, set team/archive/2025 collapsed, and read both folders sorted in collapsedFolders with every artifact still listed; set team/archive expanded over MCP and read only the subfolder. In a browser, the collapsed folder starts with aria-expanded false and its artifact hidden, another folder starts open, and a click opens and closes it."}
+      failure: {id: FRK-021-F, description: "An anonymous PUT is 401, a key with only artifact create and read is 403 AUTHORIZATION_DENIED over REST and MCP, an uppercase, reserved-root, or empty-segment path and an unknown state are 422, and a collapsed folder that holds only a private artifact or nothing is absent from the tree until a public artifact lands in it."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint. The Postgres migration 0020 and its queries run only in CI with Docker, the browser case runs only in CI, and no deployed run exists.
+    depends_on: [FRK-009]
+    evidence: []

@@ -2,17 +2,25 @@ import {Context, DateTime, Duration, Effect, Layer} from "effect";
 
 import type {ApplicationClock} from "./application-clock.js";
 import {
+  type AuthorizationOperations,
+  AuthorizationService,
+} from "./authorization.js";
+import {
   ArtifactRepositoryFailure,
+  type AuthorizationDenied,
   InvalidPagination,
 } from "../core/errors.js";
+import type {Principal} from "../core/identity.js";
 import type {
   ArtifactRepository,
   ArtifactViewRepository,
+  CollapsedFolderRepository,
 } from "../core/ports.js";
 import type {
   ArtifactViewCounts,
   ArtifactViewDay,
   ArtifactViewTotal,
+  FolderDefaultState,
   PublicArtifactCatalog,
   PublicArtifactSummary,
 } from "../core/model.js";
@@ -31,11 +39,21 @@ export interface ListPublicArtifactCatalogCommand {
   readonly limit: number;
 }
 
-/** Repository reads the public catalog needs. */
+/** Values used to store how one folder of the public tree starts. */
+export interface SetFolderDefaultStateCommand {
+  /** A path already normalized by `parseArtifactPath`. */
+  readonly path: string;
+  readonly principal: Principal;
+  readonly state: FolderDefaultState;
+}
+
+/** Repository reads and writes the public catalog needs. */
 export interface PublicArtifactCatalogRepository {
+  readonly listCollapsedFolders: CollapsedFolderRepository["listCollapsedFolders"];
   readonly listPublicArtifacts: ArtifactRepository["listPublicArtifacts"];
   readonly readArtifactViewDays: ArtifactViewRepository["readArtifactViewDays"];
   readonly readArtifactViewTotals: ArtifactViewRepository["readArtifactViewTotals"];
+  readonly setFolderDefaultState: CollapsedFolderRepository["setFolderDefaultState"];
 }
 
 /** Dependencies and windows for the public artifact catalog. */
@@ -53,6 +71,9 @@ interface PublicArtifactCatalogOperations {
     PublicArtifactCatalog,
     ArtifactRepositoryFailure | InvalidPagination
   >;
+  readonly setFolderDefaultState: (
+    command: SetFolderDefaultStateCommand,
+  ) => Effect.Effect<void, ArtifactRepositoryFailure | AuthorizationDenied>;
 }
 
 /**
@@ -67,15 +88,19 @@ export class PublicArtifactCatalogService extends Context.Service<
   /** Construct the catalog from deployment-neutral repository ports. */
   static readonly layer = (
     dependencies: PublicArtifactCatalogDependencies,
-  ): Layer.Layer<PublicArtifactCatalogService> =>
-    Layer.succeed(
+  ): Layer.Layer<PublicArtifactCatalogService, never, AuthorizationService> =>
+    Layer.effect(
       PublicArtifactCatalogService,
-      makePublicArtifactCatalogService(dependencies),
+      Effect.gen(function*() {
+        const authorization = yield* AuthorizationService;
+        return makePublicArtifactCatalogService(dependencies, authorization);
+      }),
     );
 }
 
 function makePublicArtifactCatalogService(
   dependencies: PublicArtifactCatalogDependencies,
+  authorization: AuthorizationOperations,
 ): PublicArtifactCatalogOperations {
   const listCatalog = Effect.fn("PublicArtifactCatalogService.listCatalog")(
     function*(command: ListPublicArtifactCatalogCommand) {
@@ -104,6 +129,10 @@ function makePublicArtifactCatalogService(
         sinceDay,
         untilDay,
       );
+      const collapsed = yield* Effect.tryPromise({
+        catch: (cause) => repositoryFailure("listCollapsedFolders", cause),
+        try: () => dependencies.repository.listCollapsedFolders(),
+      });
       return {
         artifacts: summaries.map((artifact) => {
           const series = days.filter((day) => day.artifactId === artifact.id);
@@ -116,6 +145,7 @@ function makePublicArtifactCatalogService(
             views: countViews(series, total, recentSinceDay),
           };
         }),
+        collapsedFolders: revealedFolders(collapsed, summaries),
         generatedAt: DateTime.formatIso(now),
         // An exactly-full read is treated as possibly capped. Reporting
         // truncation one artifact early costs a line of prose; reporting a
@@ -126,7 +156,43 @@ function makePublicArtifactCatalogService(
     },
   );
 
-  return {listCatalog};
+  // Folders are not owned by anyone, so the gate is the one that guards
+  // every artifact setting. Whoever may tag an artifact unlisted can already
+  // hide it from the tree, which is more than collapsing its folder does.
+  const setFolderDefaultState = Effect.fn(
+    "PublicArtifactCatalogService.setFolderDefaultState",
+  )(function*(command: SetFolderDefaultStateCommand) {
+    yield* authorization.requireArtifactManagement(command.principal);
+    yield* Effect.tryPromise({
+      catch: (cause) => repositoryFailure("setFolderDefaultState", cause),
+      try: () => dependencies.repository.setFolderDefaultState(
+        command.path,
+        command.state,
+      ),
+    });
+  });
+
+  return {listCatalog, setFolderDefaultState};
+}
+
+/**
+ * The collapsed folders the listed artifacts already reveal: a folder is
+ * named only when a listed path is that folder or sits inside it. An
+ * anonymous reader never learns a folder that holds only private or unlisted
+ * artifacts.
+ */
+function revealedFolders(
+  collapsed: readonly string[],
+  artifacts: readonly PublicArtifactSummary[],
+): readonly string[] {
+  const paths = artifacts.flatMap((artifact) =>
+    artifact.path === null ? [] : [artifact.path]
+  );
+  return collapsed
+    .filter((folder) =>
+      paths.some((path) => path === folder || path.startsWith(`${folder}/`))
+    )
+    .toSorted();
 }
 
 function readSummaries(
