@@ -195,22 +195,26 @@ export function entriesOnDay(
   );
 }
 
-/** How strongly one day's bar wears its measure's accent. */
-export type DayTone = "full" | "hover" | "muted";
+/**
+ * How strongly one day's bar wears its measure's accent: a tint lighter than
+ * the accent, the accent itself, or a step stronger than it.
+ */
+export type DayTone = "accent" | "muted" | "strong";
 
 /**
- * The tone of one day's bar. The selected day keeps the full accent and the
- * day under the pointer or keyboard sits one step below it. With a day
- * selected the rest recede to a tint; with none, every bar is full.
+ * The tone of one day's bar. The selected day takes the strong step and the
+ * rest recede to the tint, with the day under the pointer or keyboard one
+ * step up at the accent. With no day selected every bar is the accent, and
+ * the day under the pointer previews the selected step.
  */
 export function dayTone(
   day: string,
   selected: string | null,
   active: string | null,
 ): DayTone {
-  if (day === selected) return "full";
-  if (day === active) return "hover";
-  return selected === null ? "full" : "muted";
+  if (day === selected) return "strong";
+  if (selected === null) return day === active ? "strong" : "accent";
+  return day === active ? "accent" : "muted";
 }
 
 /**
