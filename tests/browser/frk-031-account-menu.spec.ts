@@ -12,6 +12,7 @@ import {
   startTestServer,
   type TestInstallation,
 } from "../support/runtime-harness.js";
+import {publishSite} from "../support/same-host-site.js";
 
 const bootstrapAdministratorEmail = "administrator@example.test";
 const helpUrl = "https://help.example.com/artifact-server";
@@ -31,6 +32,8 @@ test.describe("home page account menu", () => {
       contentDomain: null,
       helpUrl,
     });
+    // The tree, and its Mine filter, show only once something is published.
+    await publishSite(server, installation, {accessSetting: "public_link", name: "Shared page"});
     const anonymous = await browser.newContext();
     const member = await browser.newContext();
     try {
@@ -67,6 +70,11 @@ test.describe("home page account menu", () => {
       await page.keyboard.press("Escape");
       await expect(menu).toHaveCount(0);
       await expect(avatar).toBeFocused();
+
+      await avatar.click();
+      await page.getByRole("menuitem", {name: "My artifacts"}).click();
+      await expect(page).toHaveURL(`${server.baseUrl}/?mine=1`);
+      await expect(page.getByRole("button", {name: "Mine"})).toHaveAttribute("aria-pressed", "true");
 
       const cookieHeader = (await member.cookies(server.baseUrl))
         .map((cookie) => `${cookie.name}=${cookie.value}`)
