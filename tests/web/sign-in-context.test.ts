@@ -55,7 +55,13 @@ describe("account control sign-in context", () => {
       helpUrl,
       login: {kind: "none", oidc: true},
     }, 503))).rejects.toThrow("HTTP 503");
-    const hostile = ["javascript:alert(1)", "http://help.example.com/", "//evil.example.com/", "/\\evil.example.com"];
+    const hostile = [
+      "javascript:alert(1)",
+      "http://help.example.com/",
+      "//evil.example.com/",
+      "/\\evil.example.com",
+      "/\t/evil.example.com",
+    ];
     const read = await Promise.allSettled(hostile.map((link) => readSignInContext(answering({
       accessMode: "private_team",
       helpUrl: link,

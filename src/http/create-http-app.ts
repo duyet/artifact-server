@@ -1073,7 +1073,12 @@ export function createHttpApp(
       startOidcSignIn(
         oidc,
         {
-          returnArtifactId: parseArtifactId(context.req.query("returnArtifact")),
+          // Only this origin's own pages may pick the artifact to land on, so
+          // a link from another site or from sandboxed artifact content cannot
+          // send someone through a real sign-in to a page of its choosing.
+          returnArtifactId: context.req.header("sec-fetch-site") === "same-origin"
+            ? parseArtifactId(context.req.query("returnArtifact"))
+            : null,
           returnTo: safeReturnTo(context.req.query("returnTo")),
         },
         dependencies.clock.now(),

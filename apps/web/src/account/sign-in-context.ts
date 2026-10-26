@@ -3,7 +3,9 @@ import {z} from "zod";
 const signInContextSchema = z.object({
   helpUrl: z.union([
     z.url({protocol: /^https$/u}),
-    z.string().regex(/^\/(?![/\\])/u),
+    // The server's rule: one leading slash, then no backslash, whitespace, or
+    // control code, any of which a browser could read as another host.
+    z.string().regex(/^\/(?![/\\])[^\s\\\p{Cc}]*$/u),
   ]),
   login: z.object({oidc: z.boolean().optional()}),
 });

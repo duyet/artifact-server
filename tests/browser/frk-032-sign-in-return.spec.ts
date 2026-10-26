@@ -28,7 +28,12 @@ const readablePath = "team/plans";
  */
 async function approveEverySignIn(page: Page, provider: FakeOidcProvider): Promise<void> {
   await page.route((url) => url.pathname === "/auth/oidc/start", async (route) => {
-    const started = await route.fetch({maxRedirects: 0});
+    // request.headers() leaves out Fetch Metadata, and the server reads Sec-Fetch-Site.
+    const request = route.request();
+    const started = await route.fetch({
+      headers: {...request.headers(), "sec-fetch-site": await request.headerValue("sec-fetch-site") ?? ""},
+      maxRedirects: 0,
+    });
     const back = provider.approve(started.headers()["location"] ?? "", carol);
     await route.fulfill({
       body: `<!doctype html><meta http-equiv="refresh" content="0; url=${back.replaceAll("&", "&amp;")}">`,

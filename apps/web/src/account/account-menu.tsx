@@ -1,7 +1,7 @@
 import {IconFiles, IconHelp, IconLayoutDashboard, IconLogout} from "@tabler/icons-react";
 import {toast} from "sonner";
 
-import {api, type Session} from "@/api/client";
+import {api, ApiError, type Session} from "@/api/client";
 import {Avatar, AvatarFallback} from "@/components/ui/avatar";
 import {Button} from "@/components/ui/button";
 import {
@@ -26,11 +26,17 @@ interface AccountMenuProps {
   readonly helpUrl: string | null;
 }
 
-function signOut(afterSignOut: string): void {
-  void api.logout().then(
-    () => window.location.assign(afterSignOut),
-    () => toast.error("Sign out failed. You are still signed in."),
-  );
+async function signOut(afterSignOut: string): Promise<void> {
+  try {
+    await api.logout();
+  } catch (failed) {
+    // A 401 means the session had already ended, so the reader is signed out.
+    if (!(failed instanceof ApiError && failed.status === 401)) {
+      toast.error("Sign out failed. You are still signed in.");
+      return;
+    }
+  }
+  window.location.assign(afterSignOut);
 }
 
 /**
@@ -65,7 +71,7 @@ export function AccountMenuItems({account, afterSignOut, helpUrl}: AccountMenuPr
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
-        <DropdownMenuItem onClick={() => signOut(afterSignOut)}>
+        <DropdownMenuItem onClick={() => void signOut(afterSignOut)}>
           <IconLogout />
           Sign out
         </DropdownMenuItem>

@@ -83,10 +83,14 @@ describe("FRK-032 sign-in from an artifact page", () => {
     await removeTestInstallation(installation);
   });
 
-  async function begin(query: Readonly<Record<string, string>>) {
+  /** Start one sign-in, as a link on one of this server's own pages does unless `fetchSite` says otherwise. */
+  async function begin(
+    query: Readonly<Record<string, string>>,
+    fetchSite: "cross-site" | "none" | "same-origin" | "same-site" | null = "same-origin",
+  ) {
     const response = await fetch(
       `${server.baseUrl}/auth/oidc/start?${new URLSearchParams(query)}`,
-      {redirect: "manual"},
+      {headers: fetchSite === null ? {} : {"Sec-Fetch-Site": fetchSite}, redirect: "manual"},
     );
     expect(response.status).toBe(302);
     const cookie = cookiePair(response, pendingCookie);
@@ -115,21 +119,19 @@ describe("FRK-032 sign-in from an artifact page", () => {
     return (await publishSite(server, installation, input)).artifact;
   }
 
-  test("FRK-032-B: SSO started from a path artifact, a folder artifact, or a private artifact the member may read lands on that artifact's own readable root, and SSO from the home page lands home", async () => {
+  test("FRK-032-B: SSO started on this origin from a public path artifact or a public folder artifact lands on that artifact's own readable root, and SSO from the home page lands home", async () => {
     const plans = await publish({accessSetting: "public_link", name: "Team plans", path: "team/plans"});
     const folder = await publish({accessSetting: "public_link", name: "Quarterly Report"});
-    const privateNotes = await publish({accessSetting: "account_required", name: "Private notes"});
 
     expect(await landing(await begin({returnArtifact: plans.id}))).toBe("/team/plans/");
     expect(await landing(await begin({returnArtifact: folder.id})))
       .toBe(`/quarterly-report-${folder.id.slice("art_".length)}/`);
-    expect(await landing(await begin({returnArtifact: privateNotes.id})))
-      .toBe(`/private-notes-${privateNotes.id.slice("art_".length)}/`);
     expect(await landing(await begin({returnTo: "/"}))).toBe("/");
   });
 
-  test("FRK-032-F: an unknown, deleted, path-shaped, or URL-shaped return artifact lands on /review, a caller's query or fragment never rides along, and an edited pending cookie can only name an artifact's own root", async () => {
+  test("FRK-032-F: a return artifact from another site, an unknown, deleted, or private one, or a path-shaped or URL-shaped value lands on /review, a caller's query or fragment never rides along, and an edited pending cookie can only name a public artifact's own root", async () => {
     const plans = await publish({accessSetting: "public_link", name: "Team plans", path: "team/plans"});
+    const privateNotes = await publish({accessSetting: "account_required", name: "Private notes"});
     const doomed = await publish({accessSetting: "public_link", name: "Doomed page", path: "doomed"});
     const deleted = await fetch(`${server.baseUrl}/api/v1/artifacts/${doomed.id}`, {
       body: JSON.stringify({expectedCurrentVersionId: doomed.currentVersionId}),
@@ -155,9 +157,15 @@ describe("FRK-032 sign-in from an artifact page", () => {
     expect(refused.map((each) => pendingSignIn(each.cookie).returnArtifactId))
       .toEqual(notArtifactIds.map(() => null));
     expect(await Promise.all(refused.map(landing))).toEqual(notArtifactIds.map(() => "/review"));
-    const unknownIds = [`art_${randomUUID()}`, doomed.id];
-    expect(await Promise.all(unknownIds.map(async (returnArtifact) => landing(await begin({returnArtifact})))))
-      .toEqual(["/review", "/review"]);
+    // The member may read the private artifact, but its readable root serves only public ones.
+    const unreachableIds = [`art_${randomUUID()}`, doomed.id, privateNotes.id];
+    expect(await Promise.all(unreachableIds.map(async (returnArtifact) => landing(await begin({returnArtifact})))))
+      .toEqual(["/review", "/review", "/review"]);
+    // A link on another site, or a request with no Fetch Metadata, never picks the landing page.
+    const offOrigin = await Promise.all((["cross-site", "same-site", "none", null] as const).map((fetchSite) =>
+      begin({returnArtifact: plans.id}, fetchSite)));
+    expect(offOrigin.map((each) => pendingSignIn(each.cookie).returnArtifactId)).toEqual([null, null, null, null]);
+    expect(await Promise.all(offOrigin.map(landing))).toEqual(["/review", "/review", "/review", "/review"]);
     // A return path never names an artifact page; only an ID does.
     expect(await landing(await begin({returnTo: "/team/plans/"}))).toBe("/review");
     // The server's own root for the artifact, with nothing the caller sent.
@@ -168,8 +176,8 @@ describe("FRK-032 sign-in from an artifact page", () => {
       const started = await begin({});
       return landing({...started, cookie: editedCookie(started.cookie, {returnArtifactId})});
     };
-    expect(await Promise.all(["/team/plans/", "https://evil.example.com/", doomed.id].map(withEditedCookie)))
-      .toEqual(["/review", "/review", "/review"]);
+    expect(await Promise.all(["/team/plans/", "https://evil.example.com/", doomed.id, privateNotes.id].map(withEditedCookie)))
+      .toEqual(["/review", "/review", "/review", "/review"]);
     // A hand-edited ID still lands only where the server would build for it.
     expect(await withEditedCookie(plans.id)).toBe("/team/plans/");
   });

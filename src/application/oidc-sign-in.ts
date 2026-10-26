@@ -1,7 +1,7 @@
 import {Effect, Redacted} from "effect";
 
 import type {IssuedApplicationSession} from "../core/installation-identity.js";
-import type {ArtifactRecord} from "../core/model.js";
+import {accessSettings, type ArtifactRecord} from "../core/model.js";
 import {
   oidcFailureReports,
   type OidcSignIn,
@@ -49,7 +49,10 @@ export interface OidcCallbackRequest {
 
 export interface CompletedOidcSignIn {
   readonly issued: IssuedApplicationSession;
-  /** The return artifact, when it is live and the new session may read it. */
+  /**
+   * The return artifact, when it is live, public by link, and the new session
+   * may read it: only such an artifact has a page at its readable root.
+   */
   readonly returnArtifact: ArtifactRecord | null;
   readonly returnTo: string;
 }
@@ -143,9 +146,9 @@ export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
 );
 
 /**
- * The artifact a new session may read, resolved as that session's next
- * request would be. Anything else, a repository failure included, is null so
- * the sign-in still lands on its Review path.
+ * The public-link artifact a new session may read, resolved as that session's
+ * next request would be. Anything else, a repository failure included, is null
+ * so the sign-in still lands on its Review path.
  */
 const readableReturnArtifact = Effect.fn("readableReturnArtifact")(
   function*(issued: IssuedApplicationSession, artifactId: string) {
@@ -154,7 +157,8 @@ const readableReturnArtifact = Effect.fn("readableReturnArtifact")(
     const session = yield* access.authenticateSession(
       Redacted.make(issued.token, {label: "application-session"}),
     );
-    return yield* content.resolveReadableArtifact(session.principal, artifactId);
+    const artifact = yield* content.resolveReadableArtifact(session.principal, artifactId);
+    return artifact.accessSetting === accessSettings.publicLink ? artifact : null;
   },
   Effect.tapError((failed) =>
     Effect.logInfo("auth.oidc_sign_in.return_artifact_unreadable").pipe(
