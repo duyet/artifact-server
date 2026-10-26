@@ -33,6 +33,7 @@ import {
   agentBeaconStates,
   agentDispatchStates,
   artifactActionKinds,
+  catalogScopes,
   commentThreadStates,
   dispatchHoldsCommentThread,
   dispatchedThreadFilters,
@@ -118,6 +119,7 @@ import type {
   ListAgentDispatches,
   ListArtifactActions,
   ListArtifacts,
+  ListCatalogArtifacts,
   ListCommentThreads,
   MarkDispatchDelivered,
   MarkDispatchFailed,
@@ -278,13 +280,10 @@ const artifactViewTotalRowSchema = z.object({
   artifactId: z.string(),
   count: z.number().int().nonnegative(),
 });
-const publicArtifactSummaryRowSchema = z.object({
-  accessSetting: accessSettingSchema,
+const catalogArtifactRowSchema = z.object({
+  ...artifactRowColumns,
   currentVersionCreatedAt: z.string(),
-  id: z.string(),
-  name: z.string(),
-  path: z.string().nullable(),
-});
+}).transform(withArtifactOwner);
 const projectActivityTotalsRowSchema = z.object({
   artifacts: z.number().int().nonnegative(),
   artifactsViewedOnDay: z.number().int().nonnegative(),
@@ -1249,29 +1248,47 @@ export class SqliteArtifactRepository implements
     });
   }
 
-  listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]> {
-    return Promise.resolve().then(() =>
-      z.array(publicArtifactSummaryRowSchema).parse(this.#database
+  listCatalogArtifacts(
+    command: ListCatalogArtifacts,
+  ): Promise<readonly PublicArtifactSummary[]> {
+    return Promise.resolve().then(() => {
+      // The public scope is what an anonymous viewer may see: a public link
+      // that is not tagged unlisted.
+      const publicOnly = command.scope === catalogScopes.public;
+      const scopeSql = publicOnly
+        ? `AND artifacts.access_setting = 'public_link'
+           AND NOT EXISTS (
+             SELECT 1 FROM artifact_tags
+             WHERE artifact_tags.artifact_id = artifacts.id
+               AND artifact_tags.tag = ?
+           )`
+        : "";
+      const rows = this.#database
         .prepare(
           `SELECT
              artifacts.id,
+             artifacts.project_id AS projectId,
              artifacts.name,
              artifacts.path,
              artifacts.access_setting AS accessSetting,
+             artifacts.owner_principal_id AS ownerPrincipalId,
+             artifacts.owner_display_name AS ownerDisplayName,
+             artifacts.current_version_id AS currentVersionId,
+             artifacts.created_at AS createdAt,
+             artifacts.deleted_at AS deletedAt,
              versions.created_at AS currentVersionCreatedAt
            FROM artifacts
            JOIN versions ON versions.id = artifacts.current_version_id
            WHERE artifacts.deleted_at IS NULL
-             AND artifacts.access_setting = 'public_link'
-             AND NOT EXISTS (
-               SELECT 1 FROM artifact_tags
-               WHERE artifact_tags.artifact_id = artifacts.id
-                 AND artifact_tags.tag = ?
-             )
+             ${scopeSql}
            ORDER BY artifacts.created_at DESC, artifacts.id DESC
            LIMIT ?`,
         )
-        .all(unlistedArtifactTag, limit)));
+        .all(...(publicOnly ? [unlistedArtifactTag] : []), command.limit);
+      return this.#withTagsForArtifacts(
+        z.array(catalogArtifactRowSchema).parse(rows),
+      );
+    });
   }
 
   readArtifactVersionDays(
