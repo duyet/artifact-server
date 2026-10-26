@@ -14,6 +14,7 @@ export interface DirectoryIdentity {
 export const directoryRejectionReasons = {
   entryUnreadable: "entry_unreadable",
   invalidCredentials: "invalid_credentials",
+  invalidUsername: "invalid_username",
   missingEmail: "missing_email",
   noMember: "no_member",
   notInRequiredGroup: "not_in_required_group",

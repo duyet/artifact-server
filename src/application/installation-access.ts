@@ -571,24 +571,23 @@ function makeInstallationAccessService(
     const noMember = new DirectorySignInRejected({
       reason: directoryRejectionReasons.noMember,
     });
-    const findMember = Effect.fn(function*() {
-      for (const email of emails) {
-        const member = yield* dependencies.repository.findActiveMemberByEmail(
-          dependencies.installationId,
-          email,
-        );
-        if (member !== null) return member;
-      }
-      return null;
-    });
+    // Only the entry's first email names its member. Other values may be
+    // aliases or delegated mailboxes that belong to someone else.
+    const firstEmail = yield* normalizeEmail(identity.emails[0]).pipe(
+      Effect.mapError(() => noMember),
+    );
+    const findMember = () =>
+      dependencies.repository.findActiveMemberByEmail(
+        dependencies.installationId,
+        firstEmail,
+      );
     let member = yield* findMember();
-    const [firstEmail] = emails;
     if (member === null) {
-      if (unknownUsers === unknownDirectoryUserPolicies.reject || firstEmail === undefined) {
+      if (unknownUsers === unknownDirectoryUserPolicies.reject) {
         return yield* noMember;
       }
-      // Any email of a deactivated member keeps the whole entry out, whatever
-      // order the directory returns its values in.
+      // Any email of an existing member, active or deactivated, keeps the whole
+      // entry out, whatever order the directory returns its values in.
       const members = yield* dependencies.repository.listMembers(dependencies.installationId);
       if (members.some((existing) => emails.includes(existing.email))) {
         return yield* noMember;

@@ -58,6 +58,7 @@ import {
   AuthorizationDenied,
   type ArtifactServerFailure,
   ContentBootstrapRejected,
+  DirectoryUnavailable,
   errorCodes,
   InvalidPagination,
   isArtifactServerFailure,
@@ -147,7 +148,10 @@ import {
   versionServedRoots,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
-import {FailedSignInLimiter} from "./failed-sign-in-limiter.js";
+import {
+  directoryUsernameFailedSignInPolicy,
+  FailedSignInLimiter,
+} from "./failed-sign-in-limiter.js";
 import {
   attachmentContentDisposition,
   portableDownloadFilename,
@@ -466,9 +470,16 @@ const issueApiKeySchema = z.object({
 const apiKeySignInSchema = z.object({
   apiKey: z.string().min(1).max(1_024),
 }).strict();
+// Letters, digits, and `._@-` only, so a username carries no DN syntax and
+// nothing a directory might drop or fold into another user's name.
+const directoryUsernamePattern = /^[\p{L}\p{N}._@-]{1,200}$/u;
 const directorySignInSchema = z.object({
   password: z.string().min(1).max(1_024),
-  username: z.string().min(1).max(200),
+  // Null for a username outside the pattern, which is refused like a wrong password.
+  username: z.string().transform((username) => {
+    const normalized = username.normalize("NFC");
+    return directoryUsernamePattern.test(normalized) ? normalized : null;
+  }),
 }).strict();
 
 // Characters RFC 4518 section 2.2 maps to nothing before a directory compares names.
@@ -607,7 +618,10 @@ export function createHttpApp(
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
   const failedDirectorySignIns = new FailedSignInLimiter(dependencies.clock);
-  const failedDirectoryUsers = new FailedSignInLimiter(dependencies.clock);
+  const failedDirectoryUsers = new FailedSignInLimiter(
+    dependencies.clock,
+    directoryUsernameFailedSignInPolicy,
+  );
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -1002,7 +1016,10 @@ export function createHttpApp(
   });
 
   // Each attempt is counted before it runs, so concurrent guesses cannot all
-  // pass the check, and refunded when it ends without a refused credential.
+  // pass the check. A refused credential keeps its charge, and so does an
+  // unavailable directory, which may have checked the password before its
+  // answer was lost; refunding that would let a client bind without limit.
+  // A success, or a failure of this server's own, returns the charge.
   const limitedSignIn = async <E>(
     context: Context<HttpEnvironment>,
     counters: readonly SignInCounter[],
@@ -1027,7 +1044,10 @@ export function createHttpApp(
     try {
       issued = await runHttpApplicationEffect(context, dependencies, signIn);
     } catch (failure) {
-      if (!(failure instanceof AuthenticationRequired)) {
+      if (
+        !(failure instanceof AuthenticationRequired) &&
+        !(failure instanceof DirectoryUnavailable)
+      ) {
         for (const counter of counters) counter.limiter.refund(counter.key);
       }
       throw failure;
@@ -1069,18 +1089,23 @@ export function createHttpApp(
     requireApplicationOrigin(context, dependencies);
     const body = directorySignInSchema.parse(await context.req.json());
     const clientAddress = signInClientAddress(context, dependencies);
-    // Passwords are guessable, unlike keys, so one person's success never
-    // resets the client's count, and each username has its own count.
+    // Passwords are guessable, unlike keys, so a success resets neither
+    // count: not the client's, and not the username's, which a victim's own
+    // sign-in would otherwise clear for whoever is guessing at it.
+    const counters: SignInCounter[] = [
+      {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
+    ];
+    // A refused username never reaches the directory, so only the client pays.
+    if (body.username !== null) {
+      counters.push({
+        key: directoryUsernameKey(body.username),
+        limiter: failedDirectoryUsers,
+        onSuccess: "refund",
+      });
+    }
     return limitedSignIn(
       context,
-      [
-        {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
-        {
-          key: directoryUsernameKey(body.username),
-          limiter: failedDirectoryUsers,
-          onSuccess: "clear",
-        },
-      ],
+      counters,
       signInWithDirectory(
         directory,
         body.username,
