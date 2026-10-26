@@ -39,17 +39,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {Toaster} from "@/components/ui/sonner";
 import {readThemePreference} from "@/lib/theme";
+import {visibilitySteps, type Visibility} from "@/lib/visibility";
+import {visibilityPresentation} from "@/review/access-badge";
 import {reviewHref} from "@/review/review-location";
 
-import {
-  treeVisibilities,
-  unlistedTag,
-  visibilityLabels,
-  visibilityWrites,
-  type PublicArtifactTreeEntry,
-  type TreeManageHandle,
-  type TreeVisibility,
-} from "./home-tree.js";
+import type {PublicArtifactTreeEntry, TreeManageHandle} from "./home-tree.js";
+
+/** The choices the menu offers, widest last. */
+const visibilities = ["public", "unlisted", "private"] as const satisfies readonly Visibility[];
 
 /**
  * The `⋯` menu on a row the viewer may change. The server sends a manage
@@ -69,7 +66,7 @@ export function ArtifactRowMenu({
   const [pending, setPending] = useState(false);
   const [renaming, setRenaming] = useState<ArtifactDetails | null>(null);
   // A private artifact about to gain a link waits for the reader to confirm.
-  const [exposing, setExposing] = useState<TreeVisibility | null>(null);
+  const [exposing, setExposing] = useState<Visibility | null>(null);
   const run = async (action: () => Promise<void>) => {
     setPending(true);
     try {
@@ -80,37 +77,39 @@ export function ArtifactRowMenu({
       setPending(false);
     }
   };
-  const changeVisibility = (target: TreeVisibility) => run(async () => {
+  const changeVisibility = (target: Visibility) => run(async () => {
     try {
       // The tags write replaces every tag, so it starts from the artifact as
       // the server holds it now, not as the tree last read it.
       const {artifact: current} = await api.artifact(handle.projectId, handle.artifactId);
-      const writes = visibilityWrites({
-        tags: current.tags,
-        visibility: current.accessSetting === "account_required"
-          ? "private"
-          : current.tags.includes(unlistedTag) ? "unlisted" : "public",
-      }, target);
-      if (writes.tags !== null) {
-        await api.changeTags(
-          handle.projectId,
-          handle.artifactId,
-          current.currentVersionId,
-          writes.tags,
-          newActionKey("visibility"),
-        );
-      }
-      const changed = writes.accessSetting === null
-        ? null
-        : await api.changeAccess(
-          handle.projectId,
-          handle.artifactId,
-          current.currentVersionId,
-          writes.accessSetting,
-          newActionKey("visibility"),
-        );
-      toast.success(`${artifact.name} is now ${visibilityLabels[target].toLowerCase()}.`, {
-        description: changed?.warning ?? undefined,
+      // The steps run one after another; their order keeps every state in
+      // between no more exposed than both ends. The access write's warning,
+      // if any, is the one the reader needs to see.
+      const warning = await visibilitySteps(current, target).reduce(
+        async (previous: Promise<string | null>, step) => {
+          const earlier = await previous;
+          if (step.kind === "tags") {
+            await api.changeTags(
+              handle.projectId,
+              handle.artifactId,
+              current.currentVersionId,
+              step.tags,
+              newActionKey("visibility"),
+            );
+            return earlier;
+          }
+          return (await api.changeAccess(
+            handle.projectId,
+            handle.artifactId,
+            current.currentVersionId,
+            step.accessSetting,
+            newActionKey("visibility"),
+          )).warning;
+        },
+        Promise.resolve(null),
+      );
+      toast.success(`${artifact.name} is now ${visibilityPresentation[target].label.toLowerCase()}.`, {
+        description: warning ?? undefined,
       });
     } finally {
       // A failed second write can leave the first in place, so the tree
@@ -118,7 +117,7 @@ export function ArtifactRowMenu({
       onChanged();
     }
   });
-  const chooseVisibility = (target: TreeVisibility) => {
+  const chooseVisibility = (target: Visibility) => {
     if (target === artifact.visibility) return;
     if (artifact.visibility === "private") setExposing(target);
     else void changeVisibility(target);
@@ -186,12 +185,12 @@ export function ArtifactRowMenu({
             <DropdownMenuLabel>Visibility</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               onValueChange={(value) => {
-                const target = treeVisibilities.find((visibility) => visibility === value);
+                const target = visibilities.find((visibility) => visibility === value);
                 if (target !== undefined) chooseVisibility(target);
               }}
               value={artifact.visibility}
             >
-              {treeVisibilities.map((visibility) => (
+              {visibilities.map((visibility) => (
                 // The menu closes on a choice, so a second choice cannot race
                 // the first before the tree reads the result.
                 <DropdownMenuRadioItem
@@ -200,7 +199,7 @@ export function ArtifactRowMenu({
                   key={visibility}
                   value={visibility}
                 >
-                  {visibilityLabels[visibility]}
+                  {visibilityPresentation[visibility].label}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
@@ -230,7 +229,7 @@ export function ArtifactRowMenu({
                 setExposing(null);
               }}
             >
-              Make {exposing === null ? "" : visibilityLabels[exposing].toLowerCase()}
+              Make {exposing === null ? "" : visibilityPresentation[exposing].label.toLowerCase()}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

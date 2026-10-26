@@ -1,23 +1,10 @@
+import type {Visibility} from "../lib/visibility.js";
+
 /** One UTC day's count in a sparse daily series. */
 export interface DailyCount {
   readonly count: number;
   readonly day: string;
 }
-
-/** Who can find an artifact from the tree, as the tree endpoint reports it. */
-export const treeVisibilities = ["public", "unlisted", "private"] as const;
-
-export type TreeVisibility = (typeof treeVisibilities)[number];
-
-/** The words each visibility shows in the row menu and on a row's badge. */
-export const visibilityLabels = {
-  private: "Private",
-  public: "Public",
-  unlisted: "Unlisted",
-} as const satisfies Record<TreeVisibility, string>;
-
-/** The tag that keeps a public-link artifact out of the anonymous tree. */
-export const unlistedTag = "unlisted";
 
 /**
  * What the viewer needs to change an artifact's settings. The server sends it
@@ -51,7 +38,7 @@ export interface PublicArtifactTreeEntry {
     readonly last30Days: number;
     readonly total: number;
   };
-  readonly visibility: TreeVisibility;
+  readonly visibility: Visibility;
 }
 
 /** One folder in the tree, labelled with the last segment of its path. */
@@ -233,38 +220,6 @@ export function busiestDay(
   return busiest;
 }
 
-/** One bar's place and height inside a fixed chart box. */
-export interface SparklineBar {
-  readonly height: number;
-  readonly width: number;
-  readonly x: number;
-}
-
-/** The box every chart on the page is drawn in. */
-export const sparklineBox = {gap: 1, height: 24, width: 96} as const;
-
-/**
- * Lay out one bar per value, scaled to the tallest. A series with no views
- * produces zero-height bars rather than an empty box, so a column of rows stays
- * aligned instead of collapsing.
- */
-export function sparklineBars(
-  values: readonly number[],
-  box: {readonly gap: number; readonly height: number; readonly width: number},
-): readonly SparklineBar[] {
-  if (values.length === 0) return [];
-  const totalGap = box.gap * (values.length - 1);
-  const width = Math.max(1, (box.width - totalGap) / values.length);
-  // A floor of 1 keeps an all-zero series from dividing by zero, and a flat
-  // one from being drawn at an arbitrary height.
-  const tallest = Math.max(1, ...values);
-  return values.map((value, index) => ({
-    height: Math.round((Math.max(0, value) / tallest) * box.height),
-    width,
-    x: index * (width + box.gap),
-  }));
-}
-
 /** One calendar day, `days` after or before `day`, as `YYYY-MM-DD`. */
 function shiftDay(day: string, days: number): string {
   const instant = new Date(`${day}T00:00:00.000Z`);
@@ -351,29 +306,3 @@ const treeSortOrders = {
   readonly entries: (left: PublicArtifactTreeEntry, right: PublicArtifactTreeEntry) => number;
   readonly folders: (left: PublicArtifactTreeFolder, right: PublicArtifactTreeFolder) => number;
 }>;
-
-/** The two settings writes one visibility change needs; null skips a write. */
-export interface VisibilityWrites {
-  readonly accessSetting: "account_required" | "public_link" | null;
-  readonly tags: readonly string[] | null;
-}
-
-/**
- * The writes that move an artifact from its visibility to `target`. Private
- * is the access setting; unlisted is a public link with the unlisted tag. The
- * tags are written before the access, so a change never passes through a
- * state that lists the artifact more widely than either end.
- */
-export function visibilityWrites(
-  current: {readonly tags: readonly string[]; readonly visibility: TreeVisibility},
-  target: TreeVisibility,
-): VisibilityWrites {
-  const tagged = current.tags.includes(unlistedTag);
-  const accessSetting = target === "private"
-    ? (current.visibility === "private" ? null : "account_required")
-    : (current.visibility === "private" ? "public_link" : null);
-  let tags: readonly string[] | null = null;
-  if (target === "unlisted" && !tagged) tags = [...current.tags, unlistedTag].toSorted();
-  if (target === "public" && tagged) tags = current.tags.filter((tag) => tag !== unlistedTag);
-  return {accessSetting, tags};
-}

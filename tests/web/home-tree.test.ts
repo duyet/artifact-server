@@ -6,10 +6,7 @@ import {
   dayTone,
   densifyDailySeries,
   entriesOnDay,
-  sparklineBars,
-  sparklineBox,
   sumDailySeries,
-  visibilityWrites,
   windowDays,
   type PublicArtifactTreeEntry,
 } from "../../apps/web/src/home/home-tree.js";
@@ -278,50 +275,5 @@ describe("tree order", () => {
       team: ["Alpha", "gamma", "beta"],
       ungrouped: ["Loose a", "loose b"],
     });
-  });
-});
-
-describe("visibility writes", () => {
-  test("a change writes the tags before the access, and only what differs", () => {
-    const tags = ["report"];
-    expect(visibilityWrites({tags, visibility: "public"}, "private"))
-      .toEqual({accessSetting: "account_required", tags: null});
-    expect(visibilityWrites({tags, visibility: "public"}, "unlisted"))
-      .toEqual({accessSetting: null, tags: ["report", "unlisted"]});
-    expect(visibilityWrites({tags: ["report", "unlisted"], visibility: "unlisted"}, "public"))
-      .toEqual({accessSetting: null, tags: ["report"]});
-    // A private artifact that still carries the tag becomes public only once
-    // the tag is gone.
-    expect(visibilityWrites({tags: ["unlisted"], visibility: "private"}, "public"))
-      .toEqual({accessSetting: "public_link", tags: []});
-    expect(visibilityWrites({tags: [], visibility: "private"}, "unlisted"))
-      .toEqual({accessSetting: "public_link", tags: ["unlisted"]});
-    expect(visibilityWrites({tags, visibility: "private"}, "private"))
-      .toEqual({accessSetting: null, tags: null});
-  });
-});
-
-describe("sparkline geometry", () => {
-  test("bar heights scale to the tallest value and share the box width", () => {
-    const bars = sparklineBars([0, 1, 2, 4], sparklineBox);
-    expect(bars.map((bar) => bar.height)).toEqual([0, 6, 12, 24]);
-    const total = bars.reduce((sum, bar) => sum + bar.width, 0) +
-      sparklineBox.gap * (bars.length - 1);
-    expect(total).toBeCloseTo(sparklineBox.width, 6);
-    expect(bars[0]?.x).toBe(0);
-  });
-
-  test("a series with no views draws zero-height bars instead of an empty box", () => {
-    const bars = sparklineBars([0, 0, 0], sparklineBox);
-    expect(bars).toHaveLength(3);
-    expect(bars.every((bar) => bar.height === 0)).toBe(true);
-    expect(bars.every((bar) => bar.width > 0)).toBe(true);
-  });
-
-  test("a single value fills the box and an empty series draws nothing", () => {
-    expect(sparklineBars([9], sparklineBox)).toEqual([
-      {height: 24, width: sparklineBox.width, x: 0},
-    ]);
-    expect(sparklineBars([], sparklineBox)).toEqual([]);
   });
 });

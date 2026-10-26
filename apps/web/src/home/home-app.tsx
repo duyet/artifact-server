@@ -9,9 +9,9 @@ import {
 import {lazy, Suspense, useRef, useState, type KeyboardEvent} from "react";
 import {Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis} from "recharts";
 
+import {Sparkline} from "@/components/sparkline";
 import {ThemeMenu} from "@/components/theme-menu";
 import {Alert, AlertDescription} from "@/components/ui/alert";
-import {Badge} from "@/components/ui/badge";
 import {Button, ButtonLink} from "@/components/ui/button";
 import {
   Card,
@@ -38,6 +38,7 @@ import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
 import {Toggle} from "@/components/ui/toggle";
 import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
+import {VisibilityBadge} from "@/review/access-badge";
 
 import {
   buildPublicArtifactTree,
@@ -45,11 +46,8 @@ import {
   dayTone,
   densifyDailySeries,
   entriesOnDay,
-  sparklineBars,
-  sparklineBox,
   sumDailySeries,
   treeSorts,
-  visibilityLabels,
   windowDays,
   type DailyMetric,
   type DayTone,
@@ -718,7 +716,6 @@ function ArtifactNode({
   readonly row: RowContext;
 }) {
   const counts = densifyDailySeries(artifact.series, row.days);
-  const bars = sparklineBars(counts, sparklineBox);
   const views = artifact.views;
   const summary = `${viewCount(views.last7Days)} in 7 days, ` +
     `${formatCount(views.last30Days)} in ${counts.length} days, ` +
@@ -734,9 +731,7 @@ function ArtifactNode({
         <IconFileText />
         <span className="truncate">{artifact.name}</span>
       </ButtonLink>
-      {artifact.visibility === "public" ? null : (
-        <Badge variant="outline">{visibilityLabels[artifact.visibility]}</Badge>
-      )}
+      {artifact.visibility === "public" ? null : <VisibilityBadge visibility={artifact.visibility} />}
       <span className="hidden w-36 shrink-0 truncate text-xs text-muted-foreground md:block">
         {artifact.owner ?? ""}
       </span>
@@ -744,32 +739,17 @@ function ArtifactNode({
         <TooltipTrigger
           render={(
             <span
-              aria-label={`${artifact.name}: ${summary}`}
               className="hidden shrink-0 rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:block"
               data-slot="tree-sparkline"
-              role="img"
               tabIndex={0}
             />
           )}
         >
-          <svg
-            aria-hidden="true"
-            className="block text-(--chart-views)"
-            height={sparklineBox.height}
-            viewBox={`0 0 ${sparklineBox.width} ${sparklineBox.height}`}
-            width={sparklineBox.width}
-          >
-            {bars.map((bar, index) => (
-              <rect
-                className="fill-current"
-                height={bar.height}
-                key={row.days[index]}
-                width={bar.width}
-                x={bar.x}
-                y={sparklineBox.height - bar.height}
-              />
-            ))}
-          </svg>
+          <Sparkline
+            className="text-(--chart-views)"
+            label={`${artifact.name}: ${summary}`}
+            values={counts}
+          />
         </TooltipTrigger>
         <TooltipContent>{summary}</TooltipContent>
       </Tooltip>

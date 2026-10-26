@@ -1,7 +1,6 @@
 import {Context, DateTime, Duration, Effect, Layer} from "effect";
 
 import type {ApplicationClock} from "./application-clock.js";
-import {unlistedArtifactTag} from "./artifact-tags.js";
 import {
   type AuthorizationOperations,
   AuthorizationService,
@@ -18,13 +17,10 @@ import type {
   CollapsedFolderRepository,
 } from "../core/ports.js";
 import {
-  accessSettings,
-  artifactVisibilities,
   type ArtifactVersionDay,
   type ArtifactViewCounts,
   type ArtifactViewDay,
   type ArtifactViewTotal,
-  type ArtifactVisibility,
   type CatalogScope,
   catalogScopes,
   type FolderDefaultState,
@@ -169,7 +165,6 @@ function makePublicArtifactCatalogService(
             series,
             updates: versionDays.filter((day) => day.artifactId === artifact.id),
             views: countViews(series, total, recentSinceDay),
-            visibility: visibilityOf(artifact),
           };
         }),
         collapsedFolders: revealedFolders(collapsed, summaries),
@@ -253,15 +248,6 @@ const emailAddressPattern = /[^\s@]+@[^\s@]+/u;
 function ownerName(displayName: string | null): string | null {
   const name = displayName?.trim() ?? "";
   return name === "" || emailAddressPattern.test(name) ? null : name;
-}
-
-function visibilityOf(artifact: PublicArtifactSummary): ArtifactVisibility {
-  if (artifact.accessSetting === accessSettings.accountRequired) {
-    return artifactVisibilities.private;
-  }
-  return artifact.tags.includes(unlistedArtifactTag)
-    ? artifactVisibilities.unlisted
-    : artifactVisibilities.public;
 }
 
 function readSummaries(

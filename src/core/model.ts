@@ -19,20 +19,6 @@ export type FolderDefaultState =
   (typeof folderDefaultStates)[keyof typeof folderDefaultStates];
 
 /**
- * Who can find an artifact from the home page tree. Private needs an account,
- * unlisted keeps its public link but leaves the anonymous tree, and public is
- * listed for everyone.
- */
-export const artifactVisibilities = {
-  private: "private",
-  public: "public",
-  unlisted: "unlisted",
-} as const;
-
-export type ArtifactVisibility =
-  (typeof artifactVisibilities)[keyof typeof artifactVisibilities];
-
-/**
  * Which live artifacts one catalog read lists: the public ones an anonymous
  * viewer may see, or every one for a viewer who may list artifacts.
  */
@@ -283,7 +269,6 @@ export interface PublicArtifactCatalogItem {
   /** Only the days inside the window that published a version, ascending. */
   readonly updates: readonly ArtifactVersionDay[];
   readonly views: ArtifactViewCounts;
-  readonly visibility: ArtifactVisibility;
 }
 
 /** The signed-in viewer a catalog was read for. */

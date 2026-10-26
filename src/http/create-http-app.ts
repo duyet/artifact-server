@@ -44,6 +44,7 @@ import {
   type PublicLinkInventoryPage,
 } from "../application/public-link-administration.js";
 import {ArtifactAssetService} from "../application/artifact-assets.js";
+import {artifactVisibility} from "../application/artifact-tags.js";
 import {
   type ArtifactAssetCheck,
   CheckArtifactAssetsService,
@@ -989,7 +990,7 @@ export function createHttpApp(
           item.artifact,
         ),
         views: item.views,
-        visibility: item.visibility,
+        visibility: artifactVisibility(item.artifact),
       })),
       loginKind: dependencies.browserAccess.loginKind,
     });
