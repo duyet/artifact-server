@@ -45,6 +45,15 @@ async function approveEverySignIn(page: Page, provider: FakeOidcProvider): Promi
   });
 }
 
+/** Wait for every running transition, such as a theme change or a menu opening, before a screenshot. */
+async function settled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const finite = document.getAnimations()
+      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity);
+    await Promise.all(finite.map(async (animation) => animation.finished));
+  });
+}
+
 function viewerBar(page: Page) {
   return page.getByRole("banner", {name: "Artifact viewer"});
 }
@@ -99,14 +108,21 @@ test.describe("FRK-032 sign-in returns to the page it started from", () => {
       await expect(menu.getByText("carol@example.com")).toBeVisible();
       await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Workbench", "Help", "Sign out"]);
       await expect(menu.getByRole("menuitem", {name: "Help"})).toHaveAttribute("href", defaultHelpUrl);
+      await settled(page);
       await page.screenshot({path: "test-results/browser/screenshots/frk-032-bar-account-light.png"});
-      await page.emulateMedia({colorScheme: "dark"});
-      await expect(page.locator("html")).toHaveClass(/\bdark\b/u);
-      await page.screenshot({path: "test-results/browser/screenshots/frk-032-bar-account-dark.png"});
-      await page.emulateMedia({colorScheme: "light"});
       await page.keyboard.press("Escape");
       await expect(menu).toHaveCount(0);
       await expect(avatar).toBeFocused();
+
+      await page.emulateMedia({colorScheme: "dark"});
+      await expect(page.locator("html")).toHaveClass(/\bdark\b/u);
+      await avatar.click();
+      await expect(menu.getByText("carol@example.com")).toBeVisible();
+      await settled(page);
+      await page.screenshot({path: "test-results/browser/screenshots/frk-032-bar-account-dark.png"});
+      await page.keyboard.press("Escape");
+      await expect(menu).toHaveCount(0);
+      await page.emulateMedia({colorScheme: "light"});
 
       await page.setViewportSize({height: 844, width: 390});
       await expect(avatar).toHaveCount(0);
@@ -115,6 +131,7 @@ test.describe("FRK-032 sign-in returns to the page it started from", () => {
       await expect(menu.getByRole("menuitem", {name: "My artifacts"})).toHaveAttribute("href", "/?mine=1");
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
         .toBe(true);
+      await settled(page);
       await page.screenshot({path: "test-results/browser/screenshots/frk-032-bar-account-phone.png"});
 
       const cookieHeader = (await fixture.context.cookies(fixture.server.baseUrl))
