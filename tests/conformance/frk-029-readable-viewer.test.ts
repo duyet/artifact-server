@@ -239,6 +239,8 @@ describe("the viewer at readable artifact URLs", () => {
     await server.stop();
     server = await startTestServer(installation, {contentDomain: null, webAssetsRoot});
     expect(await get(pathUrl, tabNavigation)).toEqual(page(indexHtml));
+    expect(await get(`${pathUrl}docs/nested/page.html`, tabNavigation)).toEqual(page(nestedHtml));
+    expect(await get(`${spa.links.artifact}${route}`, tabNavigation)).toEqual(page(spaShell));
     expect(await totalViews(server, "Agent console")).toBe(1);
   });
 });

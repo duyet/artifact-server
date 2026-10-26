@@ -188,11 +188,21 @@ describe("entry-document view counts", () => {
     );
     expect(clientRoute.status).toBe(200);
     expect(await clientRoute.text()).toBe(spaShell);
+    // A tab's navigation to the same client route at the version URL answers
+    // the entry document too, and counts the same way.
+    const versionRoute = await fetchVersion(
+      server,
+      `${spa.links.version}settings/profile`,
+      "GET",
+      navigation,
+    );
+    expect(versionRoute.status).toBe(200);
+    expect(await versionRoute.text()).toBe(spaShell);
     await server.flushArtifactViews();
     expect(treeEntry(await readTree(server), "Agent console SPA").views)
-      .toEqual({last7Days: 1, last30Days: 1, total: 1});
+      .toEqual({last7Days: 2, last30Days: 2, total: 2});
     expect(storedViewRows(installation, spa.artifact.id)).toEqual([
-      {count: 1, day: today},
+      {count: 2, day: today},
     ]);
   }, 60_000);
 
