@@ -114,7 +114,8 @@ test.describe("FRK-026 viewer bar", () => {
       await expect.poll(() => logo.evaluate((element) =>
         element instanceof HTMLImageElement ? element.naturalWidth : 0
       )).toBeGreaterThan(0);
-      await expect(header.getByRole("link").filter({has: logo})).toHaveAttribute("href", "/");
+      await expect(header.getByRole("link", {exact: true, name: logoAlt}))
+        .toHaveAttribute("href", "/");
       await expect(reviewFrame(page).getByRole("button", {name: "Artifact info"}))
         .toHaveCount(0);
 
