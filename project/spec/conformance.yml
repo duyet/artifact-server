@@ -4449,3 +4449,31 @@ requirements:
     proof_gap: Proved against a compact SQLite installation and an in-process OIDC provider. No run against a real provider, and no Postgres run.
     depends_on: [AUTH-029, FRK-014]
     evidence: []
+
+  - id: FRK-026
+    kind: security
+    behavior: Review's artifact viewer shows a 40px bar above the preview, outside the sandboxed review frame, with the configured logo, the artifact name, an info popover, and an actions menu; the info endpoint reports the owner's display name, the current version, the derived visibility, the update time, exact views, and whether the reader may change visibility; and only the artifact's owner (its own session, or a key on its principal that may create artifacts), a direct human administrator, or a key with artifact:manage:any may change its access or add or remove the unlisted tag, over HTTP and MCP.
+    owner: authorization
+    source: {file: ../../docs/fork/VIEWER.md, anchor: who-can-change-visibility}
+    acceptance:
+      behavior: {id: FRK-026-B, description: "Publish two versions with the installation key, view the entry document across three days with a pinned clock, and read the owner name, version 2, public, the second version's creation time, the exact total, 30-day count, and sparse days, and canManage true; tag it unlisted and read unlisted, make it account_required and read private; a member key that published its own artifact reads canManage true and changes its access and the unlisted tag; an administrator session changes an artifact it does not own. In a browser, the bar is at most 44px tall above the preview with the configured logo, the popover shows each row with an axe-clean page, a visibility change reads back over the API, and the menu holds Copy link, Versions, and Open raw at desktop and phone width in light and dark."}
+      failure: {id: FRK-026-F, description: "A member key on another principal's artifact and a direct human member who is not an administrator read canManage false and get 403 AUTHORIZATION_DENIED on access and on adding or removing unlisted in any spelling, while nothing changes; that member still edits other tags; MCP artifact_set_visibility is refused the same way; a key on the owner's own principal with only artifact:read reads canManage false and gets 403 on access, on adding unlisted, on removing it, and over MCP, while nothing changes; an unknown artifact is 404, no credential is 401, and a key without artifact read is 403; and the response never carries an email or the owner's principal ID."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: The HTTP and MCP cases run against SQLite over a real server, and the rule runs against the real AuthorizationService with constructed principals. The browser case runs only in CI, and no Postgres or deployed run exists.
+    depends_on: [FRK-011, FRK-015]
+    evidence: []
+
+  - id: FRK-028
+    kind: security
+    behavior: An operator sets the viewer bar's logo with ARTIFACT_SERVER_LOGO as an https URL or a logo file of at most 256 KiB, with required alt text and an optional https or root-relative link; startup refuses anything else, config check reports it, an anonymous branding route names it, a logo file is served with nosniff, an ETag, and a sandbox policy that runs no script, and a URL logo adds only its origin to the application pages' img-src.
+    owner: operations
+    source: {file: ../../docs/fork/VIEWER.md, anchor: viewer-logo}
+    acceptance:
+      behavior: {id: FRK-028-B, description: "Parse an https URL logo, an SVG file with a root-relative link, a PNG file with an https link, and a file of exactly 256 KiB, and read each in the config check summary from the external-storage and compact parsers; serve a file logo and read the branding anonymously and the bytes with their type, nosniff, the sandbox policy, an ETag, a 304, and HEAD; serve a URL logo and read its origin in /review's img-src and nowhere else; without a logo read a null branding and a 404 logo route; and start the compact server command with a logo file and read its branding and bytes."}
+      failure: {id: FRK-028-F, description: "An http URL, a URL with credentials, a relative path, a javascript: value, a missing file, a directory, an unsupported extension, a file one byte over 256 KiB, a missing or blank alt, an alt over 100 characters, a link that is //host, /\\host, javascript:, or http, and an alt or a link without a logo each stop startup with the right field and reason."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against the configuration parsers, a real local server, and a spawned compact server. The external-storage server command passes the parsed logo the same way but runs only in CI with Postgres, the browser view of the logo runs only in CI, and no deployed run exists.
+    depends_on: [FRK-009]
+    evidence: []

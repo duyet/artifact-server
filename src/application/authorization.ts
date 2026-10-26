@@ -36,6 +36,16 @@ export interface AuthorizationOperations {
   readonly requireArtifactManagement: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
+  /** {@link canManageArtifact} in this installation. */
+  readonly canManageArtifact: (
+    principal: Principal,
+    artifact: ArtifactRecord,
+  ) => boolean;
+  /** Fail unless {@link canManageArtifact} holds in this installation. */
+  readonly requireArtifactOwnership: (
+    principal: Principal,
+    artifact: ArtifactRecord,
+  ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireArtifactRead: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -77,6 +87,32 @@ export class AuthorizationService extends Context.Service<
       AuthorizationService,
       makeAuthorizationService(dependencies),
     );
+}
+
+/**
+ * Whether a principal may change who can open an artifact: the artifact's
+ * owner, a direct human administrator, or a key that manages any artifact,
+ * always inside the artifact's own installation. A member's own key carries
+ * the member's principal ID, but it owns what the member published only when
+ * it may also create artifacts: a key scoped to reading or commenting must not
+ * make its member's private artifacts public.
+ */
+export function canManageArtifact(
+  principal: Principal,
+  artifact: ArtifactRecord,
+  installationId: string,
+): boolean {
+  return principal.installationId === installationId && (
+    (
+      principal.id === artifact.owner.principalId &&
+      (
+        isDirectHumanPrincipal(principal) ||
+        hasCapability(principal, principalCapabilities.createArtifact)
+      )
+    ) ||
+    isHumanAdministrator(principal) ||
+    hasCapability(principal, principalCapabilities.manageAnyArtifact)
+  );
 }
 
 function makeAuthorizationService(
@@ -221,6 +257,15 @@ function makeAuthorizationService(
     yield* denied();
   });
 
+  const requireArtifactOwnership = Effect.fn(
+    "AuthorizationService.requireArtifactOwnership",
+  )(function*(principal: Principal, artifact: ArtifactRecord) {
+    if (canManageArtifact(principal, artifact, dependencies.installationId)) {
+      return;
+    }
+    yield* denied();
+  });
+
   const requirePublicationPreparation = Effect.fn(
     "AuthorizationService.requirePublicationPreparation",
   )(function*(principal: Principal) {
@@ -286,12 +331,15 @@ function makeAuthorizationService(
   });
 
   return AuthorizationService.of({
+    canManageArtifact: (principal, artifact) =>
+      canManageArtifact(principal, artifact, dependencies.installationId),
     requireAgentConnection,
     requireDispatchSend,
     requireInstallationAdministration,
     requireArtifactListing,
     requireArtifactCreation,
     requireArtifactManagement,
+    requireArtifactOwnership,
     requireArtifactRead,
     requireCommentRead,
     requireCommentWrite,

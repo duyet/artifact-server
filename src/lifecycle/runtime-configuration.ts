@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 import {constants} from "node:fs";
 import {access, readFile, stat} from "node:fs/promises";
 import path from "node:path";
@@ -7,6 +8,12 @@ import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
+import {
+  type ViewerLogo,
+  viewerLogoMaximumBytes,
+  viewerLogoMediaTypes,
+  type ViewerLogoSource,
+} from "../core/viewer-logo.js";
 import {
   unknownOidcUserPolicies,
   type UnknownOidcUserPolicy,
@@ -108,6 +115,7 @@ export interface CompactRuntimeConfiguration {
   readonly deploymentMode: "compact";
   readonly hostname: string;
   readonly installation: CompactInstallationMetadata;
+  readonly logo: ViewerLogo | null;
   readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
@@ -131,6 +139,7 @@ export interface ExternalStorageRuntimeConfiguration {
   readonly deploymentMode: "external-storage";
   readonly hostname: string;
   readonly installationId: string;
+  readonly logo: ViewerLogo | null;
   readonly objectStorage: ObjectStorageProviderFactory;
   readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
@@ -147,6 +156,15 @@ export interface ExternalMigrationConfiguration {
   readonly installationId: string;
 }
 
+/** What `config check` reports about the viewer logo. */
+export interface ViewerLogoSummary {
+  readonly alt: string;
+  readonly link: string | null;
+  /** The URL or the absolute file path. */
+  readonly location: string;
+  readonly source: ViewerLogoSource["kind"];
+}
+
 /** Public, credential-free summary emitted by `config check`. */
 export interface RuntimeConfigurationSummary {
   readonly applicationOrigin: string;
@@ -156,6 +174,7 @@ export interface RuntimeConfigurationSummary {
   readonly deploymentMode: DeploymentMode;
   readonly hostname: string;
   readonly installationId: string;
+  readonly logo: ViewerLogoSummary | null;
   readonly objectStorageProvider: "filesystem" | ObjectStorageProviderKind;
   readonly oidcSignIn: OidcSignInSummary | null;
   readonly port: number;
@@ -248,6 +267,7 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     deploymentMode: "compact",
     hostname: yield* parseHostname(input.hostname),
     installation,
+    logo: yield* parseViewerLogo(input.environment),
     oidcSignIn: yield* parseOidcSignIn(input.environment, applicationOrigin),
     port: yield* parsePort(input.port),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
@@ -390,6 +410,7 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
       environment["ARTIFACT_SERVER_INSTALLATION_ID"],
       installationIdSchema,
     ),
+    logo: yield* parseViewerLogo(environment),
     objectStorage: configuredObjectStorage.factory,
     oidcSignIn: yield* parseOidcSignIn(environment, applicationOrigin),
     port: yield* parsePort(input.port),
@@ -531,6 +552,7 @@ export function summarizeRuntimeConfiguration(
       deploymentMode: configuration.deploymentMode,
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
+      logo: summarizeViewerLogo(configuration.logo),
       objectStorageProvider: "filesystem",
       oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
       port: configuration.port,
@@ -551,6 +573,7 @@ export function summarizeRuntimeConfiguration(
     deploymentMode: configuration.deploymentMode,
     hostname: configuration.hostname,
     installationId: configuration.installationId,
+    logo: summarizeViewerLogo(configuration.logo),
     objectStorageProvider: configuration.objectStorage.kind,
     oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
     port: configuration.port,
@@ -733,6 +756,134 @@ function parseAssetQuota(
       ),
     };
   });
+}
+
+const viewerLogoAltMaximumLength = 100;
+const graphemes = new Intl.Segmenter("en", {granularity: "grapheme"});
+// Browsers read `//host` and `/\host` as another host, so a path link starts
+// with exactly one slash and holds no backslash, whitespace, or control code.
+const rootRelativePathPattern = /^\/(?![/\\])[^\s\\\p{Cc}]*$/u;
+
+/**
+ * Parse the optional viewer logo. A file is read once here, so a missing,
+ * oversized, or unsupported file stops startup instead of breaking the page.
+ */
+const parseViewerLogo = Effect.fn("parseViewerLogo")(function*(
+  environment: NodeJS.ProcessEnv,
+): Effect.fn.Return<ViewerLogo | null, RuntimeConfigurationError> {
+  const location = environment["ARTIFACT_SERVER_LOGO"];
+  if (location === undefined || location === "") {
+    for (const field of ["ARTIFACT_SERVER_LOGO_ALT", "ARTIFACT_SERVER_LOGO_LINK"]) {
+      const value = environment[field];
+      if (value !== undefined && value !== "") {
+        return yield* new RuntimeConfigurationError({
+          field,
+          message: `${field} needs ARTIFACT_SERVER_LOGO.`,
+          reason: "incomplete_configuration",
+        });
+      }
+    }
+    return null;
+  }
+  const altField = "ARTIFACT_SERVER_LOGO_ALT";
+  const alt = environment[altField]?.trim() ?? "";
+  if (alt === "") return yield* missingValue(altField);
+  if (Array.from(graphemes.segment(alt)).length > viewerLogoAltMaximumLength) {
+    return yield* invalidValue(
+      altField,
+      `${altField} must be at most ${viewerLogoAltMaximumLength} characters.`,
+    );
+  }
+  return {
+    alt,
+    link: yield* parseViewerLogoLink(environment["ARTIFACT_SERVER_LOGO_LINK"]),
+    source: path.isAbsolute(location)
+      ? yield* readViewerLogoFile(location)
+      : {kind: "url", url: yield* parseHttpsUrl(
+        "ARTIFACT_SERVER_LOGO",
+        location,
+        "ARTIFACT_SERVER_LOGO must be an https:// URL without credentials or an absolute path to an image file.",
+      )},
+  };
+});
+
+const readViewerLogoFile = Effect.fn("readViewerLogoFile")(function*(
+  filePath: string,
+): Effect.fn.Return<ViewerLogoSource, RuntimeConfigurationError> {
+  const field = "ARTIFACT_SERVER_LOGO";
+  const extension = path.extname(filePath).toLowerCase();
+  const mediaType = Object.entries(viewerLogoMediaTypes)
+    .find(([candidate]) => candidate === extension)?.[1];
+  if (mediaType === undefined) {
+    return yield* invalidValue(
+      field,
+      `${field} must name a ${Object.keys(viewerLogoMediaTypes).join(", ")} file.`,
+    );
+  }
+  const bytes = yield* Effect.tryPromise({
+    catch: () => new RuntimeConfigurationError({
+      field,
+      message: `${field} is not a readable file.`,
+      reason: "path_unavailable",
+    }),
+    try: async () => {
+      const metadata = await stat(filePath);
+      if (!metadata.isFile()) throw new Error("not a file");
+      // Stat first so an oversized file is refused without reading it.
+      return metadata.size > viewerLogoMaximumBytes ? null : readFile(filePath);
+    },
+  });
+  if (bytes === null || bytes.byteLength > viewerLogoMaximumBytes) {
+    return yield* invalidValue(
+      field,
+      `${field} must be at most ${viewerLogoMaximumBytes / 1024} KiB.`,
+    );
+  }
+  return {
+    bytes: new Uint8Array(bytes),
+    kind: "file",
+    mediaType,
+    path: filePath,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+});
+
+function parseViewerLogoLink(
+  value: string | undefined,
+): Effect.Effect<string | null, RuntimeConfigurationError> {
+  if (value === undefined || value === "") return Effect.succeed(null);
+  if (rootRelativePathPattern.test(value)) return Effect.succeed(value);
+  return parseHttpsUrl(
+    "ARTIFACT_SERVER_LOGO_LINK",
+    value,
+    "ARTIFACT_SERVER_LOGO_LINK must be an https:// URL without credentials or a path that starts with one /.",
+  );
+}
+
+function parseHttpsUrl(
+  field: string,
+  value: string,
+  message: string,
+): Effect.Effect<string, RuntimeConfigurationError> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return invalidValue(field, message);
+  }
+  return url.protocol === "https:" && url.hostname !== "" &&
+      url.username === "" && url.password === ""
+    ? Effect.succeed(url.href)
+    : invalidValue(field, message);
+}
+
+function summarizeViewerLogo(logo: ViewerLogo | null): ViewerLogoSummary | null {
+  return logo === null ? null : {
+    alt: logo.alt,
+    link: logo.link,
+    location: logo.source.kind === "file" ? logo.source.path : logo.source.url,
+    source: logo.source.kind,
+  };
 }
 
 function parsePositiveInteger(
