@@ -43,7 +43,10 @@ const accessContextSchema = z.discriminatedUnion("accessMode", [
   }),
   z.object({
     accessMode: z.literal("private_team"),
-    login: z.object({kind: z.enum(["none", "oidc", "workos"])}),
+    login: z.object({
+      directory: z.boolean(),
+      kind: z.enum(["none", "oidc", "workos"]),
+    }),
   }),
 ]);
 
@@ -697,11 +700,37 @@ export class ApiError extends Error {
   }
 }
 
-/** Outcome of presenting an API key at the browser sign-in form. */
-export type ApiKeySignIn =
+/** Outcome of presenting an API key or a directory password at a sign-in form. */
+export type SignInOutcome =
   | {readonly kind: "signed_in"}
   | {readonly kind: "rejected"; readonly message: string}
   | {readonly kind: "rate_limited"; readonly retryAfterSeconds: number};
+
+type SignInRequest =
+  | {readonly apiKey: string}
+  | {readonly password: string; readonly username: string};
+
+async function signIn(path: string, body: SignInRequest): Promise<SignInOutcome> {
+  const response = await fetch(path, {
+    body: JSON.stringify(body),
+    credentials: "same-origin",
+    headers: {"Content-Type": "application/json"},
+    method: "POST",
+  });
+  if (response.status === 204) return {kind: "signed_in"};
+  const failure = await parseFailure(response);
+  if (response.status === 401) return {kind: "rejected", message: failure.message};
+  if (response.status === 429) {
+    const retryAfterSeconds = Number(response.headers.get("retry-after"));
+    return {
+      kind: "rate_limited",
+      retryAfterSeconds: Number.isInteger(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds
+        : 60,
+    };
+  }
+  throw failure;
+}
 
 function readCsrfToken(): string {
   for (const candidate of document.cookie.split(";")) {
@@ -845,27 +874,10 @@ export const api = {
     method: "POST",
   }),
   session: () => request(sessionSchema, "/api/v1/session"),
-  signInWithApiKey: async (apiKey: string): Promise<ApiKeySignIn> => {
-    const response = await fetch("/auth/api-key", {
-      body: JSON.stringify({apiKey}),
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      method: "POST",
-    });
-    if (response.status === 204) return {kind: "signed_in"};
-    const failure = await parseFailure(response);
-    if (response.status === 401) return {kind: "rejected", message: failure.message};
-    if (response.status === 429) {
-      const retryAfterSeconds = Number(response.headers.get("retry-after"));
-      return {
-        kind: "rate_limited",
-        retryAfterSeconds: Number.isInteger(retryAfterSeconds) && retryAfterSeconds > 0
-          ? retryAfterSeconds
-          : 60,
-      };
-    }
-    throw failure;
-  },
+  signInWithApiKey: (apiKey: string): Promise<SignInOutcome> =>
+    signIn("/auth/api-key", {apiKey}),
+  signInWithDirectory: (username: string, password: string): Promise<SignInOutcome> =>
+    signIn("/auth/ldap", {password, username}),
   logout: async () => {
     await requestNoContent("/api/v1/session/logout", {
       headers: mutationHeaders(),
