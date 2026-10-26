@@ -116,7 +116,7 @@ Losses are bounded and stated: a process killed between a record and its drain l
 
 ## 2. The tree endpoint
 
-`GET /api/v1/public/tree` is anonymous. It returns every public artifact with its view counts, newest first, except artifacts tagged `unlisted`. An unlisted artifact keeps its public link, so an old path that now redirects after a move can stay reachable without showing on the home page.
+`GET /api/v1/public/tree` needs no credential. For an anonymous viewer it returns every public artifact with its view counts, newest first, except artifacts tagged `unlisted`. An unlisted artifact keeps its public link, so an old path that now redirects after a move can stay reachable without showing on the home page. A signed-in member reads every live artifact instead, with which ones are theirs and which they may change ([Owners, visibility, and the member view](#owners-visibility-and-the-member-view)).
 
 ### Why `/api/v1/public/` is anonymous
 
@@ -128,7 +128,7 @@ app.use("/api/*", async (context, next) => {
   …
 ```
 
-A prefix rule rather than an allowlist of exact paths, so the next anonymous read is a naming decision instead of a second edit to the guard. Only `GET` routes are registered under the prefix, the prefix carries no cookie and no CORS headers (AUTH-012), and no mutation route lives there. Everything an operator can reach stays behind a credential.
+A prefix rule rather than an allowlist of exact paths, so the next anonymous read is a naming decision instead of a second edit to the guard. Only `GET` routes are registered under the prefix, the prefix sets no cookie and no CORS headers (AUTH-012), and no mutation route lives there. The tree reads the session cookie itself, only to show a member more, and a missing or invalid one leaves the viewer anonymous rather than failing. Everything an operator can reach stays behind a credential.
 
 `/api/v1/public/` sits inside the reserved roots of section 11 already (`api`), so no artifact path can shadow it and the FRK-003-F route walk stays satisfied.
 
@@ -140,21 +140,34 @@ A prefix rule rather than an allowlist of exact paths, so the next anonymous rea
   "artifacts": [
     {
       "access": "public_link",
+      "manage": {
+        "artifactId": "art_…",
+        "currentVersionId": "ver_…",
+        "projectId": "prj_default",
+        "tags": ["release"]
+      },
+      "mine": true,
       "name": "Release checklist",
+      "owner": "Alice Example",
       "path": "2026/10/release-checklist",
       "series": [{"count": 2, "day": "2026-10-17"}],
       "updatedAt": "2026-10-17T07:41:02.113Z",
       "updates": [{"count": 1, "day": "2026-10-16"}, {"count": 2, "day": "2026-10-17"}],
       "url": "https://artifacts.example.internal/2026/10/release-checklist/",
-      "views": {"last7Days": 2, "last30Days": 2, "total": 2}
+      "views": {"last7Days": 2, "last30Days": 2, "total": 2},
+      "visibility": "public"
     }
   ],
+  "collapsedFolders": [],
   "generatedAt": "2026-10-17T08:00:00.000Z",
   "loginKind": "none",
   "truncated": false,
+  "viewer": {"name": "Alice Example"},
   "windowDays": 30
 }
 ```
+
+This is a member's read. An anonymous read has the same fields, with `"manage": null`, `"mine": false`, and `"visibility": "public"` on every row, and `"viewer": null`.
 
 A flat list, not a nested tree. The endpoint reads and shapes; the browser groups and renders. That split keeps the wire format to what the database already returns, keeps one definition of "newest first" instead of two, and lets the grouping be tested as a pure function with no server and no browser.
 
@@ -165,24 +178,48 @@ Field decisions:
 - **`series` is sparse and ascending.** Days with no views are absent, so the payload stays small on a quiet server. The client densifies against `windowDays`. A dense 30-element array per artifact would be 30 times the bytes for the same information.
 - **`updates` counts versions published per UTC day**, in the same window and the same sparse shape as `series`. It is read from `versions.created_at`, the column `updatedAt` already comes from, so it needs no new table. A restore moves the current version without publishing one, so it does not count. Only the artifacts the tree already lists are read, so a private, deleted, or unlisted artifact contributes nothing. Accepted tradeoff: the count includes every version of a currently public artifact in the window, even versions published before it became public. Only the per-day count shows, never the content of those versions.
 - **`url` is absolute** and comes from `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`), the same builder `links.artifact` uses, so the home page can never advertise a URL the server would not serve. In path mode it is `/<path>/`, otherwise `/<folder>/`.
-- **`access` is always `public_link`.** The field exists so the client does not have to assume, and so issue 4 can widen the endpoint to authenticated callers without changing the item shape.
+- **`access` is the artifact's access setting**, `public_link` or `account_required`. An anonymous read only ever carries `public_link`.
+- **`owner` is the owner's display name or `null`.** It is the name stored when the artifact was created (`ArtifactOwner.displayName`). It is `null` when none was stored, and also when the name holds an email address (text joined to text by an `@` with no space), because the tree never shows an email to anyone, signed in or not. A key published under a name such as `Ada Lovelace @ laptop`, the form `RUNBOOK.md` suggests, holds no address and is shown.
+- **`visibility` is `public`, `unlisted`, or `private`**, the three choices the row menu offers. `private` is `access: account_required`; `unlisted` is `public_link` with the `unlisted` tag; anything else is `public`. It is derived on the server so the client has one rule to read, not two fields to combine.
+- **`mine` is `true` only when the viewer owns the artifact**, that is, the session principal's ID is the owner's principal ID. It is `false` for an anonymous viewer. The Mine filter reads it.
+- **`manage` is the handle the row menu needs to change visibility, or `null`.** It carries the artifact ID, its project, the current version ID that the access and tags APIs take as `expectedCurrentVersionId`, and the sorted tags, so making an artifact unlisted or listed again keeps its other tags. It is non-null exactly when the viewer may change the artifact's settings.
+- **`viewer` is `{"name": …}` for a signed-in viewer, from the session principal's display name, or `null`.**
 - **`loginKind` is `local_owner` or `none`** from `dependencies.browserAccess` (`src/core/browser-access.ts`). The home page reads it to decide whether to offer a sign-in link. Issue 4 owns the link itself.
 - **`windowDays` is 30** and is echoed so the client never hard-codes it.
 - **`truncated` is a boolean, never absent.** A client must not have to tell "not truncated" from "the server did not say".
 
-There is no `nextCursor`. The response is the whole public catalog for one installation, capped at the 500 newest public artifacts. When more exist, `truncated` is `true`, so a partial list never reads as a complete one.
+There is no `nextCursor`. The response is the whole catalog the viewer may see for one installation, capped at its 500 newest artifacts. When more exist, `truncated` is `true`, so a partial list never reads as a complete one.
+
+### Owners, visibility, and the member view
+
+The tree reads the application session cookie when one is present. It authenticates it the same way the `/api/*` middleware does (`AuthenticationService.authenticateApplicationSession`), but a missing, malformed, expired, or revoked session reads as anonymous with `200`, never `401`, so a stale cookie cannot break the home page. An `Authorization` header is ignored: the tree is a page read, not an API surface.
+
+- **Which artifacts.** A viewer who passes `requireArtifactListing` (a member, or a key that may read artifacts) reads every live artifact in every project, whatever its access setting and tags, in the same order and under the same 500 cap and `truncated` rule. Anyone else, an anonymous viewer included, reads exactly the anonymous set. One repository read, `listCatalogArtifacts({limit, scope})` with scope `public` or `all`, serves both, so the order and the cap cannot drift between them.
+- **Who may change visibility.** `manage` follows `canManageArtifact(principal, artifact)` in `src/application/authorization.ts`: the artifact's owner, a direct human administrator, or a key with `artifact:manage:any`, inside the artifact's installation. An owner match counts only for the person signed in as themselves or a key of theirs that may also create artifacts, so a read-only key on the owner's own principal sees the artifact as theirs (`mine`) but gets no handle. The viewer bar uses the same function for its own control.
+- **Collapsed folders.** `collapsedFolders` still names only folders of the listed artifacts, so a member learns a folder that holds only private work and an anonymous viewer does not.
+- **Caching.** The body now depends on the session, so the response is `Cache-Control: private, no-cache` with `Vary: Cookie`: the browser revalidates, and no shared cache keeps one viewer's copy for another.
 
 ### Reading it
 
-One query for the artifacts, one for the window rows, one for the totals, and one for the versions per day.
+One query for the artifacts, one for their tags, one for the window rows, one for the totals, and one for the versions per day.
 
 ```sql
--- artifacts: the 500 newest live public artifacts, in every project
-SELECT a.id, a.name, a.path, a.access_setting, v.created_at
+-- artifacts: the 500 newest live artifacts the viewer may see, in every project
+SELECT a.id, a.project_id, a.name, a.path, a.access_setting,
+       a.owner_principal_id, a.owner_display_name, a.current_version_id,
+       v.created_at
   FROM artifacts a JOIN versions v ON v.id = a.current_version_id
- WHERE a.deleted_at IS NULL AND a.access_setting = 'public_link'
+ WHERE a.deleted_at IS NULL
+   -- the public scope only; the all scope stops at deleted_at
+   AND a.access_setting = 'public_link'
+   AND NOT EXISTS (SELECT 1 FROM artifact_tags t
+                    WHERE t.artifact_id = a.id AND t.tag = 'unlisted')
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT 500;
+
+-- tags for exactly those artifacts, sorted
+SELECT artifact_id, tag FROM artifact_tags
+ WHERE artifact_id = ANY(…) ORDER BY artifact_id, tag;
 
 -- window rows for exactly those artifacts
 SELECT artifact_id, day, count FROM artifact_views
@@ -203,7 +240,7 @@ SELECT v.artifact_id, substr(v.created_at, 1, 10) AS day, COUNT(*)
 
 Both view queries are bounded by the artifact set the first query returned, so the payload is `O(artifacts × days actually used)`, not `O(all history)`. The totals query has no day bound because "total" is not a window; it reads at most one row per artifact.
 
-The 7-day and 30-day counts are `SUM(count)` over the window's first 7 and all 30 days, computed from the rows the second query already returned. No third query, and the numbers cannot disagree with `series`.
+The 7-day and 30-day counts are `SUM(count)` over the window's first 7 and all 30 days, computed from the rows the window query already returned. No extra query, and the numbers cannot disagree with `series`.
 
 ### Grouping
 
@@ -218,7 +255,7 @@ The grouping is a pure function on the client, because it is display order and d
 
 Prefix-free paths (section 11) make step 3 unambiguous: no folder path is also an artifact path, so no node is both a leaf and a branch.
 
-The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPublicArtifactTree`, `densifyDailySeries`, and `sparklineBars`. All three are pure and are tested from `tests/web/home-tree.test.ts`, which imports them directly — the vitest root includes only `tests/**/*.test.ts`.
+The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPublicArtifactTree` and `densifyDailySeries`. Both are pure and are tested from `tests/web/home-tree.test.ts`, which imports them directly — the vitest root includes only `tests/**/*.test.ts`.
 
 ### The chart
 
@@ -228,9 +265,11 @@ The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPub
 - **A day filters the tree.** Clicking a day's column filters the tree to the artifacts viewed on that day, or updated on it in the updates measure. The tree is built from the filtered list, so only folders that hold a match render. A filtered tree opens every folder, including one set to start collapsed, so a match never hides. Clearing the filter returns each folder to its default state. A chip above the tree names the filter ("Updated on 26 Oct") and clears it, as does the same day again. Switching the measure clears the day, because a day means something else in the other measure. Each day with a count is also a real `<button>` laid over its column with `aria-pressed`. It is one tab stop, the arrow keys, Home, and End move between days, and Enter or Space toggles. The buttons let the pointer through, so hovering a column still shows the day's tooltip. A day with no count is not a target, because it would filter to an empty tree.
 - **Colour.** Each measure wears one accent token: `--chart-views` (blue) and `--chart-updates` (the theme's orange, `--chart-4` in light and `--chart-3` in dark). Both are in `apps/web/src/theme-tokens.css` and were run through the data-viz palette validator against the card surface in each theme: inside the lightness band, above the chroma floor, at least 3:1 against the card, and far apart under protanopia and deuteranopia. Each accent has three steps: a tint (the accent mixed 82% into the card), the accent, and a strong step (the accent mixed 75% toward the text colour, so it gains contrast in both themes). With no day selected every bar is the accent, and the day under the pointer or keyboard focus previews the strong step. A selected day takes the strong step, every other day recedes to the tint, and the day under the pointer or focus lifts back to the accent. All three steps keep the 3:1 a data-bearing mark needs against the card (WCAG 1.4.11): the tint measures 3.23 (views) and 3.68 (updates) in light and 3.62 and 3.67 in dark, the accent 4.42 to 5.22, and the strong step 6.94 to 7.89. The validator's ordinal check passes for all four ramps, with neighbouring steps 0.076 to 0.108 apart in OKLCH lightness against its 0.06 floor.
 - **Reading it.** A line above the chart gives the window total and the busiest day, the latest one on a tie. A mirrored y axis and hairline gridlines stay in the muted ink. Today's column carries a dot below it, and the right end of the axis reads "Today". Hovering a column, or focusing its day button, shows a tooltip with the date and the count. The page draws that tooltip itself rather than Recharts, so the pointer and the keyboard show the same thing. The tooltip is hidden from assistive tech, because each day button's accessible name already carries the date and the count.
-- **Each artifact row.** The same function at 30 bars in a fixed 96×24 box beside the total. A row with no views draws the bars at zero height, so the column stays aligned instead of collapsing.
+- **Each artifact row.** The name, a visibility badge when the row is not public, the owner's display name, a 30-day sparkline in the views accent, when the artifact last changed, and the row menu. The sparkline is the shared `Sparkline` component (`apps/web/src/components/sparkline.tsx`) the viewer bar's info popover uses, drawn at 30 bars. A row with no views draws the bars at zero height, so the column stays aligned instead of collapsing. The row shows no counts as text: the sparkline sits in one focusable element, its accessible name carries the 7-day, 30-day, and all-time views, and so does its tooltip. The badge is the shared `VisibilityBadge`.
+- **Tree controls.** A sort control orders the tree by last updated (the default), name, or most viewed (all-time views). Folders keep grouping, so a sort reorders artifacts inside each folder and orders sibling folders by the same measure over everything beneath them. The browser keeps the choice in `localStorage` under `artifact-server-home-sort`; a page that cannot reach storage, as in some private windows, starts at the default. A signed-in member also gets a **Mine** toggle that keeps only rows whose `mine` is true. The Workbench account menu's **My artifacts** opens `/?mine=1`, which starts with the toggle on.
+- **Row menu.** A row whose `manage` handle is not null has a `⋯` button: open, copy link, versions (Review with the artifact selected), rename, and visibility. The labels match the viewer bar's menu. Visibility is public, unlisted, or private and is written through the existing tags and access APIs with the handle's IDs, in the order `visibilitySteps` from `apps/web/src/lib/visibility.ts` gives, the same plan the viewer bar runs. Each change first reads the artifact again, because the tags write replaces every tag and the tree's copy may be stale. Giving a private artifact a link asks for confirmation first. The menu closes on a choice, and the tree reads the server again after every attempt, failed or not. Rows without a handle, and every row for an anonymous reader, show no button. The server decides the handle, so the page only shows or hides the button. The menu, the API client, and the toasts load as a separate chunk only for a signed-in reader.
 
-Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that a screen reader reads, because a chart nobody can read is not an accessible chart.
+The day chart is `aria-hidden`; its day buttons carry the numbers. Each sparkline's numbers are in its accessible name.
 
 ## 3. The page
 
@@ -250,7 +289,7 @@ Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that 
 
 Two requirements, because the counting and the tree fail differently.
 
-`FRK-008` owns the counters and the port. `FRK-009` owns the endpoint and the page. `FRK-023` owns the `updates` series, the chart's measure switch, and the day filter on the tree. `FRK-025` owns the chart's colours, its tooltip, today's mark, and the summary line. All four carry `status: implementing` with a `proof_gap` that names the Docker-backed work, the same way FRK-006 and FRK-007 do.
+`FRK-008` owns the counters and the port. `FRK-009` owns the endpoint and the page. `FRK-023` owns the `updates` series, the chart's measure switch, and the day filter on the tree. `FRK-025` owns the chart's colours, its tooltip, today's mark, and the summary line. `FRK-027` owns the owner name, visibility, `mine`, `manage`, and `viewer` fields, the member view, and the row controls that read them. All five carry `status: implementing` with a `proof_gap` that names the Docker-backed work, the same way FRK-006 and FRK-007 do.
 
 ## 5. Commits
 

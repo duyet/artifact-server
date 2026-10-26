@@ -1,4 +1,4 @@
-import {StrictMode, useEffect, useState} from "react";
+import {lazy, StrictMode, Suspense, useCallback, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 import {IconAlertCircle} from "@tabler/icons-react";
@@ -13,9 +13,19 @@ import "../index.css";
 
 applyStoredTheme();
 
+// The toasts belong to the row menu, which loads only for a signed-in reader.
+const RowMenuToaster = lazy(async () => ({
+  default: (await import("./home-row-menu.js")).RowMenuToaster,
+}));
+
 function HomeShell() {
   const [catalog, setCatalog] = useState<PublicCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // Bumped after the page changes an artifact, so the tree reads it again.
+  const [revision, setRevision] = useState(0);
+  const reload = useCallback(() => {
+    setRevision((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +47,7 @@ function HomeShell() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [revision]);
 
   if (failure !== null) {
     return (
@@ -69,7 +79,13 @@ function HomeShell() {
       </main>
     );
   }
-  return <HomePage catalog={catalog} />;
+  return (
+    <>
+      <HomePage catalog={catalog} onChanged={reload} />
+      {/* Beside `main`, so the toaster arriving late never shifts the page. */}
+      {catalog.viewer === null ? null : <Suspense><RowMenuToaster /></Suspense>}
+    </>
+  );
 }
 
 const rootElement = document.querySelector("#home-root");

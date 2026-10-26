@@ -44,6 +44,7 @@ import {
   type PublicLinkInventoryPage,
 } from "../application/public-link-administration.js";
 import {ArtifactAssetService} from "../application/artifact-assets.js";
+import {artifactVisibility} from "../application/artifact-tags.js";
 import {
   type ArtifactAssetCheck,
   CheckArtifactAssetsService,
@@ -866,9 +867,11 @@ export function createHttpApp(
   );
 
   app.use("/api/*", async (context, next) => {
-    // The public prefix carries only reads of artifacts every viewer may
-    // already open, so it asks for no credential. Everything an operator can
-    // reach stays behind the bearer or session check below.
+    // The public prefix carries only reads, so it asks for no credential. A
+    // route there that shows a signed-in viewer more reads the session
+    // itself and answers an anonymous viewer when it is absent or invalid.
+    // Everything an operator can reach stays behind the bearer or session
+    // check below.
     if (context.req.path.startsWith(anonymousApiPrefix)) return next();
     const authorization = context.req.header("authorization");
     if (authorization !== undefined) {
@@ -944,25 +947,39 @@ export function createHttpApp(
     );
   });
 
-  // Public artifacts and their view counts, for a viewer who holds no
-  // credential. The browser groups the flat list into folders; see
-  // docs/fork/HOMEPAGE.md.
+  // The artifact tree and its view counts. A viewer who holds no credential
+  // reads the public artifacts; a signed-in member reads every live artifact
+  // with what they may change. The browser groups the flat list into
+  // folders; see docs/fork/HOMEPAGE.md.
   app.get("/api/v1/public/tree", async (context) => {
     // Counts move between reads, so the browser must revalidate rather than
-    // reuse a cached copy. The response carries no viewer-specific fact.
-    context.header("Cache-Control", "no-cache");
+    // reuse a cached copy. The body depends on the session cookie, so no
+    // shared cache may keep it and none may answer one viewer with another's.
+    context.header("Cache-Control", "private, no-cache");
+    context.header("Vary", "Cookie");
+    const viewer = await optionalSessionPrincipal(context, dependencies);
     const catalog = await runHttpApplicationEffect(
       context,
       dependencies,
       PublicArtifactCatalogService.use((catalogService) =>
-        catalogService.listCatalog({limit: publicCatalogLimit})),
+        catalogService.listCatalog({limit: publicCatalogLimit, viewer})),
     );
     const requestUrl = responseApplicationUrl(context, dependencies);
     return context.json({
       ...catalog,
       artifacts: catalog.artifacts.map((item) => ({
         access: item.artifact.accessSetting,
+        manage: item.manageable
+          ? {
+            artifactId: item.artifact.id,
+            currentVersionId: item.artifact.currentVersionId,
+            projectId: item.artifact.projectId,
+            tags: item.artifact.tags,
+          }
+          : null,
+        mine: item.mine,
         name: item.artifact.name,
+        owner: item.ownerName,
         path: item.artifact.path,
         series: item.series.map((day) => ({count: day.count, day: day.day})),
         updatedAt: item.artifact.currentVersionCreatedAt,
@@ -973,6 +990,7 @@ export function createHttpApp(
           item.artifact,
         ),
         views: item.views,
+        visibility: artifactVisibility(item.artifact),
       })),
       loginKind: dependencies.browserAccess.loginKind,
     });
@@ -2853,6 +2871,38 @@ function clearApplicationSessionCookies(
   const secure = usesSecureApplicationCookies(dependencies);
   deleteCookie(context, cookieNames.session, {path: "/", secure});
   deleteCookie(context, cookieNames.csrf, {path: "/", secure});
+}
+
+/**
+ * The principal the request's application session cookie names, or null
+ * when the cookie is absent, malformed, expired, or revoked. A route that
+ * answers anonymous viewers too reads it here, so a stale cookie leaves the
+ * viewer anonymous instead of failing the request. A bearer header is not
+ * read: those routes carry no API surface.
+ */
+async function optionalSessionPrincipal(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+): Promise<Principal | null> {
+  const parsedSession = sessionTokenSchema.safeParse(
+    getCookie(context, applicationCookieNames(dependencies).session),
+  );
+  if (!parsedSession.success) return null;
+  return runHttpApplicationEffect(
+    context,
+    dependencies,
+    AuthenticationService.use((authentication) =>
+      authentication.authenticateApplicationSession(
+        Redacted.make(parsedSession.data, {label: "application-session"}),
+      )
+    ).pipe(
+      Effect.map((authenticated): Principal | null => authenticated.principal),
+      Effect.catchTag(
+        ["AuthenticationRequired", "AuthorizationDenied"],
+        () => Effect.succeed(null),
+      ),
+    ),
+  );
 }
 
 function applicationCookieNames(

@@ -8,8 +8,15 @@ const dailyCountSchema = z.object({
 });
 
 const publicArtifactSchema = z.object({
-  access: z.literal("public_link"),
+  manage: z.object({
+    artifactId: z.string().min(1),
+    currentVersionId: z.string().min(1),
+    projectId: z.string().min(1),
+    tags: z.array(z.string()),
+  }).nullable(),
+  mine: z.boolean(),
   name: z.string().min(1).max(200),
+  owner: z.string().nullable(),
   path: z.string().min(1).max(200).nullable(),
   series: z.array(dailyCountSchema),
   updatedAt: z.iso.datetime(),
@@ -20,6 +27,7 @@ const publicArtifactSchema = z.object({
     last30Days: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
   }),
+  visibility: z.enum(["private", "public", "unlisted"]),
 }).loose();
 
 /**
@@ -33,6 +41,7 @@ const publicCatalogSchema = z.object({
   generatedAt: z.iso.datetime(),
   loginKind: z.enum(["local_owner", "none", "oidc", "workos"]),
   truncated: z.boolean(),
+  viewer: z.object({name: z.string()}).nullable(),
   windowDays: z.number().int().positive(),
 });
 
@@ -44,10 +53,16 @@ export interface PublicCatalog {
   readonly generatedAt: string;
   readonly loginKind: z.infer<typeof publicCatalogSchema>["loginKind"];
   readonly truncated: boolean;
+  /** The signed-in member, or null for an anonymous reader. */
+  readonly viewer: {readonly name: string} | null;
   readonly windowDays: number;
 }
 
-/** Read the anonymous public catalog. */
+/**
+ * Read the catalog. The browser sends its session cookie, so a signed-in
+ * member reads every artifact with what they may change; anyone else reads
+ * the public ones.
+ */
 export async function readPublicCatalog(
   fetchImplementation: typeof fetch = fetch,
 ): Promise<PublicCatalog> {
@@ -62,18 +77,23 @@ export async function readPublicCatalog(
   const catalog = publicCatalogSchema.parse(await response.json());
   return {
     artifacts: catalog.artifacts.map((artifact) => ({
+      manage: artifact.manage,
+      mine: artifact.mine,
       name: artifact.name,
+      owner: artifact.owner,
       path: artifact.path,
       series: artifact.series,
       updatedAt: artifact.updatedAt,
       updates: artifact.updates,
       url: artifact.url,
       views: artifact.views,
+      visibility: artifact.visibility,
     })),
     collapsedFolders: catalog.collapsedFolders,
     generatedAt: catalog.generatedAt,
     loginKind: catalog.loginKind,
     truncated: catalog.truncated,
+    viewer: catalog.viewer,
     windowDays: catalog.windowDays,
   };
 }

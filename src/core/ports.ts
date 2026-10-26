@@ -31,6 +31,7 @@ import type {
   ContentSessionRecord,
   AgentBeaconState,
   AgentCapabilities,
+  CatalogScope,
   CommentClearScope,
   CommentThreadClearing,
   PageCursor,
@@ -650,11 +651,15 @@ export interface ArtifactRepository {
     artifactId: string,
   ): Promise<readonly VersionRecord[]>;
   /**
-   * Read the newest live public artifacts across every project, with the facts
-   * a public catalog shows. Callers shape the links, so this never returns a
-   * URL that a credential could change.
+   * Read the newest live artifacts across every project, with the facts the
+   * home page tree shows. The public scope keeps only public-link artifacts
+   * not tagged unlisted; the all scope keeps every live artifact. Callers
+   * build the links, so this never returns a URL that a credential could
+   * change.
    */
-  listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]>;
+  listCatalogArtifacts(
+    command: ListCatalogArtifacts,
+  ): Promise<readonly PublicArtifactSummary[]>;
   /**
    * Count the versions each listed artifact published per UTC day inside one
    * inclusive window, ascending. A day with no version is absent.
@@ -737,6 +742,12 @@ export interface ArtifactViewDelta {
   /** The UTC calendar day the views were served on, as `YYYY-MM-DD`. */
   readonly day: string;
   readonly count: number;
+}
+
+/** Values used to read the newest live artifacts the home page tree lists. */
+export interface ListCatalogArtifacts {
+  readonly limit: number;
+  readonly scope: CatalogScope;
 }
 
 /** Values used to read the stored daily rows inside one day window. */

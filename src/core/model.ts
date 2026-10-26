@@ -18,6 +18,17 @@ export const folderDefaultStates = {
 export type FolderDefaultState =
   (typeof folderDefaultStates)[keyof typeof folderDefaultStates];
 
+/**
+ * Which live artifacts one catalog read lists: the public ones an anonymous
+ * viewer may see, or every one for a viewer who may list artifacts.
+ */
+export const catalogScopes = {
+  all: "all",
+  public: "public",
+} as const;
+
+export type CatalogScope = (typeof catalogScopes)[keyof typeof catalogScopes];
+
 /** Artifact mutation kinds persisted in the standalone action history. */
 export const artifactActionKinds = {
   changeAccess: "change_access",
@@ -231,19 +242,28 @@ export interface ViewedArtifact {
   readonly windowViews: number;
 }
 
-/** A live public artifact with the facts the home page tree shows. */
-export interface PublicArtifactSummary {
-  readonly accessSetting: AccessSetting;
+/**
+ * A live artifact with the facts the home page tree shows: the artifact
+ * itself, with its tags sorted as stored, and when its current version was
+ * made.
+ */
+export interface PublicArtifactSummary extends ArtifactRecord {
   /** The current version's creation time, which is the artifact's last change. */
   readonly currentVersionCreatedAt: string;
-  readonly id: string;
-  readonly name: string;
-  readonly path: string | null;
 }
 
-/** One public artifact with its sparse daily series and its window counts. */
+/** One listed artifact with its counts and what the viewer may do with it. */
 export interface PublicArtifactCatalogItem {
   readonly artifact: PublicArtifactSummary;
+  /** True when the viewer may change the artifact's visibility. */
+  readonly manageable: boolean;
+  /** True when the viewer is the artifact's owner. */
+  readonly mine: boolean;
+  /**
+   * The owner's display name, or null when none was recorded or it holds an
+   * email address, so an address is never shown.
+   */
+  readonly ownerName: string | null;
   /** Only the days inside the window that have views, ascending. */
   readonly series: readonly ArtifactViewDay[];
   /** Only the days inside the window that published a version, ascending. */
@@ -251,7 +271,16 @@ export interface PublicArtifactCatalogItem {
   readonly views: ArtifactViewCounts;
 }
 
-/** Every live public artifact with its counts, newest first. */
+/** The signed-in viewer a catalog was read for. */
+export interface CatalogViewer {
+  readonly name: string;
+}
+
+/**
+ * The live artifacts one viewer may see in the tree, with their counts,
+ * newest first: the public ones for an anonymous viewer, every one for a
+ * viewer who may list artifacts.
+ */
 export interface PublicArtifactCatalog {
   readonly artifacts: readonly PublicArtifactCatalogItem[];
   /**
@@ -260,8 +289,10 @@ export interface PublicArtifactCatalog {
    */
   readonly collapsedFolders: readonly string[];
   readonly generatedAt: string;
-  /** True when the installation holds more public artifacts than were read. */
+  /** True when the installation holds more listed artifacts than were read. */
   readonly truncated: boolean;
+  /** The signed-in viewer, or null for an anonymous read. */
+  readonly viewer: CatalogViewer | null;
   readonly windowDays: number;
 }
 

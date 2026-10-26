@@ -384,7 +384,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "listAssets",
       "listPublicLinks",
       "listExpiredStagedUploads",
-      "listPublicArtifacts",
+      "listCatalogArtifacts",
       "listRegisteredAgents",
       "markAgentDispatchDelivered",
       "markAgentDispatchFailed",

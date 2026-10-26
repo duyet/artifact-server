@@ -1,5 +1,6 @@
 import {
   IconChartBar,
+  IconFiles,
   IconKeyboard,
   IconLayoutGrid,
   IconLogout,
@@ -237,6 +238,11 @@ function UserMenu({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
+              {/* The home page tree, narrowed to what this account owns. */}
+              <DropdownMenuItem render={<a href="/?mine=1" />}>
+                <IconFiles />
+                My artifacts
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={onOpenShortcuts}>
                 <IconKeyboard />
                 Keyboard shortcuts

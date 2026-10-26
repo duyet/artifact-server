@@ -6,8 +6,6 @@ import {
   dayTone,
   densifyDailySeries,
   entriesOnDay,
-  sparklineBars,
-  sparklineBox,
   sumDailySeries,
   windowDays,
   type PublicArtifactTreeEntry,
@@ -20,13 +18,17 @@ function entry(
   overrides: Partial<PublicArtifactTreeEntry> = {},
 ): PublicArtifactTreeEntry {
   return {
+    manage: null,
+    mine: false,
     name,
+    owner: null,
     path,
     series: [],
     updatedAt,
     updates: [],
     url: `https://artifacts.example.internal/${path ?? `loose-${name}`}/`,
     views: {last7Days: 0, last30Days: 0, total: 0},
+    visibility: "public",
     ...overrides,
   };
 }
@@ -233,27 +235,45 @@ describe("daily chart tones and summary", () => {
   });
 });
 
-describe("sparkline geometry", () => {
-  test("bar heights scale to the tallest value and share the box width", () => {
-    const bars = sparklineBars([0, 1, 2, 4], sparklineBox);
-    expect(bars.map((bar) => bar.height)).toEqual([0, 6, 12, 24]);
-    const total = bars.reduce((sum, bar) => sum + bar.width, 0) +
-      sparklineBox.gap * (bars.length - 1);
-    expect(total).toBeCloseTo(sparklineBox.width, 6);
-    expect(bars[0]?.x).toBe(0);
-  });
+function views(total: number): PublicArtifactTreeEntry["views"] {
+  return {last7Days: 0, last30Days: 0, total};
+}
 
-  test("a series with no views draws zero-height bars instead of an empty box", () => {
-    const bars = sparklineBars([0, 0, 0], sparklineBox);
-    expect(bars).toHaveLength(3);
-    expect(bars.every((bar) => bar.height === 0)).toBe(true);
-    expect(bars.every((bar) => bar.width > 0)).toBe(true);
-  });
+describe("tree order", () => {
+  const entries = [
+    entry("beta", "team/beta", "2026-10-03T00:00:00.000Z", {views: views(1)}),
+    entry("Alpha", "team/alpha", "2026-10-01T00:00:00.000Z", {views: views(9)}),
+    entry("gamma", "team/gamma", "2026-10-02T00:00:00.000Z", {views: views(4)}),
+    entry("Zed", "archive/zed", "2026-10-04T00:00:00.000Z", {views: views(2)}),
+    entry("loose b", null, "2026-10-05T00:00:00.000Z", {views: views(0)}),
+    entry("Loose a", null, "2026-10-06T00:00:00.000Z", {views: views(3)}),
+  ];
+  const order = (sort: "name" | "updated" | "views") => {
+    const tree = buildPublicArtifactTree(entries, sort);
+    return {
+      folders: tree.folders.map((folder) => folder.label),
+      team: names(tree.folders.find((folder) => folder.label === "team")?.artifacts ?? []),
+      ungrouped: names(tree.ungrouped),
+    };
+  };
 
-  test("a single value fills the box and an empty series draws nothing", () => {
-    expect(sparklineBars([9], sparklineBox)).toEqual([
-      {height: 24, width: sparklineBox.width, x: 0},
-    ]);
-    expect(sparklineBars([], sparklineBox)).toEqual([]);
+  test("each order sorts within a folder and never moves an artifact across folders", () => {
+    expect(order("updated")).toEqual({
+      folders: ["archive", "team"],
+      team: ["beta", "gamma", "Alpha"],
+      ungrouped: ["Loose a", "loose b"],
+    });
+    // Names compare without case, and folders by their label.
+    expect(order("name")).toEqual({
+      folders: ["archive", "team"],
+      team: ["Alpha", "beta", "gamma"],
+      ungrouped: ["Loose a", "loose b"],
+    });
+    // A folder ranks by every view beneath it: team has 14, archive 2.
+    expect(order("views")).toEqual({
+      folders: ["team", "archive"],
+      team: ["Alpha", "gamma", "beta"],
+      ungrouped: ["Loose a", "loose b"],
+    });
   });
 });

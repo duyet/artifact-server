@@ -4233,7 +4233,7 @@ requirements:
     source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-tree-endpoint}
     acceptance:
       behavior: {id: FRK-009-B, description: "Publish artifacts under 2026/10 and 2026/11 plus one with no path, read the tree, and observe nested folders labelled by their last segment, newest-first order, the ungrouped group, sparse daily rows, and the 7-day, 30-day, and all-time totals. Publish 499, exactly 500, then 501 public artifacts and observe truncated flip at the cap, an exactly-full read already reporting it, a capped read holding only the newest 500 newest first, and the oldest artifact falling off. Behind an ingress that ends TLS, a request whose forwarded host and protocol match the configured application origin yields only that origin in each artifact url."}
-      failure: {id: FRK-009-F, description: "A private, deleted, or unlisted-tagged artifact is absent while an unlisted one still serves at its path, the endpoint needs no credential and answers cache-control no-cache while /api/v1/artifacts still needs one, an artifact path cannot shadow the endpoint, and / carries the application policy and not the content sandbox."}
+      failure: {id: FRK-009-F, description: "A private, deleted, or unlisted-tagged artifact is absent while an unlisted one still serves at its path, the endpoint needs no credential and answers cache-control private, no-cache while /api/v1/artifacts still needs one, an artifact path cannot shadow the endpoint, and / carries the application policy and not the content sandbox."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite over a real server, including the ordering, both windows, the sparse series, an anonymous read, the no-cache header, truncation at the 500 cap with the newest-first window, a private and a deleted artifact, the application policy on /, and the pure tree and chart builders with no server and no browser. The Postgres read path and the light and dark browser captures run only in CI, and no deployed run exists.
@@ -4476,6 +4476,20 @@ requirements:
     status: implementing
     proof_gap: The HTTP and MCP cases run against SQLite over a real server, and the rule runs against the real AuthorizationService with constructed principals. The browser case runs only in CI, and no Postgres or deployed run exists.
     depends_on: [FRK-011, FRK-015]
+    evidence: []
+
+  - id: FRK-027
+    kind: security
+    behavior: The tree names each artifact's owner by display name and never by an email, gives each artifact a visibility of public, unlisted, or private, and reads the application session when one is present, so a signed-in member sees every live artifact with which ones are theirs and a manage handle only on artifacts they own or, as an administrator or a key that manages any artifact, on every artifact, under the same rule the viewer bar applies, while an anonymous viewer or an invalid session sees only public artifacts with no handle; the home page sorts the tree, filters it to the viewer's own artifacts, shows each row's numbers in its sparkline tooltip, and changes visibility from a row menu.
+    owner: web-application
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: owners-visibility-and-the-member-view}
+    acceptance:
+      behavior: {id: FRK-027-B, description: "Read the anonymous tree with each public artifact's owner name, public visibility, mine false, and no manage handle; sign in as a member and read every live artifact including private and unlisted ones with their visibility, mine and a manage handle on the member's own artifacts and no handle on another member's, and an administrator's handle on every artifact that changes its visibility through the access and tags APIs. In a browser, read a row's numbers from its sparkline tooltip, sort by name, last updated, and most viewed with the choice kept across a reload, narrow the tree with the Mine filter, and make an artifact private from its row menu."}
+      failure: {id: FRK-027-F, description: "An anonymous read never lists a private or unlisted artifact, never names an owner whose display name is an email, and carries no manage handle or viewer; a malformed, expired, or revoked session reads as anonymous with 200; the response is private and varies on Cookie; a key on the owner's own principal that may only read sees its artifacts as its own with no handle and is refused by the access API; and anonymous rows, and another member's rows, show no row menu in the browser."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: The server half is proved locally against SQLite over a real server with member, administrator, read-only, and comment-only sessions, and the owner-or-administrator rule through member, administrator, and owner read-only key sessions. The Postgres catalog read runs only in CI with Docker and has no member-scope case there, the browser sparkline tooltip, sort, Mine filter, and row menu run only in the CI browser job, and no deployed run exists.
+    depends_on: [FRK-009]
     evidence: []
 
   - id: FRK-028

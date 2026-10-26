@@ -54,6 +54,7 @@ import {
   type ArtifactVersionDay,
   type ArtifactViewDay,
   type ArtifactViewTotal,
+  catalogScopes,
   type CommentAuthor,
   type CommentReplyCreation,
   type CommentReplyRecord,
@@ -113,6 +114,7 @@ import type {
   ListAgentDispatches,
   ListArtifactActions,
   ListArtifacts,
+  ListCatalogArtifacts,
   ListCommentThreads,
   MarkDispatchDelivered,
   MarkDispatchFailed,
@@ -240,13 +242,10 @@ const viewedArtifactRowSchema = z.object({
   totalViews: nonnegativeIntegerSchema,
   windowViews: positiveIntegerSchema,
 });
-const publicArtifactSummaryRowSchema = z.object({
-  accessSetting: accessSettingSchema,
+const catalogArtifactRowSchema = z.object({
+  ...artifactRowColumns,
   currentVersionCreatedAt: z.string(),
-  id: z.string(),
-  name: z.string(),
-  path: z.string().nullable(),
-});
+}).transform(withArtifactOwner);
 const artifactListRowSchema = z.object({
   ...artifactRowColumns,
   commentCount: z.coerce.number().int().nonnegative(),
@@ -1268,13 +1267,33 @@ export class PostgresArtifactRepository implements
     }));
   }
 
-  async listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]> {
+  async listCatalogArtifacts(
+    command: ListCatalogArtifacts,
+  ): Promise<readonly PublicArtifactSummary[]> {
     const installationId = this.#installationId;
-    return this.#database.run(Effect.gen(function*() {
+    return this.#database.run(Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
+      // The public scope is what an anonymous viewer may see: a public link
+      // that is not tagged unlisted.
+      const publicOnly = command.scope === catalogScopes.public;
+      const scopeSql = publicOnly
+        ? `AND artifacts.access_setting = 'public_link'
+           AND NOT EXISTS (
+             SELECT 1 FROM artifact_tags
+             WHERE artifact_tags.installation_id = artifacts.installation_id
+               AND artifact_tags.artifact_id = artifacts.id
+               AND artifact_tags.tag = $3
+           )`
+        : "";
       const rows = yield* sql.unsafe<object>(
-        `SELECT artifacts.id, artifacts.name, artifacts.path,
+        `SELECT artifacts.id, artifacts.project_id AS "projectId",
+           artifacts.name, artifacts.path,
            artifacts.access_setting AS "accessSetting",
+           artifacts.owner_principal_id AS "ownerPrincipalId",
+           artifacts.owner_display_name AS "ownerDisplayName",
+           artifacts.current_version_id AS "currentVersionId",
+           artifacts.created_at AS "createdAt",
+           artifacts.deleted_at AS "deletedAt",
            versions.created_at AS "currentVersionCreatedAt"
          FROM artifacts
          JOIN versions
@@ -1282,18 +1301,16 @@ export class PostgresArtifactRepository implements
           AND versions.id = artifacts.current_version_id
          WHERE artifacts.installation_id = $1
            AND artifacts.deleted_at IS NULL
-           AND artifacts.access_setting = 'public_link'
-           AND NOT EXISTS (
-             SELECT 1 FROM artifact_tags
-             WHERE artifact_tags.installation_id = artifacts.installation_id
-               AND artifact_tags.artifact_id = artifacts.id
-               AND artifact_tags.tag = $3
-           )
+           ${scopeSql}
          ORDER BY artifacts.created_at DESC, artifacts.id DESC
          LIMIT $2`,
-        [installationId, limit, unlistedArtifactTag],
+        publicOnly
+          ? [installationId, command.limit, unlistedArtifactTag]
+          : [installationId, command.limit],
       );
-      return z.array(publicArtifactSummaryRowSchema).parse(rows);
+      return yield* this.#withTagsForArtifacts(
+        z.array(catalogArtifactRowSchema).parse(rows),
+      );
     }));
   }
 

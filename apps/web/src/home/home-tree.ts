@@ -1,12 +1,30 @@
+import type {Visibility} from "../lib/visibility.js";
+
 /** One UTC day's count in a sparse daily series. */
 export interface DailyCount {
   readonly count: number;
   readonly day: string;
 }
 
-/** One artifact on the public home page, as the tree endpoint shapes it. */
+/**
+ * What the viewer needs to change an artifact's settings. The server sends it
+ * only when it would accept the change, under the visibility API's own rule.
+ */
+export interface TreeManageHandle {
+  readonly artifactId: string;
+  readonly currentVersionId: string;
+  readonly projectId: string;
+  readonly tags: readonly string[];
+}
+
+/** One artifact on the home page, as the tree endpoint shapes it. */
 export interface PublicArtifactTreeEntry {
+  readonly manage: TreeManageHandle | null;
+  /** True when the signed-in viewer owns the artifact. */
+  readonly mine: boolean;
   readonly name: string;
+  /** The owner's display name; null when unknown or withheld as an email. */
+  readonly owner: string | null;
   /** The readable path the artifact claims, or null when it claims none. */
   readonly path: string | null;
   /** Only the days inside the window that have views, ascending. */
@@ -20,6 +38,7 @@ export interface PublicArtifactTreeEntry {
     readonly last30Days: number;
     readonly total: number;
   };
+  readonly visibility: Visibility;
 }
 
 /** One folder in the tree, labelled with the last segment of its path. */
@@ -53,6 +72,7 @@ interface MutableFolder {
  */
 export function buildPublicArtifactTree(
   entries: readonly PublicArtifactTreeEntry[],
+  sort: TreeSort = "updated",
 ): PublicArtifactTree {
   const roots = new Map<string, MutableFolder>();
   const ungrouped: PublicArtifactTreeEntry[] = [];
@@ -72,8 +92,8 @@ export function buildPublicArtifactTree(
   }
 
   return {
-    folders: newestFoldersFirst(roots.values()),
-    ungrouped: newestEntriesFirst(ungrouped),
+    folders: sortFolders(roots.values(), sort),
+    ungrouped: ungrouped.toSorted(treeSortOrders[sort].entries),
   };
 }
 
@@ -200,38 +220,6 @@ export function busiestDay(
   return busiest;
 }
 
-/** One bar's place and height inside a fixed chart box. */
-export interface SparklineBar {
-  readonly height: number;
-  readonly width: number;
-  readonly x: number;
-}
-
-/** The box every chart on the page is drawn in. */
-export const sparklineBox = {gap: 1, height: 24, width: 96} as const;
-
-/**
- * Lay out one bar per value, scaled to the tallest. A series with no views
- * produces zero-height bars rather than an empty box, so a column of rows stays
- * aligned instead of collapsing.
- */
-export function sparklineBars(
-  values: readonly number[],
-  box: {readonly gap: number; readonly height: number; readonly width: number},
-): readonly SparklineBar[] {
-  if (values.length === 0) return [];
-  const totalGap = box.gap * (values.length - 1);
-  const width = Math.max(1, (box.width - totalGap) / values.length);
-  // A floor of 1 keeps an all-zero series from dividing by zero, and a flat
-  // one from being drawn at an arbitrary height.
-  const tallest = Math.max(1, ...values);
-  return values.map((value, index) => ({
-    height: Math.round((Math.max(0, value) / tallest) * box.height),
-    width,
-    x: index * (width + box.gap),
-  }));
-}
-
 /** One calendar day, `days` after or before `day`, as `YYYY-MM-DD`. */
 function shiftDay(day: string, days: number): string {
   const instant = new Date(`${day}T00:00:00.000Z`);
@@ -240,50 +228,81 @@ function shiftDay(day: string, days: number): string {
 }
 
 /**
+ * Sort sibling folders and, inside each, its artifacts by one order. Folders
+ * keep grouping: a sort reorders within a folder and never across folders.
+ */
+function sortFolders(
+  folders: Iterable<MutableFolder>,
+  sort: TreeSort,
+): readonly PublicArtifactTreeFolder[] {
+  return [...folders]
+    .map((folder): PublicArtifactTreeFolder => ({
+      artifacts: folder.artifacts.toSorted(treeSortOrders[sort].entries),
+      folders: sortFolders(folder.children.values(), sort),
+      label: folder.label,
+      path: folder.path,
+    }))
+    .toSorted(treeSortOrders[sort].folders);
+}
+
+/** Every artifact anywhere beneath a folder. */
+function entriesBeneath(folder: PublicArtifactTreeFolder): readonly PublicArtifactTreeEntry[] {
+  return [...folder.artifacts, ...folder.folders.flatMap(entriesBeneath)];
+}
+
+function newestUpdatedAt(folder: PublicArtifactTreeFolder): string {
+  return entriesBeneath(folder).reduce(
+    (latest, entry) => (entry.updatedAt > latest ? entry.updatedAt : latest),
+    "",
+  );
+}
+
+function totalViews(folder: PublicArtifactTreeFolder): number {
+  return entriesBeneath(folder).reduce((sum, entry) => sum + entry.views.total, 0);
+}
+
+/**
  * Newest first. `url` breaks ties so the order is total: two versions
  * published in the same millisecond still land in a fixed order.
  */
-function newestEntriesFirst(
-  entries: readonly PublicArtifactTreeEntry[],
-): readonly PublicArtifactTreeEntry[] {
-  return entries.toSorted((left, right) => {
-    if (left.updatedAt !== right.updatedAt) {
-      return left.updatedAt < right.updatedAt ? 1 : -1;
-    }
-    return left.url.localeCompare(right.url);
-  });
+function newestEntriesFirst(left: PublicArtifactTreeEntry, right: PublicArtifactTreeEntry): number {
+  if (left.updatedAt !== right.updatedAt) return left.updatedAt < right.updatedAt ? 1 : -1;
+  return left.url.localeCompare(right.url);
 }
 
-/** A folder sorts by the newest artifact anywhere beneath it. */
-function newestFoldersFirst(
-  folders: Iterable<MutableFolder>,
-): readonly PublicArtifactTreeFolder[] {
-  return [...folders]
-    .map((folder) => toTreeFolder(folder))
-    .toSorted((left, right) => {
+/** The orders a reader can pick for the tree. */
+export const treeSorts = ["updated", "name", "views"] as const;
+
+export type TreeSort = (typeof treeSorts)[number];
+
+/**
+ * Each order, for artifacts and for the folders that hold them. A folder
+ * sorts by what lies beneath it: its newest artifact, its total views, or
+ * its own label.
+ */
+const treeSortOrders = {
+  name: {
+    entries: (left, right) =>
+      left.name.localeCompare(right.name, undefined, {sensitivity: "base"}) ||
+      left.url.localeCompare(right.url),
+    folders: (left, right) => left.label.localeCompare(right.label),
+  },
+  updated: {
+    entries: newestEntriesFirst,
+    folders: (left, right) => {
       const leftNewest = newestUpdatedAt(left);
       const rightNewest = newestUpdatedAt(right);
       if (leftNewest !== rightNewest) return leftNewest < rightNewest ? 1 : -1;
       return left.label.localeCompare(right.label);
-    });
-}
-
-function toTreeFolder(folder: MutableFolder): PublicArtifactTreeFolder {
-  return {
-    artifacts: newestEntriesFirst(folder.artifacts),
-    folders: newestFoldersFirst(folder.children.values()),
-    label: folder.label,
-    path: folder.path,
-  };
-}
-
-function newestUpdatedAt(folder: PublicArtifactTreeFolder): string {
-  const dates = [
-    ...folder.artifacts.map((artifact) => artifact.updatedAt),
-    ...folder.folders.map(newestUpdatedAt),
-  ];
-  return dates.reduce(
-    (latest, date) => (date > latest ? date : latest),
-    "",
-  );
-}
+    },
+  },
+  views: {
+    entries: (left, right) =>
+      right.views.total - left.views.total || newestEntriesFirst(left, right),
+    folders: (left, right) =>
+      totalViews(right) - totalViews(left) || left.label.localeCompare(right.label),
+  },
+} as const satisfies Record<TreeSort, {
+  readonly entries: (left: PublicArtifactTreeEntry, right: PublicArtifactTreeEntry) => number;
+  readonly folders: (left: PublicArtifactTreeFolder, right: PublicArtifactTreeFolder) => number;
+}>;

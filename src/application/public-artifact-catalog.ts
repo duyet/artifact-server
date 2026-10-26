@@ -16,14 +16,16 @@ import type {
   ArtifactViewRepository,
   CollapsedFolderRepository,
 } from "../core/ports.js";
-import type {
-  ArtifactVersionDay,
-  ArtifactViewCounts,
-  ArtifactViewDay,
-  ArtifactViewTotal,
-  FolderDefaultState,
-  PublicArtifactCatalog,
-  PublicArtifactSummary,
+import {
+  type ArtifactVersionDay,
+  type ArtifactViewCounts,
+  type ArtifactViewDay,
+  type ArtifactViewTotal,
+  type CatalogScope,
+  catalogScopes,
+  type FolderDefaultState,
+  type PublicArtifactCatalog,
+  type PublicArtifactSummary,
 } from "../core/model.js";
 
 /** Days of history the public catalog reports as its rolling window. */
@@ -35,9 +37,11 @@ export const publicCatalogRecentDays = 7;
 /** Artifacts one public catalog read returns before it reports truncation. */
 export const publicCatalogLimit = 500;
 
-/** Values used to read one public catalog. */
+/** Values used to read one catalog for one viewer. */
 export interface ListPublicArtifactCatalogCommand {
   readonly limit: number;
+  /** The signed-in viewer, or null for an anonymous read. */
+  readonly viewer: Principal | null;
 }
 
 /** Values used to store how one folder of the public tree starts. */
@@ -51,7 +55,7 @@ export interface SetFolderDefaultStateCommand {
 /** Repository reads and writes the public catalog needs. */
 export interface PublicArtifactCatalogRepository {
   readonly listCollapsedFolders: CollapsedFolderRepository["listCollapsedFolders"];
-  readonly listPublicArtifacts: ArtifactRepository["listPublicArtifacts"];
+  readonly listCatalogArtifacts: ArtifactRepository["listCatalogArtifacts"];
   readonly readArtifactVersionDays: ArtifactRepository["readArtifactVersionDays"];
   readonly readArtifactViewDays: ArtifactViewRepository["readArtifactViewDays"];
   readonly readArtifactViewTotals: ArtifactViewRepository["readArtifactViewTotals"];
@@ -79,9 +83,11 @@ interface PublicArtifactCatalogOperations {
 }
 
 /**
- * Reads the live public catalog with its view counts. It returns a flat,
- * newest-first list rather than folders: grouping is display order, and the
- * page that draws the tree owns that order rather than this read.
+ * Reads the live catalog one viewer may see, with its view counts. An
+ * anonymous viewer reads the public artifacts; a viewer who may list
+ * artifacts reads every live one. It returns a flat, newest-first list rather
+ * than folders: grouping is display order, and the page that draws the tree
+ * owns that order rather than this read.
  */
 export class PublicArtifactCatalogService extends Context.Service<
   PublicArtifactCatalogService,
@@ -116,7 +122,13 @@ function makePublicArtifactCatalogService(
         });
       }
       const now = yield* dependencies.clock.now;
-      const summaries = yield* readSummaries(dependencies.repository, command.limit);
+      const viewer = command.viewer;
+      const scope = yield* catalogScopeFor(authorization, viewer);
+      const summaries = yield* readSummaries(
+        dependencies.repository,
+        command.limit,
+        scope,
+      );
       const artifactIds = summaries.map((summary) => summary.id);
       const untilDay = dayOf(now);
       const sinceDay = dayOf(
@@ -143,6 +155,13 @@ function makePublicArtifactCatalogService(
           );
           return {
             artifact,
+            // The owner-or-administrator rule for who may change an
+            // artifact's visibility, so the tree offers a change only to a
+            // viewer that rule admits.
+            manageable: viewer !== null &&
+              authorization.canManageArtifact(viewer, artifact),
+            mine: viewer !== null && viewer.id === artifact.owner.principalId,
+            ownerName: ownerName(artifact.owner.displayName),
             series,
             updates: versionDays.filter((day) => day.artifactId === artifact.id),
             views: countViews(series, total, recentSinceDay),
@@ -154,6 +173,7 @@ function makePublicArtifactCatalogService(
         // truncation one artifact early costs a line of prose; reporting a
         // partial list as complete costs the reader a missing artifact.
         truncated: summaries.length === command.limit,
+        viewer: viewer === null ? null : {name: viewer.displayName},
         windowDays: dependencies.windowDays,
       } satisfies PublicArtifactCatalog;
     },
@@ -197,16 +217,50 @@ function revealedFolders(
     .toSorted();
 }
 
+/**
+ * Every live artifact for a viewer who may list artifacts, and the public
+ * ones for anyone else, an anonymous viewer included. The two checks are the
+ * ones `GET /api/v1/artifacts` makes before it lists a project, so the tree
+ * never shows a viewer an artifact that API would not list to them.
+ */
+function catalogScopeFor(
+  authorization: AuthorizationOperations,
+  viewer: Principal | null,
+): Effect.Effect<CatalogScope> {
+  if (viewer === null) return Effect.succeed(catalogScopes.public);
+  return authorization.requireArtifactListing(viewer).pipe(
+    Effect.andThen(authorization.requireProjectAccess(viewer)),
+    Effect.as(catalogScopes.all),
+    Effect.catchTag("AuthorizationDenied", () =>
+      Effect.succeed(catalogScopes.public)),
+  );
+}
+
+/** Text joined to text by an `@` with no space on either side. */
+const emailAddressPattern = /[^\s@]+@[^\s@]+/u;
+
+/**
+ * The owner's display name as the tree may show it. A blank name is no name,
+ * and a name holding an email address is withheld rather than shown to
+ * anyone. A key name such as `Ada Lovelace @ laptop` holds no address and is
+ * shown.
+ */
+function ownerName(displayName: string | null): string | null {
+  const name = displayName?.trim() ?? "";
+  return name === "" || emailAddressPattern.test(name) ? null : name;
+}
+
 function readSummaries(
   repository: PublicArtifactCatalogRepository,
   limit: number,
+  scope: CatalogScope,
 ): Effect.Effect<
   readonly PublicArtifactSummary[],
   ArtifactRepositoryFailure
 > {
   return Effect.tryPromise({
-    catch: (cause) => repositoryFailure("listPublicArtifacts", cause),
-    try: () => repository.listPublicArtifacts(limit),
+    catch: (cause) => repositoryFailure("listCatalogArtifacts", cause),
+    try: () => repository.listCatalogArtifacts({limit, scope}),
   });
 }
 
