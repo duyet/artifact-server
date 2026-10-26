@@ -1,11 +1,19 @@
+const navigationDestinations: ReadonlySet<string> = new Set([
+  "document",
+  "frame",
+  "iframe",
+]);
+
 /**
  * Decide whether a missing path may resolve to a single-page application's
  * HTML entry file.
  */
 export function permitsSpaEntryFallback(headers: Headers): boolean {
   if (!acceptsHtml(headers.get("accept"))) return false;
-  const destination = headers.get("sec-fetch-dest");
-  if (destination !== null && destination.toLowerCase() !== "document") {
+  const destination = headers.get("sec-fetch-dest")?.toLowerCase() ?? null;
+  // The viewer frames a readable URL, so a client route opened there is a
+  // frame's navigation, not a tab's.
+  if (destination !== null && !navigationDestinations.has(destination)) {
     return false;
   }
   const mode = headers.get("sec-fetch-mode");

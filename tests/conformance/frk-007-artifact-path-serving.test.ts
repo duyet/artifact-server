@@ -28,9 +28,10 @@ import {
 const mcpProtocolVersion = "2026-07-28";
 const sandboxPolicy =
   "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
-const navigation = {
+/** A navigation of the viewer's frame, the way a browser loads a readable URL's page. */
+const frameNavigation = {
   Accept: "text/html",
-  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Dest": "iframe",
   "Sec-Fetch-Mode": "navigate",
 };
 const errorBodySchema = z.object({
@@ -95,7 +96,7 @@ describe("artifacts served at their readable paths", () => {
       server,
       `${spa.links.artifact}settings/profile`,
       "GET",
-      navigation,
+      frameNavigation,
     );
     expect(fallback.status).toBe(200);
     expect(await fallback.text()).toBe(spaShell);

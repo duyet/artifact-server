@@ -23,6 +23,12 @@ const navigation = {
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
 };
+/** A navigation of the viewer's frame, the way a browser loads a readable URL's page. */
+const frameNavigation = {
+  Accept: "text/html",
+  "Sec-Fetch-Dest": "iframe",
+  "Sec-Fetch-Mode": "navigate",
+};
 
 interface ContentRequest {
   readonly headers?: Record<string, string>;
@@ -142,7 +148,7 @@ describe("same-host content sandbox", () => {
         url: `${server.baseUrl}/folder-3fa85f64-5717-4562-b3fc-2c963f66afa6/`,
       },
       {
-        headers: navigation,
+        headers: frameNavigation,
         name: "200 folder SPA fallback",
         status: 200,
         url: `${spa.links.artifact}settings/profile`,

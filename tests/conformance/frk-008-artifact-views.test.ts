@@ -21,6 +21,12 @@ const navigation = {
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
 };
+/** A navigation of the viewer's frame, the way a browser loads a readable URL's page. */
+const frameNavigation = {
+  Accept: "text/html",
+  "Sec-Fetch-Dest": "iframe",
+  "Sec-Fetch-Mode": "navigate",
+};
 
 const viewCountsSchema = z.object({
   last7Days: z.number().int().nonnegative(),
@@ -162,8 +168,9 @@ describe("entry-document view counts", () => {
       {count: 4, day: today},
     ]);
 
-    // An SPA client route that misses every file is one browser navigation
-    // that answers the entry document, so the same one-view rule counts it.
+    // An SPA client route that misses every file is one navigation of the
+    // viewer's frame that answers the entry document, so the same one-view
+    // rule counts it.
     // Only the raw client sends a navigation's Sec-Fetch-Mode; undici's fetch
     // replaces it with `cors`, which answers no fallback at all.
     const spa = await publishSite(server, installation, {
@@ -177,7 +184,7 @@ describe("entry-document view counts", () => {
       server,
       `${spa.links.artifact}settings/profile`,
       "GET",
-      navigation,
+      frameNavigation,
     );
     expect(clientRoute.status).toBe(200);
     expect(await clientRoute.text()).toBe(spaShell);
