@@ -471,7 +471,7 @@ describe("LDAP browser sign-in", () => {
     ].toSorted());
   });
 
-  test("failed LDAP sign-ins are limited per client and per username, and neither a success nor a burst gets past either limit", async () => {
+  test("failed LDAP sign-ins are limited to five a minute per client and ten in 15 minutes per username, and neither a success nor a burst gets past either limit", async () => {
     await server?.stop();
     await issueAliceKey();
     server = await startTestServer(installation, {
@@ -503,12 +503,31 @@ describe("LDAP browser sign-in", () => {
     const limited = await signIn(running(), "alice", alicePassword, attacker);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(Number(limited.headers.get("retry-after"))).toBeLessThanOrEqual(60);
     expect(errorSchema.parse(await limited.json()).error.code).toBe("RATE_LIMITED");
 
-    // Carol has had five guesses, so a second client gets none.
-    expect((await signIn(running(), "carol", "carol password", from("203.0.113.2"))).status)
+    // A second client adds five more guesses at carol, which uses up her ten,
+    // so a third client gets none for the rest of the 15 minutes.
+    const moreGuesses = await Promise.all(
+      Array.from({length: 5}, () => signIn(running(), "carol", "guess", from("203.0.113.2"))),
+    );
+    expect(moreGuesses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401]);
+    const carolLimited = await signIn(running(), "carol", "carol password", from("203.0.113.4"));
+    expect(carolLimited.status).toBe(429);
+    expect(Number(carolLimited.headers.get("retry-after"))).toBeGreaterThan(60);
+    expect(Number(carolLimited.headers.get("retry-after"))).toBeLessThanOrEqual(15 * 60);
+    expect(carolBinds()).toBe(10);
+
+    // Alice's own sign-in between guesses does not give the guesser a fresh count.
+    const aliceGuesses = await Promise.all(Array.from({length: 9}, (_, index) =>
+      signIn(running(), "alice", "guess", from(index < 5 ? "203.0.113.20" : "203.0.113.21"))));
+    expect(aliceGuesses.map((response) => response.status))
+      .toEqual(Array.from({length: 9}, () => 401));
+    expect((await signIn(running(), "alice", alicePassword, from("203.0.113.22"))).status)
+      .toBe(204);
+    expect((await signIn(running(), "alice", "guess", from("203.0.113.22"))).status).toBe(401);
+    expect((await signIn(running(), "alice", alicePassword, from("203.0.113.23"))).status)
       .toBe(429);
-    expect(carolBinds()).toBe(5);
 
     // A burst is charged before any bind finishes, so only five reach the directory.
     const burst = await Promise.all(
@@ -547,9 +566,9 @@ describe("LDAP browser sign-in", () => {
       "X-Forwarded-Proto": "https",
     });
     const variants = ["carol", "CAROL", "\uFF43\uFF41\uFF52\uFF4F\uFF4C", "car\u00ADol", " carol\u200B "];
-    const guesses = await Promise.all(variants.map((username, index) =>
+    const guesses = await Promise.all([...variants, ...variants].map((username, index) =>
       signIn(running(), username, "guess", from(`203.0.113.${index + 10}`))));
-    expect(guesses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401]);
+    expect(guesses.map((response) => response.status)).toEqual(Array.from({length: 10}, () => 401));
     expect((await signIn(running(), "carol", "carol password", from("203.0.113.99"))).status)
       .toBe(429);
   });

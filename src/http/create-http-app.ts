@@ -147,7 +147,10 @@ import {
   versionServedRoots,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
-import {FailedSignInLimiter} from "./failed-sign-in-limiter.js";
+import {
+  directoryUsernameFailedSignInPolicy,
+  FailedSignInLimiter,
+} from "./failed-sign-in-limiter.js";
 import {
   attachmentContentDisposition,
   portableDownloadFilename,
@@ -607,7 +610,10 @@ export function createHttpApp(
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
   const failedDirectorySignIns = new FailedSignInLimiter(dependencies.clock);
-  const failedDirectoryUsers = new FailedSignInLimiter(dependencies.clock);
+  const failedDirectoryUsers = new FailedSignInLimiter(
+    dependencies.clock,
+    directoryUsernameFailedSignInPolicy,
+  );
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -1069,8 +1075,9 @@ export function createHttpApp(
     requireApplicationOrigin(context, dependencies);
     const body = directorySignInSchema.parse(await context.req.json());
     const clientAddress = signInClientAddress(context, dependencies);
-    // Passwords are guessable, unlike keys, so one person's success never
-    // resets the client's count, and each username has its own count.
+    // Passwords are guessable, unlike keys, so a success resets neither
+    // count: not the client's, and not the username's, which a victim's own
+    // sign-in would otherwise clear for whoever is guessing at it.
     return limitedSignIn(
       context,
       [
@@ -1078,7 +1085,7 @@ export function createHttpApp(
         {
           key: directoryUsernameKey(body.username),
           limiter: failedDirectoryUsers,
-          onSuccess: "clear",
+          onSuccess: "refund",
         },
       ],
       signInWithDirectory(

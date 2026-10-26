@@ -217,7 +217,7 @@ Before you turn it on:
 - **Administrators sign in with a password too.** A directory user whose email matches an administrator member gets an administrator session. Protect those accounts in the directory (strong passwords, lockout), or require a group.
 - **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_credentials`, `no_member`, `missing_email`, `entry_unreadable`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain. `entry_unreadable` means the password was right but the user may not read their own entry, which is a directory access rule to fix.
 
-Failed LDAP sign-ins are limited to five per minute per client address and, separately, per username. A username that hits the limit is locked out of this server for the rest of the minute, whoever is guessing. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+Failed LDAP sign-ins are limited to five per minute per client address and, separately, ten per 15 minutes per username. A username that hits its limit is locked out of this server for the rest of those 15 minutes, whoever is guessing, and the person's own successful sign-in does not reset it. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
 
 ## Publishing
 
