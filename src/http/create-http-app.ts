@@ -124,7 +124,11 @@ import {
   decideByteRange,
   ifRangeAllowsPartialResponse,
 } from "./byte-range.js";
-import {permitsSpaEntryFallback} from "./spa-navigation.js";
+import {
+  permitsSpaEntryFallback,
+  tabNavigation,
+  tabOrFrameNavigation,
+} from "./spa-navigation.js";
 import {
   maximumCommentPageSize,
   maximumDeclaredFiles,
@@ -3724,7 +3728,10 @@ async function serveVersionContent(
     ContentAccessService.use((contentAccess) =>
       contentAccess.authorizeVersionContent({
         contentToken,
-        fallback: permitsSpaEntryFallback(context.req.raw.headers)
+        fallback: permitsSpaEntryFallback(
+          context.req.raw.headers,
+          readableUrl ? tabOrFrameNavigation : tabNavigation,
+        )
           ? "entry"
           : "none",
         path: requestedPath,
@@ -3916,7 +3923,7 @@ async function servePreviewLeaseContent(
     dependencies,
     ContentAccessService.use((contentAccess) =>
       contentAccess.authorizePreviewContent({
-        fallback: permitsSpaEntryFallback(context.req.raw.headers)
+        fallback: permitsSpaEntryFallback(context.req.raw.headers, tabNavigation)
           ? "entry"
           : "none",
         path: requestedPath,

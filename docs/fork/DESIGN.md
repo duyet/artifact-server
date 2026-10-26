@@ -578,7 +578,7 @@ The frame cannot load the same URL as the viewer. The HTML Standard skips an ifr
 | `/v/<token>/` | The page. The exact version URL never shows a viewer. |
 | A server without `viewer.html` in its web bundle | The page. |
 
-The SPA fallback (`permitsSpaEntryFallback`) used to accept only `Sec-Fetch-Dest: document`. A client route opened in the viewer is now a frame navigation, so it also accepts `iframe` and `frame`. This holds for every content form, `/v/<token>/`, content-domain hosts, and Review leases included, so any site that frames an SPA artifact's client route now gets its entry page, and that load counts as a view.
+The SPA fallback (`permitsSpaEntryFallback`) accepts only `Sec-Fetch-Dest: document`, except at a readable URL. A client route opened in the viewer is a frame navigation there, so the folder and path forms also accept `iframe` and `frame`. `/v/<token>/`, Review leases, and content-domain hosts keep the old rule: a frame's navigation to a missing path is 404.
 
 ### Headers
 
