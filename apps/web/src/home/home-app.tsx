@@ -310,15 +310,20 @@ function DailyChart({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         <div className="relative" ref={ref}>
-          <ChartContainer className="aspect-auto h-32 w-full cursor-pointer" config={config}>
-            <BarChart
-              data={data}
-              margin={dailyChartMargin}
-              onClick={(state) => {
-                const row = data.find((item) => item.day === state.activeLabel);
-                if (row !== undefined) toggleDay(row.day);
-              }}
-            >
+          <ChartContainer
+            className="aspect-auto h-32 w-full cursor-pointer"
+            config={config}
+            // The column under the pointer, from the same equal split the
+            // buttons use. Recharts' own click state lags a fast click by a
+            // frame, so it is not read here.
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              const index = Math.floor(((event.clientX - box.left) / box.width) * data.length);
+              const row = data[index];
+              if (row !== undefined) toggleDay(row.day);
+            }}
+          >
+            <BarChart data={data} margin={dailyChartMargin}>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" hide />
               <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
@@ -333,7 +338,7 @@ function DailyChart({
           {/*
             The keyboard path: one button per day laid over its column. They
             let the pointer through, so hovering still reaches the tooltip and
-            a click lands on the chart's own handler.
+            a click lands on the chart's handler above.
           */}
           <div
             aria-label={chart.title}
