@@ -28,6 +28,7 @@ const publicArtifactSchema = z.object({
  */
 const publicCatalogSchema = z.object({
   artifacts: z.array(publicArtifactSchema),
+  collapsedFolders: z.array(z.string().min(1).max(200)),
   generatedAt: z.iso.datetime(),
   loginKind: z.enum(["local_owner", "none", "oidc", "workos"]),
   truncated: z.boolean(),
@@ -37,6 +38,8 @@ const publicCatalogSchema = z.object({
 /** Everything the home page draws, after the server's own shaping. */
 export interface PublicCatalog {
   readonly artifacts: readonly PublicArtifactTreeEntry[];
+  /** Folder paths that start collapsed. Every other folder starts expanded. */
+  readonly collapsedFolders: readonly string[];
   readonly generatedAt: string;
   readonly loginKind: z.infer<typeof publicCatalogSchema>["loginKind"];
   readonly truncated: boolean;
@@ -65,6 +68,7 @@ export async function readPublicCatalog(
       url: artifact.url,
       views: artifact.views,
     })),
+    collapsedFolders: catalog.collapsedFolders,
     generatedAt: catalog.generatedAt,
     loginKind: catalog.loginKind,
     truncated: catalog.truncated,

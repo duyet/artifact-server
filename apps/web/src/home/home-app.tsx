@@ -61,6 +61,7 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
   const now = Date.now();
   const days = windowDays(todayUtc(), catalog.windowDays);
   const tree = buildPublicArtifactTree(catalog.artifacts);
+  const collapsed = new Set(catalog.collapsedFolders);
   const totals = catalog.artifacts.reduce(
     (sum, artifact) => ({
       last7Days: sum.last7Days + artifact.views.last7Days,
@@ -122,7 +123,13 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
             </CardHeader>
             <CardContent className="flex flex-col gap-1">
               {tree.folders.map((folder) => (
-                <FolderNode key={folder.path} days={days} folder={folder} now={now} />
+                <FolderNode
+                  key={folder.path}
+                  collapsed={collapsed}
+                  days={days}
+                  folder={folder}
+                  now={now}
+                />
               ))}
               {tree.ungrouped.length === 0 ? null : (
                 <TreeFolder id="home-ungrouped" name="Without a path">
@@ -208,18 +215,20 @@ function DailyChart({
  */
 function TreeFolder({
   children,
+  defaultOpen = true,
   id,
   name,
   prefix = "",
 }: {
   readonly children: React.ReactNode;
+  readonly defaultOpen?: boolean;
   readonly id: string;
   readonly name: string;
   /** The path above `name`, spoken but not drawn: the indent already shows it. */
   readonly prefix?: string;
 }) {
   return (
-    <Collapsible defaultOpen>
+    <Collapsible defaultOpen={defaultOpen}>
       <h2 id={id}>
         <CollapsibleTrigger
           // One name for the whole path: a visually hidden prefix element
@@ -246,16 +255,19 @@ function TreeFolder({
 }
 
 function FolderNode({
+  collapsed,
   days,
   folder,
   now,
 }: {
+  readonly collapsed: ReadonlySet<string>;
   readonly days: readonly string[];
   readonly folder: PublicArtifactTreeFolder;
   readonly now: number;
 }) {
   return (
     <TreeFolder
+      defaultOpen={!collapsed.has(folder.path)}
       id={`folder-${folder.path}`}
       name={folder.label}
       prefix={folder.path.slice(0, folder.path.length - folder.label.length)}
@@ -264,7 +276,13 @@ function FolderNode({
         <ArtifactNode key={artifact.url} artifact={artifact} days={days} now={now} />
       ))}
       {folder.folders.map((child) => (
-        <FolderNode key={child.path} days={days} folder={child} now={now} />
+        <FolderNode
+          key={child.path}
+          collapsed={collapsed}
+          days={days}
+          folder={child}
+          now={now}
+        />
       ))}
     </TreeFolder>
   );
