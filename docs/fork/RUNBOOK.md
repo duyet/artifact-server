@@ -177,48 +177,6 @@ kubectl --context <cluster> -n artifact-server exec deploy/artifact-server -c ar
 - Running the command again with the same email and key name revokes that key and prints a new one. The member's other keys keep working. The running server may accept the old key for up to 30 seconds.
 - The output adds `apiKey.name` and `member.role`. Put the `token` in the person's CLI profile or MCP bearer setting and delete the file.
 
-## Sign in with LDAP
-
-People can sign in to Review with their directory username and password instead of an API key. The browser session acts as the member whose email the directory entry holds, so it sees and edits that member's artifacts. Agents and the CLI keep using keys. The feature is off until `ARTIFACT_SERVER_LDAP_URL` is set.
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ARTIFACT_SERVER_LDAP_URL` | unset (off) | `ldaps://host:636`. `ldap://` is refused unless `ARTIFACT_SERVER_LDAP_ALLOW_INSECURE=true`, which sends passwords in clear text. Use it only for a test directory. |
-| `ARTIFACT_SERVER_LDAP_USER_DN` | required | Bind DN with `{username}` as one whole attribute value. |
-| `ARTIFACT_SERVER_LDAP_CA_FILE` | system trust store | PEM bundle that replaces the trust store for this connection. |
-| `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP` | unset | Group DN that must appear in the entry's `memberOf`, compared without case. |
-| `ARTIFACT_SERVER_LDAP_EMAIL_ATTRIBUTE` | `mail` | Attribute whose first value is matched, without case, to a member's email. Later values are ignored. |
-| `ARTIFACT_SERVER_LDAP_NAME_ATTRIBUTE` | `displayName` | Display name for members that `admit` creates. |
-| `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS` | `reject` | `reject` a directory user with no active member, or `admit` them as role `member`. |
-| `ARTIFACT_SERVER_LDAP_TIMEOUT_MS` | `5000` | Connect and operation timeout. |
-
-A FreeIPA example, with members already issued by `admin issue-key`:
-
-```yaml
-env:
-  - name: ARTIFACT_SERVER_LDAP_URL
-    value: ldaps://ipa.example.com:636
-  - name: ARTIFACT_SERVER_LDAP_USER_DN
-    value: uid={username},cn=users,cn=accounts,dc=example,dc=com
-  - name: ARTIFACT_SERVER_LDAP_CA_FILE
-    value: /etc/artifact-server/ldap/ca.crt # IPA serves its CA at http://ipa.example.com/ipa/config/ca.crt
-  - name: ARTIFACT_SERVER_LDAP_UNKNOWN_USERS
-    value: reject
-```
-
-To admit only one group, add `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP=cn=artifact-users,cn=groups,cn=accounts,dc=example,dc=com`.
-
-No secret is needed. The server binds as the person signing in and never stores the password. Usernames may hold only letters, digits, `.`, `_`, `@`, and `-`; any other username is refused without contacting the directory. Check the result with `artifactserver config check`, which reports `ldapSignIn` without credentials.
-
-Before you turn it on:
-
-- **Emails must match.** A person whose first directory `mail` value differs from their member's email is refused. Aliases in later values do not count. Compare them first, or set `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS=admit` and accept new members.
-- **The email attribute is the trust boundary.** A directory user who can change their own `mail` can sign in as any member, including an administrator. FreeIPA's default `User Self service` rule leaves `mail` out; confirm with `ipa selfservice-show "User Self service"`. On other directories, check the access rules. A required group does not help, because a member of the group who edits their own `mail` can still claim an administrator's email. The directory must not let users edit their own `mail` attribute.
-- **Administrators sign in with a password too.** A directory user whose email matches an administrator member gets an administrator session. Protect those accounts in the directory (strong passwords, lockout), or require a group.
-- **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_username`, `invalid_credentials`, `no_member`, `missing_email`, `entry_unreadable`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain. `entry_unreadable` means the password was right but the user may not read their own entry, which is a directory access rule to fix.
-
-Failed LDAP sign-ins are limited to five per minute per client address and, separately, ten per 15 minutes per username. A username that hits its limit is locked out of this server for the rest of those 15 minutes, whoever is guessing, and the person's own successful sign-in does not reset it. An attempt that ends in `DIRECTORY_UNAVAILABLE` still counts. Each server process runs at most 16 directory sign-ins at once and answers any more with `DIRECTORY_UNAVAILABLE` without contacting the directory, so a slow directory shows up as `.unavailable` lines that say the sign-ins are already running. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
-
 ## Publishing
 
 Publish with the CLI from a fork checkout. Pass the key as a file, never on the command line.

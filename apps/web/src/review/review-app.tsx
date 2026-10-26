@@ -3,9 +3,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {setDraftPrincipal} from "@/components/comments/comment-drafts";
 import {api, ApiError, type AccessContext, type Project, type Session} from "@/api/client";
 import {ApiKeySignIn} from "./api-key-sign-in.tsx";
-import {DirectorySignIn} from "./directory-sign-in.tsx";
 import {Button, ButtonLink} from "@/components/ui/button";
-import {Separator} from "@/components/ui/separator";
 import {useTheme} from "@/hooks/use-theme";
 import {ReviewGate} from "./review-primitives.tsx";
 import {ReviewShell} from "./review-shell.tsx";
@@ -20,7 +18,6 @@ export function ReviewApp() {
   const [loginKind, setLoginKind] = useState<
     AccessContext["login"]["kind"] | null
   >(null);
-  const [directorySignIn, setDirectorySignIn] = useState(false);
   const bootstrapInFlightRef = useRef(false);
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [sessionState, setSessionState] = useState<
@@ -44,10 +41,6 @@ export function ReviewApp() {
       ]);
       accessContextRef.current = loadedAccessContext;
       setLoginKind(loadedAccessContext.login.kind);
-      setDirectorySignIn(
-        loadedAccessContext.accessMode === "private_team" &&
-          loadedAccessContext.login.directory,
-      );
       let loadedSession: Session;
       if (initialSession.kind === "authenticated") {
         loadedSession = initialSession.value;
@@ -112,25 +105,6 @@ export function ReviewApp() {
 
   if (sessionState === "loading") {
     return <ReviewGate description="Opening the local artifact catalog." title="Loading Artifact Server" />;
-  }
-  if (sessionState === "unauthenticated" && loginKind === "none" && directorySignIn) {
-    return (
-      <ReviewGate
-        action={(
-          <div className="grid gap-6">
-            <DirectorySignIn onSignedIn={() => void bootstrap()} />
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <Separator className="flex-1" />
-              <span className="whitespace-nowrap">or use an API key</span>
-              <Separator className="flex-1" />
-            </div>
-            <ApiKeySignIn onSignedIn={() => void bootstrap()} />
-          </div>
-        )}
-        description="Sign in with your directory account to review artifacts in this browser."
-        title="Sign in"
-      />
-    );
   }
   if (sessionState === "unauthenticated" && loginKind === "none") {
     return (

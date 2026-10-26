@@ -4,16 +4,46 @@ import {api} from "@/api/client";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Label} from "@/components/ui/label";
-import {useSignInAttempt} from "./use-sign-in-attempt.ts";
+
+type SignInState =
+  | {readonly kind: "idle"}
+  | {readonly kind: "pending"}
+  | {readonly kind: "failed"; readonly message: string};
 
 /** Browser sign-in for a server whose login kind is none. */
 export function ApiKeySignIn({onSignedIn}: {readonly onSignedIn: () => void}) {
   const [apiKey, setApiKey] = useState("");
-  const {attempt, state} = useSignInAttempt("That API key was not accepted.", onSignedIn);
+  const [state, setState] = useState<SignInState>({kind: "idle"});
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (await attempt(() => api.signInWithApiKey(apiKey))) setApiKey("");
+    setState({kind: "pending"});
+    try {
+      const result = await api.signInWithApiKey(apiKey);
+      switch (result.kind) {
+        case "signed_in":
+          setApiKey("");
+          setState({kind: "idle"});
+          onSignedIn();
+          return;
+        case "rejected":
+          setState({kind: "failed", message: "That API key was not accepted."});
+          return;
+        case "rate_limited":
+          setState({
+            kind: "failed",
+            message: `Too many failed attempts. Try again in ${result.retryAfterSeconds} s.`,
+          });
+          return;
+        default:
+          result satisfies never;
+      }
+    } catch (caught) {
+      setState({
+        kind: "failed",
+        message: caught instanceof Error ? caught.message : "Sign-in failed.",
+      });
+    }
   };
 
   return (
