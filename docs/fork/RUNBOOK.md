@@ -229,7 +229,7 @@ A path is guessable, so anyone who can reach the host can read a report at its p
 Read it directly when you want to check what a viewer sees:
 
 ```sh
-curl -sS https://artifacts.example.internal/api/v1/public/tree | jq '.artifacts[] | {name, path, views}'
+curl -sS https://artifacts.example.internal/api/v1/public/tree | jq '.artifacts[] | {name, path, views, updates}'
 ```
 
 What the page needs from an operator:

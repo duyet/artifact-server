@@ -4,7 +4,9 @@ import {
   IconFolder,
   IconFolderOpen,
   IconInfoCircle,
+  IconX,
 } from "@tabler/icons-react";
+import {useRef, useState, type KeyboardEvent} from "react";
 import {Bar, BarChart, CartesianGrid, XAxis} from "recharts";
 
 import {ThemeMenu} from "@/components/theme-menu";
@@ -13,6 +15,7 @@ import {Badge} from "@/components/ui/badge";
 import {Button, ButtonLink} from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -36,22 +39,51 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 
 import {
   buildPublicArtifactTree,
   densifyDailySeries,
+  entriesOnDay,
   sparklineBars,
   sparklineBox,
   sumDailySeries,
   windowDays,
+  type DailyMetric,
   type PublicArtifactTreeEntry,
   type PublicArtifactTreeFolder,
 } from "./home-tree.js";
 import type {PublicCatalog} from "./home-client.js";
 
-const viewsChartConfig = {
-  views: {color: "var(--muted-foreground)", label: "Views"},
-} satisfies ChartConfig;
+/** The copy each chart measure brings to the card and the tree filter. */
+const dailyCharts = {
+  updates: {
+    description: "Versions published across every public artifact.",
+    filter: "Updated on",
+    title: "Updated per day",
+    toggle: "Updated",
+    unit: ["version", "versions"],
+  },
+  views: {
+    description: "Across every public artifact.",
+    filter: "Viewed on",
+    title: "Views per day",
+    toggle: "Views",
+    unit: ["view", "views"],
+  },
+} as const satisfies Record<DailyMetric, {
+  readonly description: string;
+  readonly filter: string;
+  readonly title: string;
+  readonly toggle: string;
+  readonly unit: readonly [string, string];
+}>;
+
+/** The chart's measure and the one day, if any, that filters the tree. */
+interface DayFilter {
+  readonly day: string | null;
+  readonly metric: DailyMetric;
+}
 
 /**
  * The home page. Every colour is a semantic token, so the application's theme
@@ -60,8 +92,23 @@ const viewsChartConfig = {
 export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
   const now = Date.now();
   const days = windowDays(todayUtc(), catalog.windowDays);
-  const tree = buildPublicArtifactTree(catalog.artifacts);
-  const collapsed = new Set(catalog.collapsedFolders);
+  const [filter, setFilter] = useState<DayFilter>({day: null, metric: "views"});
+  const chartRef = useRef<HTMLDivElement>(null);
+  const shown = filter.day === null
+    ? catalog.artifacts
+    : entriesOnDay(catalog.artifacts, filter.metric, filter.day);
+  const tree = buildPublicArtifactTree(shown);
+  // A filtered tree opens every folder, so a match never hides in a
+  // collapsed one.
+  const collapsed = new Set(filter.day === null ? catalog.collapsedFolders : []);
+  const filterVerb = dailyCharts[filter.metric].filter;
+  const filterDay = filter.day === null ? null : formatDay(filter.day);
+  const clearFilter = () => {
+    const day = filter.day;
+    setFilter({day: null, metric: filter.metric});
+    // The chip that held focus is gone, so focus returns to the day it named.
+    if (day !== null) focusDayButton(chartRef.current, day);
+  };
   const totals = catalog.artifacts.reduce(
     (sum, artifact) => ({
       last7Days: sum.last7Days + artifact.views.last7Days,
@@ -99,7 +146,13 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
 
       <DailyChart
         days={days}
-        values={densifyDailySeries(sumDailySeries(catalog.artifacts), days)}
+        filter={filter}
+        onFilterChange={setFilter}
+        ref={chartRef}
+        values={densifyDailySeries(
+          sumDailySeries(catalog.artifacts, filter.metric),
+          days,
+        )}
       />
 
       {catalog.truncated
@@ -119,9 +172,31 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
           <Card>
             <CardHeader>
               <CardTitle>Artifacts</CardTitle>
-              <CardDescription>Shared by link, newest first.</CardDescription>
+              <CardDescription aria-live="polite">
+                {filterDay === null
+                  ? "Shared by link, newest first."
+                  : `${artifactCount(shown.length)} ${filterVerb.toLowerCase()} ${filterDay}.`}
+              </CardDescription>
+              {filterDay === null ? null : (
+                <CardAction>
+                  <Button
+                    aria-label={`${filterVerb} ${filterDay}, clear`}
+                    onClick={clearFilter}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {filterVerb} {filterDay}
+                    <IconX data-icon="inline-end" />
+                  </Button>
+                </CardAction>
+              )}
             </CardHeader>
-            <CardContent className="flex flex-col gap-1">
+            <CardContent
+              className="flex flex-col gap-1"
+              // A new day remounts the folders, so each starts in its default
+              // state again rather than where the last filter left it.
+              key={filter.day ?? ""}
+            >
               {tree.folders.map((folder) => (
                 <FolderNode
                   key={folder.path}
@@ -176,30 +251,122 @@ function TotalCard({label, value}: {readonly label: string; readonly value: numb
   );
 }
 
-/** One bar per day, summed across every public artifact. */
+/** No inset, so each day's band spans exactly 1/n of the chart's width. */
+const dailyChartMargin = {bottom: 0, left: 0, right: 0, top: 4};
+
+/**
+ * One bar per day, summed across every public artifact, in the chosen measure.
+ * Clicking a day's column, or pressing a day's button, filters the tree to it.
+ */
 function DailyChart({
   days,
+  filter,
+  onFilterChange,
+  ref,
   values,
 }: {
   readonly days: readonly string[];
+  readonly filter: DayFilter;
+  readonly onFilterChange: (next: DayFilter) => void;
+  readonly ref: React.Ref<HTMLDivElement>;
   readonly values: readonly number[];
 }) {
-  const data = days.map((day, index) => ({day, views: values[index] ?? 0}));
+  const chart = dailyCharts[filter.metric];
+  const data = days.map((day, index) => ({count: values[index] ?? 0, day}));
+  // One day is the tab stop and the arrow keys move between the rest, so the
+  // chart costs a keyboard reader one Tab, not one per day.
+  const tabStop = filter.day ?? data.findLast((row) => row.count > 0)?.day;
+  const config = {
+    count: {color: "var(--muted-foreground)", label: capitalize(chart.unit[1])},
+  } satisfies ChartConfig;
+  // A day with no count filters to an empty tree, so it is not a target.
+  const toggleDay = (day: string) => {
+    if (!data.some((row) => row.day === day && row.count > 0)) return;
+    onFilterChange({day: filter.day === day ? null : day, metric: filter.metric});
+  };
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Views per day</CardTitle>
-        <CardDescription>Across every public artifact.</CardDescription>
+        <CardTitle>{chart.title}</CardTitle>
+        <CardDescription>{chart.description}</CardDescription>
+        <CardAction>
+          <ToggleGroup
+            aria-label="Chart measure"
+            onValueChange={(value) => {
+              const next = value[0];
+              // A day means something else in the other measure, so it clears.
+              if (next === "updates" || next === "views") {
+                onFilterChange({day: null, metric: next});
+              }
+            }}
+            size="sm"
+            value={[filter.metric]}
+            variant="outline"
+          >
+            <ToggleGroupItem value="views">{dailyCharts.views.toggle}</ToggleGroupItem>
+            <ToggleGroupItem value="updates">{dailyCharts.updates.toggle}</ToggleGroupItem>
+          </ToggleGroup>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        <ChartContainer className="aspect-auto h-32 w-full" config={viewsChartConfig}>
-          <BarChart accessibilityLayer data={data}>
-            <CartesianGrid vertical={false} />
-            <XAxis dataKey="day" hide />
-            <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
-            <Bar dataKey="views" fill="var(--color-views)" isAnimationActive={false} radius={2} />
-          </BarChart>
-        </ChartContainer>
+        <div className="relative" ref={ref}>
+          <ChartContainer
+            className="aspect-auto h-32 w-full cursor-pointer"
+            config={config}
+            // The column under the pointer, from the same equal split the
+            // buttons use. Recharts' own click state lags a fast click by a
+            // frame, so it is not read here.
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              const index = Math.floor(((event.clientX - box.left) / box.width) * data.length);
+              const row = data[index];
+              if (row !== undefined) toggleDay(row.day);
+            }}
+          >
+            <BarChart data={data} margin={dailyChartMargin}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="day" hide />
+              <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
+              <Bar
+                dataKey="count"
+                fill="var(--color-count)"
+                isAnimationActive={false}
+                radius={2}
+              />
+            </BarChart>
+          </ChartContainer>
+          {/*
+            The keyboard path: one button per day laid over its column. They
+            let the pointer through, so hovering still reaches the tooltip and
+            a click lands on the chart's handler above.
+          */}
+          <div
+            aria-label={chart.title}
+            className="pointer-events-none absolute inset-0 grid"
+            role="group"
+            style={{gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))`}}
+          >
+            {data.map((row) => row.count === 0
+              ? <span key={row.day} />
+              : (
+                <button
+                  aria-label={`${formatDay(row.day)}: ${formatCount(row.count)} ${
+                    chart.unit[row.count === 1 ? 0 : 1]
+                  }`}
+                  aria-pressed={filter.day === row.day}
+                  className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-pressed:bg-foreground/10"
+                  data-day={row.day}
+                  key={row.day}
+                  onClick={() => {
+                    toggleDay(row.day);
+                  }}
+                  onKeyDown={moveBetweenDays}
+                  tabIndex={row.day === tabStop ? 0 : -1}
+                  type="button"
+                />
+              ))}
+          </div>
+        </div>
         <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
           <span>{days[0] ?? ""}</span>
           <span>{days[days.length - 1] ?? ""}</span>
@@ -207,6 +374,28 @@ function DailyChart({
       </CardContent>
     </Card>
   );
+}
+
+/** Arrow keys, Home, and End move focus along a chart's day buttons. */
+function moveBetweenDays(event: KeyboardEvent<HTMLButtonElement>): void {
+  const buttons = [
+    ...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[data-day]") ?? []),
+  ];
+  const index = buttons.indexOf(event.currentTarget);
+  const target = {
+    ArrowLeft: buttons[index - 1],
+    ArrowRight: buttons[index + 1],
+    End: buttons.at(-1),
+    Home: buttons[0],
+  }[event.key];
+  if (target === undefined) return;
+  event.preventDefault();
+  target.focus();
+}
+
+/** Move keyboard focus to one day's button inside a chart. */
+function focusDayButton(chart: HTMLElement | null, day: string): void {
+  chart?.querySelector<HTMLButtonElement>(`[data-day="${day}"]`)?.focus();
 }
 
 /**
@@ -349,6 +538,19 @@ function ArtifactNode({
       </time>
     </div>
   );
+}
+
+/** "26 Oct" for a stored UTC day. */
+function formatDay(day: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${day}T00:00:00.000Z`));
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 /** The current UTC day, which is the day the stored counters are bucketed on. */

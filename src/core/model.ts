@@ -179,6 +179,14 @@ export interface ArtifactViewDay {
   readonly day: string;
 }
 
+/** One artifact's versions published on one UTC day. */
+export interface ArtifactVersionDay {
+  readonly artifactId: string;
+  readonly count: number;
+  /** The UTC calendar day, as `YYYY-MM-DD`. */
+  readonly day: string;
+}
+
 /** One artifact's all-time view total. */
 export interface ArtifactViewTotal {
   readonly artifactId: string;
@@ -238,6 +246,8 @@ export interface PublicArtifactCatalogItem {
   readonly artifact: PublicArtifactSummary;
   /** Only the days inside the window that have views, ascending. */
   readonly series: readonly ArtifactViewDay[];
+  /** Only the days inside the window that published a version, ascending. */
+  readonly updates: readonly ArtifactVersionDay[];
   readonly views: ArtifactViewCounts;
 }
 

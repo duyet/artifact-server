@@ -11,6 +11,7 @@ import type {
   ArtifactState,
   ArtifactVersion,
   ArtifactRecord,
+  ArtifactVersionDay,
   ArtifactViewDay,
   ArtifactViewTotal,
   AssetRecord,
@@ -654,6 +655,13 @@ export interface ArtifactRepository {
    * URL that a credential could change.
    */
   listPublicArtifacts(limit: number): Promise<readonly PublicArtifactSummary[]>;
+  /**
+   * Count the versions each listed artifact published per UTC day inside one
+   * inclusive window, ascending. A day with no version is absent.
+   */
+  readArtifactVersionDays(
+    command: ReadArtifactViewDays,
+  ): Promise<readonly ArtifactVersionDay[]>;
   restoreVersion(command: RestoreArtifactVersion): Promise<ArtifactState>;
 }
 

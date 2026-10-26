@@ -1,11 +1,19 @@
+/** One UTC day's count in a sparse daily series. */
+export interface DailyCount {
+  readonly count: number;
+  readonly day: string;
+}
+
 /** One artifact on the public home page, as the tree endpoint shapes it. */
 export interface PublicArtifactTreeEntry {
   readonly name: string;
   /** The readable path the artifact claims, or null when it claims none. */
   readonly path: string | null;
   /** Only the days inside the window that have views, ascending. */
-  readonly series: readonly {count: number; day: string}[];
+  readonly series: readonly DailyCount[];
   readonly updatedAt: string;
+  /** Only the days inside the window that published a version, ascending. */
+  readonly updates: readonly DailyCount[];
   readonly url: string;
   readonly views: {
     readonly last7Days: number;
@@ -105,26 +113,53 @@ export function windowDays(untilDay: string, count: number): readonly string[] {
  * chart can place a bar at a day instead of inferring where days went missing.
  */
 export function densifyDailySeries(
-  series: readonly {count: number; day: string}[],
+  series: readonly DailyCount[],
   days: readonly string[],
 ): readonly number[] {
   const counts = new Map(series.map((row) => [row.day, row.count]));
   return days.map((day) => counts.get(day) ?? 0);
 }
 
-/** Sum every artifact's sparse series into one series for the page chart. */
+/** The per-day measures the page chart can show. */
+export type DailyMetric = "updates" | "views";
+
+/** Where each measure's sparse series lives on an artifact. */
+const dailySeries = {
+  updates: (entry: PublicArtifactTreeEntry) => entry.updates,
+  views: (entry: PublicArtifactTreeEntry) => entry.series,
+} satisfies Record<
+  DailyMetric,
+  (entry: PublicArtifactTreeEntry) => readonly DailyCount[]
+>;
+
+/** Sum every artifact's sparse series of one measure into one for the page chart. */
 export function sumDailySeries(
   entries: readonly PublicArtifactTreeEntry[],
-): readonly {count: number; day: string}[] {
+  metric: DailyMetric,
+): readonly DailyCount[] {
   const totals = new Map<string, number>();
   for (const entry of entries) {
-    for (const row of entry.series) {
+    for (const row of dailySeries[metric](entry)) {
       totals.set(row.day, (totals.get(row.day) ?? 0) + row.count);
     }
   }
   return [...totals]
     .map(([day, count]) => ({count, day}))
     .toSorted((left, right) => left.day.localeCompare(right.day));
+}
+
+/**
+ * The artifacts that count at least once on `day` in one measure. Building the
+ * tree from this list keeps exactly the folders that hold a match.
+ */
+export function entriesOnDay(
+  entries: readonly PublicArtifactTreeEntry[],
+  metric: DailyMetric,
+  day: string,
+): readonly PublicArtifactTreeEntry[] {
+  return entries.filter((entry) =>
+    dailySeries[metric](entry).some((row) => row.day === day && row.count > 0)
+  );
 }
 
 /** One bar's place and height inside a fixed chart box. */
