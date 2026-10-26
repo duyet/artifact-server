@@ -28,10 +28,11 @@ const readablePath = "team/plans";
  */
 async function approveEverySignIn(page: Page, provider: FakeOidcProvider): Promise<void> {
   await page.route((url) => url.pathname === "/auth/oidc/start", async (route) => {
-    // request.headers() leaves out Fetch Metadata, and the server reads Sec-Fetch-Site.
-    const request = route.request();
+    // An intercepted request exposes no Fetch Metadata, so this sends what
+    // Chromium sends for a link clicked on one of this server's own pages.
+    // FRK-032-F proves the server drops returnArtifact for every other value.
     const started = await route.fetch({
-      headers: {...request.headers(), "sec-fetch-site": await request.headerValue("sec-fetch-site") ?? ""},
+      headers: {...route.request().headers(), "sec-fetch-site": "same-origin"},
       maxRedirects: 0,
     });
     const back = provider.approve(started.headers()["location"] ?? "", carol);
