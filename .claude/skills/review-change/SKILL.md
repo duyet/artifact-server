@@ -14,6 +14,7 @@ Read the diff itself (`gh pr diff <n>` or `git diff origin/main...`), not the PR
 - **Single use and idempotency.** A command with an idempotency key must replay the same result for the same key and the same input, and must refuse a different input. Anything consumed (an upload, a lease, a login attempt) must be consumed in the same transaction as the write it enables, so a second key cannot reuse it.
 - **Concurrency.** Ask what happens when two requests, or two processes on Postgres, run the step at once. Application-level checks are only hints. The guarantee must come from the transaction, a conditional update, or a lock.
 - **Untrusted input.** Paths, hostnames, tokens, usernames, and installation IDs never select a raw storage location, a DN, or a query fragment without escaping or a fixed template.
+- **Retention.** Before a change deletes stored rows or bytes, read the product spec's retention rule and the backup section of `docs/fork/DESIGN.md`. In the first release, expiry cleanup is the only path that deletes staging bytes, and nothing collects blobs.
 - **Visibility.** Anything served to anonymous viewers must filter out private, unlisted, and deleted artifacts, including counts and aggregates.
 
 ## Tests and ledger
