@@ -89,6 +89,10 @@ const entries = {
   [`uid=\\ frank\\ ,${people}`]: directoryEntry("frank password", {
     mail: ["frank@example.com"],
   }),
+  // An administrator's address delegated to grace sits after her own.
+  [`uid=grace,${people}`]: directoryEntry("grace password", {
+    mail: ["grace@example.com", "admin@example.com"],
+  }),
   [`uid=nomail,${people}`]: directoryEntry("nomail password", {displayName: ["No Mail"]}),
   // The RFC 4514 escaped form of the username `o,brien+x$&`.
   [`uid=o\\,brien\\+x$&,${people}`]: directoryEntry("obrien password", {
@@ -192,6 +196,24 @@ describe("LDAP browser sign-in", () => {
     if (server === undefined) throw new Error("The test server is not running.");
     return server;
   };
+
+  async function seedActiveMember(
+    member: {readonly email: string; readonly id: string; readonly role: "administrator" | "member"},
+  ): Promise<void> {
+    const repository = new SqliteIdentityRepository(
+      path.join(installation.dataDirectory, "artifact-server.db"),
+    );
+    try {
+      await repository.admitMember({
+        ...member,
+        createdAt: "2026-10-26T00:00:00.000Z",
+        displayName: member.email,
+        installationId: "local",
+      });
+    } finally {
+      repository.close();
+    }
+  }
 
   /** Dave's member is deactivated, so his directory sign-in must never revive it. */
   async function seedDeactivatedMember(): Promise<void> {
@@ -373,6 +395,32 @@ describe("LDAP browser sign-in", () => {
       unknownUsers: unknownDirectoryUserPolicies.admit,
     });
     await expectRejected(await signIn(running(), "carol", "carol password"));
+  });
+
+  test("only an entry's first email names its member, so a later value that is an administrator's email selects nobody", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    });
+    await seedActiveMember({email: "admin@example.com", id: "member_admin", role: "administrator"});
+    await start({observability: true});
+    await expectRejected(await signIn(running(), "grace", "grace password"));
+    expect(lines.filter((line) => line.includes("auth.directory_sign_in.rejected")))
+      .toEqual([expect.stringContaining("no_member")]);
+    await server?.stop();
+
+    await start({unknownUsers: unknownDirectoryUserPolicies.admit});
+    await expectRejected(await signIn(running(), "grace", "grace password"));
+    await server?.stop();
+
+    await seedActiveMember({email: "grace@example.com", id: "member_grace", role: "member"});
+    await start();
+    const response = await signIn(running(), "grace", "grace password");
+    expect(response.status).toBe(204);
+    expect(await sessionPrincipal(running(), browserCookies(response))).toMatchObject({
+      id: "member_grace",
+      membershipRole: "member",
+    });
   });
 
   test("an empty password never reaches the directory, because an empty simple bind is anonymous and succeeds", async () => {

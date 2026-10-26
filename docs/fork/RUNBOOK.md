@@ -187,7 +187,7 @@ People can sign in to Review with their directory username and password instead 
 | `ARTIFACT_SERVER_LDAP_USER_DN` | required | Bind DN with `{username}` as one whole attribute value. |
 | `ARTIFACT_SERVER_LDAP_CA_FILE` | system trust store | PEM bundle that replaces the trust store for this connection. |
 | `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP` | unset | Group DN that must appear in the entry's `memberOf`, compared without case. |
-| `ARTIFACT_SERVER_LDAP_EMAIL_ATTRIBUTE` | `mail` | Attribute matched, without case, to a member's email. |
+| `ARTIFACT_SERVER_LDAP_EMAIL_ATTRIBUTE` | `mail` | Attribute whose first value is matched, without case, to a member's email. Later values are ignored. |
 | `ARTIFACT_SERVER_LDAP_NAME_ATTRIBUTE` | `displayName` | Display name for members that `admit` creates. |
 | `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS` | `reject` | `reject` a directory user with no active member, or `admit` them as role `member`. |
 | `ARTIFACT_SERVER_LDAP_TIMEOUT_MS` | `5000` | Connect and operation timeout. |
@@ -212,7 +212,7 @@ No secret is needed. The server binds as the person signing in and never stores 
 
 Before you turn it on:
 
-- **Emails must match.** A person whose directory `mail` differs from their member's email is refused. Compare them first, or set `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS=admit` and accept new members.
+- **Emails must match.** A person whose first directory `mail` value differs from their member's email is refused. Aliases in later values do not count. Compare them first, or set `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS=admit` and accept new members.
 - **The email attribute is the trust boundary.** A directory user who can change their own `mail` can sign in as any member, including an administrator. FreeIPA's default `User Self service` rule leaves `mail` out; confirm with `ipa selfservice-show "User Self service"`. On other directories, check the access rules. A required group does not help, because a member of the group who edits their own `mail` can still claim an administrator's email. The directory must not let users edit their own `mail` attribute.
 - **Administrators sign in with a password too.** A directory user whose email matches an administrator member gets an administrator session. Protect those accounts in the directory (strong passwords, lockout), or require a group.
 - **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_credentials`, `no_member`, `missing_email`, `entry_unreadable`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain. `entry_unreadable` means the password was right but the user may not read their own entry, which is a directory access rule to fix.
