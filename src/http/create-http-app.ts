@@ -151,9 +151,12 @@ import {
   assertCookieSessionsAvailable,
   assetProjection,
   canonicalFolderLocation,
+  isHtmlMediaType,
   isolateSameHostResponse,
   parseArtifactPath,
   parseSameHostContentRequest,
+  readableDelivery,
+  readableDeliveryVary,
   requestedArtifactPath,
   sameHostContentSource,
   type SameHostBlobRequest,
@@ -519,6 +522,8 @@ const claimRecheckIntervalMilliseconds = 1_000;
 interface HttpEnvironment {
   readonly Variables: {
     readonly authenticationMethod: "bearer" | "session";
+    /** Set only by the branch that answers a readable URL with the viewer. */
+    readonly deliveredViewer: boolean;
     readonly principal: Principal;
     readonly requestId: string;
     readonly requestSpan: Tracer.Span;
@@ -713,6 +718,9 @@ export function createHttpApp(
         return next();
       }
       await next();
+      // The viewer is application markup that frames the sandboxed document,
+      // so it keeps the application pages' policy instead.
+      if (context.get("deliveredViewer")) return;
       const isolated = isolateSameHostResponse(context.res);
       // Hono copies the old response's headers over a replacement, which
       // would put the branch's own policy back in place of both. Clearing
@@ -784,6 +792,7 @@ export function createHttpApp(
         contentToken,
         context.req.header("cookie"),
         dependencies,
+        false,
       );
     }
     return next();
@@ -3694,6 +3703,7 @@ async function serveVersionContent(
   contentToken: string,
   cookieHeader: string | undefined,
   dependencies: HttpAppDependencies,
+  readableUrl: boolean,
 ): Promise<Response> {
   const method = context.req.method;
   if (method !== "GET" && method !== "HEAD") {
@@ -3724,6 +3734,28 @@ async function serveVersionContent(
   if (content === null) {
     return versionNotFoundResponse();
   }
+  const readablePage = readableUrl && isHtmlMediaType(content.entry.mediaType);
+  if (
+    readablePage &&
+    readableDelivery(
+      {headers: context.req.raw.headers, method, url: new URL(context.req.url)},
+      content.entry.mediaType,
+    ) === "viewer"
+  ) {
+    // The frame's own request is the view, so the viewer records none.
+    const viewer = await webAssetResponse(
+      context,
+      dependencies,
+      "/viewer.html",
+      "application-shell",
+    );
+    if (viewer !== null) {
+      viewer.headers.set("Vary", readableDeliveryVary);
+      viewer.headers.set("X-Robots-Tag", "noindex, nofollow");
+      context.set("deliveredViewer", true);
+      return viewer;
+    }
+  }
   if (
     dependencies.artifactViews !== undefined &&
     context.req.method === "GET" &&
@@ -3738,13 +3770,15 @@ async function serveVersionContent(
   }
   const publiclyCacheable = content.accessSetting === accessSettings.publicLink &&
     content.isCurrent;
-  return serveStoredVersionContent(
+  const served = await serveStoredVersionContent(
     context,
     content,
     publiclyCacheable,
     false,
     dependencies,
   );
+  if (readablePage) served.headers.append("Vary", readableDeliveryVary);
+  return served;
 }
 
 // The asset store holds images, data, and scripts a page loads, never a page,
@@ -3823,6 +3857,7 @@ async function serveArtifactFolder(
     current.version.contentToken,
     cookieHeader,
     dependencies,
+    true,
   );
 }
 
@@ -3851,6 +3886,7 @@ async function serveArtifactPath(
     resolved.current.version.contentToken,
     cookieHeader,
     dependencies,
+    true,
   );
 }
 
@@ -4436,10 +4472,21 @@ async function serveWebAsset(
   assetPath: string,
   kind: WebAssetKind,
 ): Promise<Response> {
-  if (dependencies.webAssets === undefined) return context.notFound();
+  return await webAssetResponse(context, dependencies, assetPath, kind) ??
+    context.notFound();
+}
+
+/** One compiled web asset, or null when this server carries no such file. */
+async function webAssetResponse(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  assetPath: string,
+  kind: WebAssetKind,
+): Promise<Response | null> {
+  if (dependencies.webAssets === undefined) return null;
   const method = context.req.method === "HEAD" ? "HEAD" : "GET";
   const asset = await dependencies.webAssets.fetch(assetPath, method);
-  if (asset === null || !asset.ok) return context.notFound();
+  if (asset === null || !asset.ok) return null;
   const headers = new Headers({
     "Cache-Control": kind === "static-asset"
       ? "public, max-age=31536000, immutable"

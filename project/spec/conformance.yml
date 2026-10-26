@@ -4478,6 +4478,20 @@ requirements:
     depends_on: [FRK-009]
     evidence: []
 
+  - id: FRK-029
+    kind: security
+    behavior: In path mode a browser tab's navigation to an HTML page at a readable artifact URL gets the viewer, an application page that shows the bar and frames the same path with raw=1 under the content sandbox; frames, raw=1 requests, and clients without Fetch Metadata get the page itself at the same URL; every HTML answer there varies on Sec-Fetch-Dest and Sec-Fetch-Mode; private, missing, and unknown paths answer as before; and the viewer itself never counts a view.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: 15-the-bar-at-readable-urls}
+    acceptance:
+      behavior: {id: FRK-029-B, description: "A tab navigation to a path URL, a folder URL, a nested page, and an SPA client route reads the viewer with the application policy, no sandbox, no CORS header, Vary on Sec-Fetch-Dest and Sec-Fetch-Mode, noindex, and no-cache; the same URLs with raw=1, a frame navigation, and a request without Fetch Metadata read the page under the sandbox with Vary; a stylesheet opened in a tab, HEAD, and /v/<token>/ read content with no viewer; one viewer load plus its frame adds exactly one view. In Chromium the bar is at most 44px above the frame, the frame's relative stylesheet applies, an in-page anchor moves the frame, the frame cannot read its parent, the info popover is read-only for an anonymous reader, the page counts one view, the hide control is remembered across a reload and undone by Show bar, the phone width has no horizontal scroll, Open raw opens the page with no bar, and light, dark, and phone screenshots are kept."}
+      failure: {id: FRK-029-F, description: "A private artifact's tab navigation is 401 CONTENT_NOT_PUBLIC under the sandbox with no Vary, a missing file and an unknown path are 404 under the sandbox, POST is 405, three viewer loads add no view, and a server whose web bundle has no viewer.html serves the page itself and counts it."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against SQLite over a real server with a stub viewer page. The browser case runs only in CI and only in Chromium, and no deployed run or shared-cache run exists.
+    depends_on: [FRK-002, FRK-007, FRK-008, FRK-026]
+    evidence: []
+
   - id: FRK-030
     kind: security
     behavior: GET /api/v1/public/artifact-info?path= answers with no credential for the public-link artifact a readable path or folder serves, with its name, owner display name, current version, update time, visibility, exact views, canManage false, and project ID; it never carries an email or principal ID, and a private artifact reads exactly like a missing one.

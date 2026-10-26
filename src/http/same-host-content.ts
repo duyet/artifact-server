@@ -225,6 +225,44 @@ export function isolateSameHostResponse(response: Response): Response {
   });
 }
 
+/** The query parameter that asks a readable URL for the artifact document itself. */
+export const rawDocumentParameter = "raw";
+
+/**
+ * The request headers an HTML answer at a readable URL depends on. Every such
+ * answer names them, so no cache hands the viewer to a frame or the document
+ * to a tab.
+ */
+export const readableDeliveryVary = "Sec-Fetch-Dest, Sec-Fetch-Mode";
+
+/** What a readable URL answers for one HTML page of a public artifact. */
+export type ReadableDelivery = "document" | "viewer";
+
+/**
+ * A tab's own navigation gets the viewer, which frames the page below the
+ * bar. A frame, a fetch, a client that sends no Fetch Metadata, and a request
+ * with `?raw=1` get the page itself, so agents and link previews read the
+ * bytes they always read.
+ */
+export function readableDelivery(
+  request: {readonly headers: Headers; readonly method: string; readonly url: URL},
+  mediaType: string,
+): ReadableDelivery {
+  const isTabNavigation = request.method === "GET" &&
+    request.headers.get("sec-fetch-dest") === "document" &&
+    request.headers.get("sec-fetch-mode") === "navigate";
+  return isTabNavigation &&
+      isHtmlMediaType(mediaType) &&
+      request.url.searchParams.get(rawDocumentParameter) !== "1"
+    ? "viewer"
+    : "document";
+}
+
+/** Whether a stored media type is an HTML page, the only kind the viewer frames. */
+export function isHtmlMediaType(mediaType: string): boolean {
+  return mediaType.split(";", 1)[0]?.trim().toLowerCase() === "text/html";
+}
+
 /** The one CSP source that covers every `/v/` response of an application origin. */
 export function sameHostContentSource(applicationOrigin: string): string {
   return `${applicationOrigin}/${versionPathSegment}/`;
