@@ -6,7 +6,7 @@ import {
   IconInfoCircle,
   IconX,
 } from "@tabler/icons-react";
-import {useRef, useState, type KeyboardEvent} from "react";
+import {lazy, Suspense, useRef, useState, type KeyboardEvent} from "react";
 import {Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis} from "recharts";
 
 import {ThemeMenu} from "@/components/theme-menu";
@@ -49,6 +49,7 @@ import {
   sparklineBox,
   sumDailySeries,
   treeSorts,
+  visibilityLabels,
   windowDays,
   type DailyMetric,
   type DayTone,
@@ -57,7 +58,15 @@ import {
   type TreeSort,
 } from "./home-tree.js";
 import type {PublicCatalog} from "./home-client.js";
-import {ArtifactRowMenu, visibilityLabels} from "./home-row-menu.js";
+
+// The row menu carries the API client and the rename dialog. Only a signed-in
+// reader gets a menu, so an anonymous one never downloads that code.
+const ArtifactRowMenu = lazy(async () => ({
+  default: (await import("./home-row-menu.js")).ArtifactRowMenu,
+}));
+const RowMenuToaster = lazy(async () => ({
+  default: (await import("./home-row-menu.js")).RowMenuToaster,
+}));
 
 /** The copy each chart measure brings to the card and the tree filter. */
 const dailyCharts = {
@@ -185,6 +194,7 @@ export function HomePage({
     // One `main` landmark, so a screen reader can jump past the heading and
     // straight to the catalog.
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
+      {signedIn ? <Suspense><RowMenuToaster /></Suspense> : null}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">
@@ -289,8 +299,8 @@ export function HomePage({
               // state again rather than where the last filter left it.
               key={filter.day ?? ""}
             >
-              {mineOnly && shown.length === 0
-                ? <p className="px-2 py-4 text-sm text-muted-foreground">You own no artifact here yet.</p>
+              {signedIn && mineOnly && shown.length === 0
+                ? <p className="px-2 py-4 text-sm text-muted-foreground">No artifact of yours is listed here.</p>
                 : null}
               {tree.folders.map((folder) => (
                 <FolderNode
@@ -773,10 +783,19 @@ function ArtifactNode({
       {artifact.manage === null
         // A signed-in reader keeps the column, so rows they cannot change
         // stay aligned with the ones they can.
-        ? (row.signedIn ? <span aria-hidden="true" className="size-7 shrink-0" /> : null)
-        : <ArtifactRowMenu artifact={artifact} handle={artifact.manage} onChanged={row.onChanged} />}
+        ? (row.signedIn ? <MenuColumn /> : null)
+        : (
+          <Suspense fallback={<MenuColumn />}>
+            <ArtifactRowMenu artifact={artifact} handle={artifact.manage} onChanged={row.onChanged} />
+          </Suspense>
+        )}
     </div>
   );
+}
+
+/** The width of a row menu's button, held by rows without one. */
+function MenuColumn() {
+  return <span aria-hidden="true" className="size-7 shrink-0" />;
 }
 
 /** "26 Oct" for a stored UTC day. */

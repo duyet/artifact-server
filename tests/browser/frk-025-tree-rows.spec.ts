@@ -144,6 +144,16 @@ async function expectMemberRows(
     const reportRow = page.locator("[data-slot=tree-row]").filter({hasText: "Alice report"});
     await expect(reportRow).toContainText("Private");
     await page.screenshot({fullPage: true, path: "test-results/browser/home-tree-member-light.png"});
+
+    // Giving a private artifact a link again asks first, and Cancel keeps it
+    // private.
+    await page.getByRole("button", {name: "Actions for Alice report"}).click();
+    await page.getByRole("menuitemradio", {name: "Public"}).click();
+    const confirm = page.getByRole("alertdialog", {name: "Share Alice report by link?"});
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", {name: "Cancel"}).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(reportRow).toContainText("Private");
   } finally {
     await context.close();
   }

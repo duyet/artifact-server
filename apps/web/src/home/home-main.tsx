@@ -5,8 +5,7 @@ import {IconAlertCircle} from "@tabler/icons-react";
 
 import {Alert, AlertDescription, AlertTitle} from "@/components/ui/alert";
 import {Skeleton} from "@/components/ui/skeleton";
-import {Toaster} from "@/components/ui/sonner";
-import {applyStoredTheme, readThemePreference} from "@/lib/theme";
+import {applyStoredTheme} from "@/lib/theme";
 
 import {HomePage} from "./home-app.js";
 import {readPublicCatalog, type PublicCatalog} from "./home-client.js";
@@ -75,12 +74,7 @@ function HomeShell() {
       </main>
     );
   }
-  return (
-    <>
-      <HomePage catalog={catalog} onChanged={reload} />
-      <Toaster position="bottom-right" theme={readThemePreference()} />
-    </>
-  );
+  return <HomePage catalog={catalog} onChanged={reload} />;
 }
 
 const rootElement = document.querySelector("#home-root");

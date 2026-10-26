@@ -5,7 +5,16 @@ export interface DailyCount {
 }
 
 /** Who can find an artifact from the tree, as the tree endpoint reports it. */
-export type TreeVisibility = "private" | "public" | "unlisted";
+export const treeVisibilities = ["public", "unlisted", "private"] as const;
+
+export type TreeVisibility = (typeof treeVisibilities)[number];
+
+/** The words each visibility shows in the row menu and on a row's badge. */
+export const visibilityLabels = {
+  private: "Private",
+  public: "Public",
+  unlisted: "Unlisted",
+} as const satisfies Record<TreeVisibility, string>;
 
 /** The tag that keeps a public-link artifact out of the anonymous tree. */
 export const unlistedTag = "unlisted";

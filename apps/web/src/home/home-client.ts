@@ -16,7 +16,7 @@ const publicArtifactSchema = z.object({
   }).nullable(),
   mine: z.boolean(),
   name: z.string().min(1).max(200),
-  owner: z.string().min(1).nullable(),
+  owner: z.string().nullable(),
   path: z.string().min(1).max(200).nullable(),
   series: z.array(dailyCountSchema),
   updatedAt: z.iso.datetime(),

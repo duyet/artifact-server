@@ -243,14 +243,14 @@ function catalogScopeFor(
 const emailAddressPattern = /[^\s@]+@[^\s@]+/u;
 
 /**
- * The owner's display name as the tree may show it. A name holding an email
- * address is withheld rather than shown to anyone. A key name such as
- * `Ada Lovelace @ laptop` holds no address and is shown.
+ * The owner's display name as the tree may show it. A blank name is no name,
+ * and a name holding an email address is withheld rather than shown to
+ * anyone. A key name such as `Ada Lovelace @ laptop` holds no address and is
+ * shown.
  */
 function ownerName(displayName: string | null): string | null {
-  return displayName === null || emailAddressPattern.test(displayName)
-    ? null
-    : displayName;
+  const name = displayName?.trim() ?? "";
+  return name === "" || emailAddressPattern.test(name) ? null : name;
 }
 
 function visibilityOf(artifact: PublicArtifactSummary): ArtifactVisibility {
