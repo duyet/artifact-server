@@ -41,15 +41,16 @@ test.describe("OIDC sign-in button", () => {
       expect(fixture.server.baseUrl).toBe(`http://127.0.0.1:${port}`);
       const page = fixture.page;
       let answer: "approve" | "deny" = "deny";
-      // The browser's leg of the flow: the provider redirects straight back.
-      await page.route(`${provider.issuer}/**`, (route) => route.fulfill({
-        headers: {
-          location: answer === "approve"
-            ? provider.approve(route.request().url(), carol)
-            : provider.deny(route.request().url(), "access_denied"),
-        },
-        status: 302,
-      }));
+      // The browser's leg of the flow: the provider page sends it straight back.
+      await page.route((url) => url.origin === provider.issuer, (route) => {
+        const back = answer === "approve"
+          ? provider.approve(route.request().url(), carol)
+          : provider.deny(route.request().url(), "access_denied");
+        return route.fulfill({
+          body: `<!doctype html><meta http-equiv="refresh" content="0; url=${back.replaceAll("&", "&amp;")}">`,
+          contentType: "text/html",
+        });
+      });
 
       await page.goto(`${fixture.server.baseUrl}/review`);
       await expect(page.getByRole("heading", {name: "Sign in"})).toBeVisible();
