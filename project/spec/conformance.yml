@@ -4464,14 +4464,14 @@ requirements:
     depends_on: [FRK-023]
     evidence: []
 
-  - id: FRK-025
+  - id: FRK-027
     kind: security
     behavior: The tree names each artifact's owner by display name and never by an email, gives each artifact a visibility of public, unlisted, or private, and reads the application session when one is present, so a signed-in member sees every live artifact with which ones are theirs and a manage handle exactly when the access and tags APIs would accept a change from them, while an anonymous viewer or an invalid session sees only public artifacts with no handle; the home page sorts the tree, filters it to the viewer's own artifacts, shows each row's numbers in its sparkline tooltip, and changes visibility from a row menu.
     owner: web-application
     source: {file: ../../docs/fork/HOMEPAGE.md, anchor: owners-visibility-and-the-member-view}
     acceptance:
-      behavior: {id: FRK-025-B, description: "Read the anonymous tree with each public artifact's owner name, public visibility, mine false, and no manage handle; sign in as a member and read every live artifact including private and unlisted ones with their visibility, mine on the member's own artifacts, and a manage handle that changes an artifact's visibility through the access and tags APIs. In a browser, read a row's numbers from its sparkline tooltip, sort by name, last updated, and most viewed with the choice kept across a reload, narrow the tree with the Mine filter, and make an artifact private from its row menu."}
-      failure: {id: FRK-025-F, description: "An anonymous read never lists a private or unlisted artifact, never names an owner whose display name is an email, and carries no manage handle or viewer; a malformed, expired, or revoked session reads as anonymous with 200; the response is private and varies on Cookie; and anonymous rows show no row menu in the browser."}
+      behavior: {id: FRK-027-B, description: "Read the anonymous tree with each public artifact's owner name, public visibility, mine false, and no manage handle; sign in as a member and read every live artifact including private and unlisted ones with their visibility, mine on the member's own artifacts, and a manage handle that changes an artifact's visibility through the access and tags APIs. In a browser, read a row's numbers from its sparkline tooltip, sort by name, last updated, and most viewed with the choice kept across a reload, narrow the tree with the Mine filter, and make an artifact private from its row menu."}
+      failure: {id: FRK-027-F, description: "An anonymous read never lists a private or unlisted artifact, never names an owner whose display name is an email, and carries no manage handle or viewer; a malformed, expired, or revoked session reads as anonymous with 200; the response is private and varies on Cookie; and anonymous rows show no row menu in the browser."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: The server half is proved locally against SQLite over a real server with member, administrator, read-only, and comment-only sessions, and the manage rule against the management write as a pure policy check. The Postgres catalog read runs only in CI with Docker and has no member-scope case there, the browser sparkline tooltip, sort, Mine filter, and row menu run only in the CI browser job, and no deployed run exists.

@@ -219,7 +219,7 @@ describe("artifact tree owners and manage handles", () => {
           expectedCurrentVersionId: unlisted.version.id,
           tags: ["unlisted", "archive"],
         }),
-        headers: apiHeaders(installation, "frk-025-unlist-carol"),
+        headers: apiHeaders(installation, "frk-027-unlist-carol"),
         method: "PATCH",
       },
     );
@@ -243,7 +243,7 @@ describe("artifact tree owners and manage handles", () => {
     await removeTestInstallation(installation);
   });
 
-  test("FRK-025-B: anonymous rows name their owner and are public; a member reads every live artifact with visibility, mine, and a manage handle that changes it", async () => {
+  test("FRK-027-B: anonymous rows name their owner and are public; a member reads every live artifact with visibility, mine, and a manage handle that changes it", async () => {
     const {alice} = await seed();
 
     const anonymous = await readTree(running());
@@ -309,7 +309,7 @@ describe("artifact tree owners and manage handles", () => {
           accessSetting: "account_required",
           expectedCurrentVersionId: alicePublic.currentVersionId,
         }),
-        headers: cookieMutation(running(), cookies, "frk-025-alice-private"),
+        headers: cookieMutation(running(), cookies, "frk-027-alice-private"),
         method: "PATCH",
       },
     );
@@ -326,7 +326,7 @@ describe("artifact tree owners and manage handles", () => {
           expectedCurrentVersionId: carolUnlisted.currentVersionId,
           tags: carolUnlisted.tags.filter((tag) => tag !== "unlisted"),
         }),
-        headers: cookieMutation(running(), cookies, "frk-025-carol-listed"),
+        headers: cookieMutation(running(), cookies, "frk-027-carol-listed"),
         method: "PATCH",
       },
     );
@@ -345,7 +345,7 @@ describe("artifact tree owners and manage handles", () => {
       .toEqual(["Carol unlisted", "Carol report"]);
   });
 
-  test("FRK-025-F: anonymous reads hide private, unlisted, emails, and handles; a bad session reads as anonymous; a session that cannot manage gets no handle", async () => {
+  test("FRK-027-F: anonymous reads hide private, unlisted, emails, and handles; a bad session reads as anonymous; a session that cannot manage gets no handle", async () => {
     const {administrator: administratorKey, alice} = await seed();
 
     const anonymous = await fetchTree(running());
@@ -380,7 +380,7 @@ describe("artifact tree owners and manage handles", () => {
 
     // A revoked session reads as anonymous.
     const loggedOut = await fetch(`${running().baseUrl}/api/v1/session/logout`, {
-      headers: cookieMutation(running(), cookies, "frk-025-logout"),
+      headers: cookieMutation(running(), cookies, "frk-027-logout"),
       method: "POST",
     });
     expect(loggedOut.status).toBe(204);
@@ -422,7 +422,7 @@ describe("artifact tree owners and manage handles", () => {
           accessSetting: "public_link",
           expectedCurrentVersionId: administratorHandle.currentVersionId,
         }),
-        headers: cookieMutation(running(), reader, "frk-025-reader-refused"),
+        headers: cookieMutation(running(), reader, "frk-027-reader-refused"),
         method: "PATCH",
       },
     );

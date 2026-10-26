@@ -434,7 +434,7 @@ describe("public artifact tree", () => {
     expect(anonymous.status).toBe(200);
     // Counts move between reads, so the browser revalidates instead of
     // reusing a cached copy of the catalog. A signed-in member reads more,
-    // so no shared cache may keep it (FRK-025).
+    // so no shared cache may keep it (FRK-027).
     expect(anonymous.headers.get("cache-control")).toBe("private, no-cache");
     // The catalog is application JSON, not artifact content, so it does not
     // carry the content sandbox.

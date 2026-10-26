@@ -23,7 +23,7 @@ const bootstrapAdministratorEmail = "administrator@example.test";
  * them. Alice and Bob are members; each publishes with a key in their name.
  */
 test.describe("artifact tree rows", () => {
-  test("FRK-025-B FRK-025-F: sparkline tooltip, sort, Mine, and a visibility change from the row menu, with no menu for an anonymous reader", async ({browser}) => {
+  test("FRK-027-B FRK-027-F: sparkline tooltip, sort, Mine, and a visibility change from the row menu, with no menu for an anonymous reader", async ({browser}) => {
     const installation = await createTestInstallation();
     // The private-team bootstrap key must exist before any member does.
     await (await startTestServer(installation, {
