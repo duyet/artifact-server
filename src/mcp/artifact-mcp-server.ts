@@ -31,6 +31,7 @@ import {CheckArtifactAssetsService} from "../application/check-artifact-assets.j
 import {CompareArtifactService} from "../application/compare-artifact.js";
 import {ContentAccessService} from "../application/content-access.js";
 import {ProjectManagementService} from "../application/project-management.js";
+import {PublicArtifactCatalogService} from "../application/public-artifact-catalog.js";
 import {StagedUploadService} from "../application/staged-upload.js";
 import {
   accessSettings,
@@ -39,6 +40,7 @@ import {
   commentClearScopes,
   commentThreadStates,
   dispatchedThreadFilters,
+  folderDefaultStates,
   type AccessSetting,
   type AgentDispatchRecord,
   type AgentDispatchState,
@@ -80,6 +82,7 @@ import {
   assertAssetStoreAvailable,
   assertCookieSessionsAvailable,
   assetProjection,
+  parseArtifactPath,
   requestedArtifactPath,
   versionServedRoots,
 } from "../http/same-host-content.js";
@@ -104,6 +107,10 @@ const accessSettingSchema = z.enum([
   accessSettings.publicLink,
 ]);
 const artifactIdSchema = z.string().min(1).max(200);
+const folderDefaultStateSchema = z.enum([
+  folderDefaultStates.collapsed,
+  folderDefaultStates.expanded,
+]);
 const projectIdSchema = z.string().min(1).max(200);
 const optionalProjectIdSchema = projectIdSchema.nullable().default(null);
 const versionIdSchema = z.string().min(1).max(200);
@@ -1428,6 +1435,40 @@ export function createArtifactMcpServer(
         ),
       );
       return {...deletion};
+    }),
+  );
+
+  registerNudgedTool(
+    "folder_set_default",
+    {
+      title: "Set a folder's default state",
+      description:
+        "Choose whether one folder of the public home page tree starts collapsed or expanded. Folders start expanded unless set. A viewer can still open or close the folder.",
+      inputSchema: z.object({
+        defaultState: folderDefaultStateSchema,
+        path: z.string().min(1).max(200).describe(
+          "Folder path such as team/archive, using the same segments as artifact paths.",
+        ),
+      }).strict(),
+      outputSchema: z.object({
+        defaultState: folderDefaultStateSchema,
+        path: z.string(),
+      }).strict(),
+      annotations: idempotentWriteAnnotations,
+    },
+    (input) => toolResult(async () => {
+      const path = parseArtifactPath(input.path);
+      await runMcpApplicationEffect(
+        dependencies,
+        PublicArtifactCatalogService.use((catalog) =>
+          catalog.setFolderDefaultState({
+            path,
+            principal: identity.principal,
+            state: input.defaultState,
+          })
+        ),
+      );
+      return {defaultState: input.defaultState, path};
     }),
   );
 

@@ -9,6 +9,15 @@ export const accessSettings = {
 
 export type AccessSetting = (typeof accessSettings)[keyof typeof accessSettings];
 
+/** How a folder of the public tree starts when the home page loads. */
+export const folderDefaultStates = {
+  collapsed: "collapsed",
+  expanded: "expanded",
+} as const;
+
+export type FolderDefaultState =
+  (typeof folderDefaultStates)[keyof typeof folderDefaultStates];
+
 /** Artifact mutation kinds persisted in the standalone action history. */
 export const artifactActionKinds = {
   changeAccess: "change_access",
@@ -235,6 +244,11 @@ export interface PublicArtifactCatalogItem {
 /** Every live public artifact with its counts, newest first. */
 export interface PublicArtifactCatalog {
   readonly artifacts: readonly PublicArtifactCatalogItem[];
+  /**
+   * The folders that start collapsed, each the path or an ancestor folder of
+   * an artifact in `artifacts`. Every other folder starts expanded.
+   */
+  readonly collapsedFolders: readonly string[];
   readonly generatedAt: string;
   /** True when the installation holds more public artifacts than were read. */
   readonly truncated: boolean;

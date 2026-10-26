@@ -814,6 +814,17 @@ const addAssets = Effect.gen(function*() {
   for (const statement of statements) yield* sql.unsafe(statement);
 });
 
+// One row is one folder of the public tree that starts collapsed. Readable
+// paths are unique across the installation, so the folder is too.
+const addCollapsedFolders = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  yield* sql.unsafe(`CREATE TABLE collapsed_folders (
+    installation_id TEXT NOT NULL,
+    path TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (installation_id, path)
+  )`);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -834,10 +845,11 @@ const migrationLoader = Migrator.fromRecord({
   "0017_drop_external_identities": dropExternalIdentities,
   "0018_drop_git_history": dropGitHistory,
   "0019_assets": addAssets,
+  "0020_collapsed_folders": addCollapsedFolders,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 19;
+export const requiredPostgresSchemaVersion = 20;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -949,6 +961,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 19,
     name: "assets",
+  }, {
+    migration_id: 20,
+    name: "collapsed_folders",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

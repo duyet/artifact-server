@@ -180,6 +180,7 @@ describe("modern MCP HTTP", () => {
       "artifact_rename",
       "artifact_restore_version",
       "artifact_delete",
+      "folder_set_default",
       "asset_create_upload",
       "asset_commit_upload",
       "asset_list",

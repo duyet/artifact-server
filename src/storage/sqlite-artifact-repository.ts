@@ -37,6 +37,7 @@ import {
   dispatchHoldsCommentThread,
   dispatchedThreadFilters,
   fileDispositions,
+  folderDefaultStates,
   parseStoredAgentCapabilities,
   routingModes,
   uploadStatuses,
@@ -80,6 +81,7 @@ import {
   type RegisteredAgentRecord,
   type StagedUpload,
   type StagedUploadFile,
+  type FolderDefaultState,
   type VersionContent,
   type VersionRecord,
 } from "../core/model.js";
@@ -90,6 +92,7 @@ import type {
   ArtifactViewRepository,
   CancelAgentDispatch,
   ChangeArtifactAccessSetting,
+  CollapsedFolderRepository,
   ChangeArtifactTags,
   ClearCommentThreads,
   CommentRepository,
@@ -518,6 +521,7 @@ export class SqliteArtifactRepository implements
   ArtifactAssetRepository,
   ArtifactRepository,
   ArtifactViewRepository,
+  CollapsedFolderRepository,
   CommentRepository,
   ContentSessionRepository,
   ProjectRepository,
@@ -1390,6 +1394,23 @@ export class SqliteArtifactRepository implements
           insert.run(delta.artifactId, delta.day, delta.count);
         }
       });
+    });
+  }
+
+  listCollapsedFolders(): Promise<readonly string[]> {
+    return Promise.resolve().then(() =>
+      z.array(z.object({path: z.string()})).parse(this.#database
+        .prepare("SELECT path FROM collapsed_folders")
+        .all()).map((row) => row.path));
+  }
+
+  setFolderDefaultState(path: string, state: FolderDefaultState): Promise<void> {
+    const statement = state === folderDefaultStates.collapsed
+      ? "INSERT INTO collapsed_folders (path) VALUES (?) ON CONFLICT DO NOTHING"
+      : "DELETE FROM collapsed_folders WHERE path = ?";
+    return Promise.resolve().then(() => {
+      this.#database.prepare(statement).run(path);
+      return undefined;
     });
   }
 
@@ -4412,6 +4433,11 @@ export class SqliteArtifactRepository implements
         day TEXT NOT NULL,
         count INTEGER NOT NULL CHECK (count >= 0),
         PRIMARY KEY (artifact_id, day)
+      ) STRICT;
+
+      -- One row is one folder of the public tree that starts collapsed.
+      CREATE TABLE IF NOT EXISTS collapsed_folders (
+        path TEXT PRIMARY KEY
       ) STRICT;
 
       -- One row is one file in an artifact's asset store, outside every

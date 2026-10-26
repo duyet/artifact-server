@@ -18,6 +18,7 @@ import type {
   CanonicalManifest,
   CommentAuthor,
   DispatchedThreadFilter,
+  FolderDefaultState,
   CommentReplyCreation,
   CommentReplyRecord,
   CommentThreadCreation,
@@ -746,6 +747,18 @@ export interface ArtifactViewRepository {
   recordArtifactViews(
     deltas: readonly ArtifactViewDelta[],
   ): Promise<void>;
+}
+
+/**
+ * The folders of the public tree that start collapsed, across every project,
+ * because readable paths are unique across the installation. A folder with no
+ * row starts expanded, so expanding a folder deletes its row.
+ */
+export interface CollapsedFolderRepository {
+  /** Every collapsed folder path, in no particular order. */
+  listCollapsedFolders(): Promise<readonly string[]>;
+  /** Store one folder's state. Repeating a call changes nothing. */
+  setFolderDefaultState(path: string, state: FolderDefaultState): Promise<void>;
 }
 
 /** Values used to read one project's activity inside one inclusive day window. */
