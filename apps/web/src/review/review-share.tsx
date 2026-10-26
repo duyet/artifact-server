@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import {
   api,
+  ApiError,
   type AccessSetting,
   type ArtifactDetails,
   type ArtifactVersion,
@@ -57,6 +58,7 @@ import { buildAgentReviewPrompt, exactReviewLink } from "./share/review-links.ts
 export { AgentLogos };
 
 type ShareScreen = "access" | "agents" | "overview";
+const accessOwnersOnly = "Only the artifact's owner or an administrator can change who can open it.";
 // Only these two copy actions show inline "Copied" state; the rest use a toast.
 type InlineCopiedTarget = "agent-prompt" | "review-link";
 type CopyFeedback =
@@ -212,7 +214,9 @@ export function ReviewShareControl({
       setScreen("overview");
     } catch (caught) {
       setFailure(
-        caught instanceof Error ? caught.message : "Artifact access could not be changed.",
+        caught instanceof ApiError && caught.status === 403
+          ? accessOwnersOnly
+          : caught instanceof Error ? caught.message : "Artifact access could not be changed.",
       );
     } finally {
       setPending(false);
@@ -492,7 +496,7 @@ export function ReviewShareControl({
             <p className="text-sm text-muted-foreground">
               {canManageAccess
                 ? "Choose who can open the current version from the stable artifact link."
-                : "Only the artifact's owner or an administrator can change who can open it."}
+                : accessOwnersOnly}
             </p>
             <RadioGroup
               aria-label="Who can open this artifact"

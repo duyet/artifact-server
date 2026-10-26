@@ -186,4 +186,43 @@ test.describe("FRK-026 viewer bar", () => {
       await stopBrowserFixture(fixture);
     }
   });
+
+  test("FRK-026-B: Share keeps its access controls when the info read fails, and the server decides the change", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser, {colorScheme: "light", contentDomain: null});
+    try {
+      const page = fixture.page;
+      const published = await publishNew(fixture.server, fixture.installation, {
+        accessSetting: "account_required",
+        content: `<!doctype html><html lang="en"><title>${artifactName}</title><main><h1>Only version</h1></main></html>`,
+        idempotencyKey: "frk-026-browser-info-down",
+        name: artifactName,
+      });
+      await page.route(`**/api/v1/artifacts/${published.body.artifact.id}/info**`, (route) =>
+        route.fulfill({
+          json: {error: {code: "INTERNAL_ERROR", message: "Views are unavailable."}},
+          status: 500,
+        }));
+
+      await localLogin(fixture);
+      await page.goto(`${fixture.server.baseUrl}/review?${new URLSearchParams({
+        artifact: published.body.artifact.id,
+        project: published.body.artifact.projectId,
+        version: published.body.version.id,
+      })}`);
+      const header = viewerHeader(page);
+      await expect(header.getByRole("heading", {exact: true, level: 1, name: artifactName}))
+        .toBeVisible();
+      await header.getByRole("button", {exact: true, name: "Share"}).click();
+      const share = page.getByRole("dialog", {name: "Share artifact"});
+      await share.getByRole("button", {name: "Manage access"}).click();
+      await expect(share.getByText("Choose who can open the current version"))
+        .toBeVisible();
+      await share.getByRole("radio", {name: /Public link/u}).click();
+      await share.getByRole("button", {name: "Save"}).click();
+      await expect.poll(async () => (await readStored(fixture, published.body.artifact.id)).accessSetting)
+        .toBe("public_link");
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
 });

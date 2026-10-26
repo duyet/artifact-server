@@ -309,9 +309,11 @@ export function ArtifactViewer({
       go({artifactId: result.artifact.id, path: null, versionId: result.version.id, view: null}, "push");
     }
   };
+  // The info read also reads views, so while it loads or fails the controls
+  // stay open and the server decides; only a known false makes them read-only.
   const share = (variant: "ghost" | "outline") => (
     <ReviewShareControl
-      canManageAccess={info.info?.canManage ?? false}
+      canManageAccess={info.info?.canManage ?? true}
       details={details}
       key={`share-${details?.artifact.id ?? "empty"}`}
       onArtifactChanged={viewer.updateArtifact}
