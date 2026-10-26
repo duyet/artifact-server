@@ -6,6 +6,7 @@ import {
 } from "./artifact-management.js";
 import {artifactVisibility, type ArtifactVisibility} from "./artifact-tags.js";
 import {AuthorizationService} from "./authorization.js";
+import {ContentAccessService} from "./content-access.js";
 import {
   type ArtifactActivityReport,
   ProjectAnalyticsService,
@@ -46,6 +47,44 @@ export const readArtifactInfo = Effect.fn("readArtifactInfo")(
       ),
       current: details.current.version,
       visibility: artifactVisibility(details.artifact),
+    };
+    return info;
+  },
+);
+
+/** The artifact a readable URL names: a folder's artifact ID, or path candidates. */
+export type ReadableArtifactTarget =
+  | {readonly artifactId: string; readonly kind: "folder"}
+  | {readonly candidates: readonly string[]; readonly kind: "path"};
+
+/**
+ * Read the public-link artifact a readable URL serves, for a reader with no
+ * credential, who may never manage it. Null when no live public-link artifact
+ * answers there, so a private artifact reads the same as a missing one.
+ */
+export const readPublicArtifactInfo = Effect.fn("readPublicArtifactInfo")(
+  function*(target: ReadableArtifactTarget) {
+    const content = yield* ContentAccessService;
+    const analytics = yield* ProjectAnalyticsService;
+    const published = yield* (target.kind === "folder"
+      ? content.resolvePublicArtifact(target.artifactId)
+      : content.resolvePublicArtifactPath(target.candidates).pipe(
+        Effect.map((resolved) => resolved?.current ?? null),
+      )
+    ).pipe(
+      Effect.catchTags({
+        ArtifactNotFound: () => Effect.succeed(null),
+        ContentSessionRequired: () => Effect.succeed(null),
+      }),
+    );
+    if (published === null) return null;
+    const activity = yield* analytics.readPublicArtifactActivity(published.artifact);
+    const info: ArtifactInfo = {
+      activity,
+      artifact: published.artifact,
+      canManage: false,
+      current: published.version,
+      visibility: artifactVisibility(published.artifact),
     };
     return info;
   },

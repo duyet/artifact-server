@@ -37,6 +37,7 @@ import {
 import {
   type ArtifactInfo,
   readArtifactInfo,
+  readPublicArtifactInfo,
 } from "../application/artifact-info.js";
 import {
   type MakePublicLinkPrivateResult,
@@ -58,6 +59,7 @@ import {
   isPreviewLeaseToken,
 } from "../application/content-access.js";
 import {
+  ArtifactNotFound,
   AuthenticationRequired,
   AuthorizationDenied,
   type ArtifactServerFailure,
@@ -194,6 +196,7 @@ const accessSettingSchema = z.enum([
 const artifactTagsSchema = z.array(z.string()).default([]);
 const projectIdSchema = z.string().trim().min(1).max(200);
 const artifactIdSchema = z.string().min(1).max(200);
+const readablePathnameSchema = z.string().startsWith("/").max(1_024);
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
 }).strict();
@@ -986,6 +989,34 @@ export function createHttpApp(
 
   app.on(["GET", "HEAD"], viewerLogoPath, (context) =>
     serveViewerLogo(context, dependencies.logo));
+
+  // The readable-URL viewer names the page it frames; the answer is the same
+  // info Review shows, for the public-link artifact served there, and never
+  // says whether a private artifact holds the path.
+  app.get("/api/v1/public/artifact-info", async (context) => {
+    context.header("Cache-Control", "no-cache");
+    const pathname = readablePathnameSchema.parse(context.req.query("path"));
+    const request = dependencies.contentDomain === null
+      ? parseSameHostContentRequest(new URL(`http://readable.invalid${pathname}`))
+      : null;
+    const target = request?.kind === "folder"
+      ? {artifactId: request.artifactId, kind: "folder" as const}
+      : request?.kind === "path"
+      ? {candidates: request.candidates, kind: "path" as const}
+      : null;
+    const info = target === null ? null : await runHttpApplicationEffect(
+      context,
+      dependencies,
+      readPublicArtifactInfo(target),
+    );
+    if (info === null) {
+      throw new ArtifactNotFound({message: "No public artifact is served at this path."});
+    }
+    return context.json({
+      ...artifactInfoResponse(info),
+      projectId: info.artifact.projectId,
+    });
+  });
 
   app.get("/auth/context", (context) => {
     context.header("Cache-Control", "private, no-store");

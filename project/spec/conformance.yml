@@ -4477,3 +4477,17 @@ requirements:
     proof_gap: Proved against the configuration parsers, a real local server, and a spawned compact server. The external-storage server command passes the parsed logo the same way but runs only in CI with Postgres, the browser view of the logo runs only in CI, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
+
+  - id: FRK-030
+    kind: security
+    behavior: GET /api/v1/public/artifact-info?path= answers with no credential for the public-link artifact a readable path or folder serves, with its name, owner display name, current version, update time, visibility, exact views, canManage false, and project ID; it never carries an email or principal ID, and a private artifact reads exactly like a missing one.
+    owner: content-delivery
+    source: {file: ../../docs/fork/VIEWER.md, anchor: public-info}
+    acceptance:
+      behavior: {id: FRK-030-B, description: "Two views of a public path artifact read back from a nested page path with no credential as version 1, public, the version's creation time, the owner's display name, the project ID, two views today, and canManage false; the folder path reads the same body; tagging it unlisted reads unlisted."}
+      failure: {id: FRK-030-F, description: "A private path, a private folder, an unknown path, the root, an /api path, and a /v/ path all answer the same 404 ARTIFACT_NOT_FOUND; a missing path, a relative path, and a path over 1024 characters are 422; a content-domain server answers 404; and the public answer holds no @ and not the owner's principal ID."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against SQLite over a real server. The Postgres reads are the ones FRK-026 already uses and run only in CI, and no deployed run exists.
+    depends_on: [FRK-007, FRK-008, FRK-026]
+    evidence: []
