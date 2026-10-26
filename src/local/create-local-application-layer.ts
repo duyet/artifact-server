@@ -913,7 +913,8 @@ export function createApplicationLayer(
             cause instanceof ArtifactNotFound ||
               cause instanceof AssetLimitExceeded ||
               cause instanceof AssetNotFound ||
-              cause instanceof IdempotencyConflict
+              cause instanceof IdempotencyConflict ||
+              cause instanceof UploadClosed
               ? cause
               : repositoryFailure("commitAsset", cause),
         }),
@@ -953,6 +954,11 @@ export function createApplicationLayer(
         Effect.tryPromise({
           try: () => adapters.repository.listAssets(projectId, artifactId),
           catch: (cause) => repositoryFailure("listAssets", cause),
+        }),
+      readAssetUsage: (artifactId) =>
+        Effect.tryPromise({
+          try: () => adapters.repository.readAssetUsage(artifactId),
+          catch: (cause) => repositoryFailure("readAssetUsage", cause),
         }),
     },
     staging: stagedDependencies.staging,

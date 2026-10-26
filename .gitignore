@@ -13,3 +13,4 @@ project/performance/results/
 *.db-wal
 *.log
 .DS_Store
+.claude/worktrees/

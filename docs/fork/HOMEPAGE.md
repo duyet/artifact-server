@@ -250,7 +250,7 @@ Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that 
 
 Two requirements, because the counting and the tree fail differently.
 
-`FRK-008` owns the counters and the port. `FRK-009` owns the endpoint and the page. `FRK-023` owns the `updates` series, the chart's measure switch, and the day filter on the tree. `FRK-024` owns the chart's colours, its tooltip, today's mark, and the summary line. All four carry `status: implementing` with a `proof_gap` that names the Docker-backed work, the same way FRK-006 and FRK-007 do.
+`FRK-008` owns the counters and the port. `FRK-009` owns the endpoint and the page. `FRK-023` owns the `updates` series, the chart's measure switch, and the day filter on the tree. `FRK-029` owns the chart's colours, its tooltip, today's mark, and the summary line. All four carry `status: implementing` with a `proof_gap` that names the Docker-backed work, the same way FRK-006 and FRK-007 do.
 
 ## 5. Commits
 

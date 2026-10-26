@@ -53,7 +53,7 @@ export function sha256(bytes: Uint8Array): string {
 
 /** Ask for an asset upload plan; the declaration defaults to the file's real metadata. */
 export function planAsset(
-  server: RunningTestServer,
+  server: Pick<RunningTestServer, "baseUrl">,
   token: string,
   artifactId: string,
   file: TestAsset,
@@ -104,7 +104,7 @@ export function commitAsset(
 
 /** Plan, upload, and commit one asset, failing the test on any refusal. */
 export async function addAsset(
-  server: RunningTestServer,
+  server: Pick<RunningTestServer, "baseUrl">,
   token: string,
   artifactId: string,
   file: TestAsset,
@@ -127,7 +127,7 @@ export async function addAsset(
 }
 
 export async function listAssets(
-  server: RunningTestServer,
+  server: Pick<RunningTestServer, "baseUrl">,
   token: string,
   artifactId: string,
 ): Promise<z.infer<typeof assetListingSchema>> {
@@ -141,7 +141,7 @@ export async function listAssets(
 }
 
 export function deleteAsset(
-  server: RunningTestServer,
+  server: Pick<RunningTestServer, "baseUrl">,
   token: string,
   artifactId: string,
   assetId: string,

@@ -115,7 +115,7 @@ curl --fail https://artifacts.example.internal/ready
 
 To upgrade, run the same command with the digest of a newer release.
 
-The release that removes OIDC and WorkOS needs two checks before the upgrade:
+The earlier WorkOS identity removal needs two checks before the upgrade:
 
 - Delete any `identity:` block from `artifact-server-values.yaml`. The chart schema rejects unknown keys, so the upgrade fails with it present.
 - Postgres migration `0017_drop_external_identities` drops the `external_identities` table. Run `SELECT count(*) FROM external_identities;` first. It should be 0 on a deployment that never used a browser identity provider. If it is not, back up the table before upgrading, because the drop cannot be undone.
@@ -177,47 +177,50 @@ kubectl --context <cluster> -n artifact-server exec deploy/artifact-server -c ar
 - Running the command again with the same email and key name revokes that key and prints a new one. The member's other keys keep working. The running server may accept the old key for up to 30 seconds.
 - The output adds `apiKey.name` and `member.role`. Put the `token` in the person's CLI profile or MCP bearer setting and delete the file.
 
-## Sign in with LDAP
+## Sign in with OIDC
 
-People can sign in to Review with their directory username and password instead of an API key. The browser session acts as the member whose email the directory entry holds, so it sees and edits that member's artifacts. Agents and the CLI keep using keys. The feature is off until `ARTIFACT_SERVER_LDAP_URL` is set.
+People can sign in to Review through your OpenID Connect provider instead of with an API key. The Review gate shows **Sign in with SSO** above the API-key form. The button sends the browser to the provider, and the provider sends it back signed in as the member whose email the ID token names. That session sees and edits the member's artifacts. Agents and the CLI keep using keys. The feature is off until `ARTIFACT_SERVER_OIDC_ISSUER` is set, and only a private-team server has it.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ARTIFACT_SERVER_LDAP_URL` | unset (off) | `ldaps://host:636`. `ldap://` is refused unless `ARTIFACT_SERVER_LDAP_ALLOW_INSECURE=true`, which sends passwords in clear text. Use it only for a test directory. |
-| `ARTIFACT_SERVER_LDAP_USER_DN` | required | Bind DN with `{username}` as one whole attribute value. |
-| `ARTIFACT_SERVER_LDAP_CA_FILE` | system trust store | PEM bundle that replaces the trust store for this connection. |
-| `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP` | unset | Group DN that must appear in the entry's `memberOf`, compared without case. |
-| `ARTIFACT_SERVER_LDAP_EMAIL_ATTRIBUTE` | `mail` | Attribute whose first value is matched, without case, to a member's email. Later values are ignored. |
-| `ARTIFACT_SERVER_LDAP_NAME_ATTRIBUTE` | `displayName` | Display name for members that `admit` creates. |
-| `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS` | `reject` | `reject` a directory user with no active member, or `admit` them as role `member`. |
-| `ARTIFACT_SERVER_LDAP_TIMEOUT_MS` | `5000` | Connect and operation timeout. |
+| `ARTIFACT_SERVER_OIDC_ISSUER` | unset (off) | The provider's issuer URL. It must be `https://`. The server reads the endpoints from `<issuer>/.well-known/openid-configuration`. |
+| `ARTIFACT_SERVER_OIDC_CLIENT_ID` | required | The client ID registered for this server. |
+| `ARTIFACT_SERVER_OIDC_CLIENT_SECRET` or `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE` | required | The client secret, or a file that holds it. Setting both fails at startup. |
+| `ARTIFACT_SERVER_OIDC_SCOPES` | `openid email profile` | Space-separated scopes. They must include `openid`. Most providers send the `email` claim only for the `email` scope. |
+| `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS` | `reject` | `reject` a verified email that names no active member, or `admit` it as a new member with role `member`. |
 
-A FreeIPA example, with members already issued by `admin issue-key`:
+Register the server with the provider as a confidential client that uses the authorization code flow. For a provider at `https://sso.example.com` and the server at `https://artifacts.example.com`:
+
+| Provider setting | Value |
+| --- | --- |
+| Client type | Confidential, authorization code, PKCE allowed |
+| Client ID | `artifact-server` |
+| Client secret | A long random secret, also stored in the file below |
+| Redirect URI | `https://artifacts.example.com/auth/oidc/callback` |
+| Token endpoint authentication | `client_secret_basic` |
+| Scopes | `openid email profile` |
 
 ```yaml
+# Artifact Server environment
 env:
-  - name: ARTIFACT_SERVER_LDAP_URL
-    value: ldaps://ipa.example.com:636
-  - name: ARTIFACT_SERVER_LDAP_USER_DN
-    value: uid={username},cn=users,cn=accounts,dc=example,dc=com
-  - name: ARTIFACT_SERVER_LDAP_CA_FILE
-    value: /etc/artifact-server/ldap/ca.crt # IPA serves its CA at http://ipa.example.com/ipa/config/ca.crt
-  - name: ARTIFACT_SERVER_LDAP_UNKNOWN_USERS
-    value: reject
+  - name: ARTIFACT_SERVER_OIDC_ISSUER
+    value: https://sso.example.com
+  - name: ARTIFACT_SERVER_OIDC_CLIENT_ID
+    value: artifact-server
+  - name: ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE
+    value: /etc/artifact-server/oidc/client-secret
 ```
 
-To admit only one group, add `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP=cn=artifact-users,cn=groups,cn=accounts,dc=example,dc=com`.
-
-No secret is needed. The server binds as the person signing in and never stores the password. Usernames may hold only letters, digits, `.`, `_`, `@`, and `-`; any other username is refused without contacting the directory. Check the result with `artifactserver config check`, which reports `ldapSignIn` without credentials.
+When the provider federates a directory, the `email` claim must come from the directory's mail attribute, and the provider must mark it verified. Check the result with `artifactserver config check`, which reports `oidcSignIn` with the redirect URI and only the source of the secret.
 
 Before you turn it on:
 
-- **Emails must match.** A person whose first directory `mail` value differs from their member's email is refused. Aliases in later values do not count. Compare them first, or set `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS=admit` and accept new members.
-- **The email attribute is the trust boundary.** A directory user who can change their own `mail` can sign in as any member, including an administrator. FreeIPA's default `User Self service` rule leaves `mail` out; confirm with `ipa selfservice-show "User Self service"`. On other directories, check the access rules. A required group does not help, because a member of the group who edits their own `mail` can still claim an administrator's email. The directory must not let users edit their own `mail` attribute.
-- **Administrators sign in with a password too.** A directory user whose email matches an administrator member gets an administrator session. Protect those accounts in the directory (strong passwords, lockout), or require a group.
-- **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_username`, `invalid_credentials`, `no_member`, `missing_email`, `entry_unreadable`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain. `entry_unreadable` means the password was right but the user may not read their own entry, which is a directory access rule to fix.
+- **Emails must match.** The server compares the ID token's `email` claim with member emails, without case. It never calls the userinfo endpoint, and an email with a non-ASCII character matches no member. A person whose provider email differs from their member's email is refused. Compare them first, or set `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS=admit` and accept new members.
+- **The provider is the trust boundary.** Anyone the provider will issue an ID token for, with a given email, can sign in as that member, including an administrator. Allow only sign-in sources whose emails administrators control. A directory where users can edit their own `mail` attribute, or a social login that does not verify emails, lets a user claim any member's email. The provider must send `email_verified` as the boolean `true`; a token without it, or with any other value, is refused.
+- **Administrators sign in this way too.** An ID token that names an administrator's email gets an administrator session, which can admit members and issue keys. Protect those accounts at the provider.
+- **Watch the logs.** Each attempt logs `auth.oidc_sign_in.succeeded`, `.rejected` with a reason (`no_member`, `missing_email`, `email_unverified`), or `.failed` with a reason and a detail. Failure reasons are `rate_limited`, `provider_error`, `invalid_callback`, `invalid_state`, `expired_state`, `token_rejected`, `invalid_id_token`, `nonce_mismatch`, and `provider_unavailable`. No line holds a code, a token, or the client secret.
 
-Failed LDAP sign-ins are limited to five per minute per client address and, separately, ten per 15 minutes per username. A username that hits its limit is locked out of this server for the rest of those 15 minutes, whoever is guessing, and the person's own successful sign-in does not reset it. An attempt that ends in `DIRECTORY_UNAVAILABLE` still counts. Each server process runs at most 16 directory sign-ins at once and answers any more with `DIRECTORY_UNAVAILABLE` without contacting the directory, so a slow directory shows up as `.unavailable` lines that say the sign-ins are already running. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+A refused sign-in returns the person to the Review gate with a generic message. When the provider cannot be reached, answers with an error status, or serves a broken discovery document, the gate says single sign-on is unavailable, and the log line has the detail. A person must come back from the provider within 10 minutes of pressing the button, and after sign-in lands on the Review page they started from. One client address may fail 20 callbacks a minute; past that, sign-ins from it are refused for the rest of the minute without asking the provider. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
 
 ## Publishing
 

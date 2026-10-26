@@ -29,14 +29,16 @@ export async function startBrowserFixture(
   options: {
     readonly browserAccess?: BrowserAccess;
     readonly contentDomain?: string | null;
+    readonly port?: number;
     readonly timezoneId?: string;
   } = {},
 ): Promise<BrowserFixture> {
-  const {browserAccess, contentDomain, ...contextOptions} = options;
+  const {browserAccess, contentDomain, port, ...contextOptions} = options;
   const installation = await createTestInstallation();
   let serverOptions: Parameters<typeof startTestServer>[1] = {};
   if (browserAccess !== undefined) serverOptions = {...serverOptions, browserAccess};
   if (contentDomain !== undefined) serverOptions = {...serverOptions, contentDomain};
+  if (port !== undefined) serverOptions = {...serverOptions, port};
   const server = await startTestServer(installation, serverOptions);
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
