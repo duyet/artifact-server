@@ -115,7 +115,7 @@ curl --fail https://artifacts.example.internal/ready
 
 To upgrade, run the same command with the digest of a newer release.
 
-The release that removes OIDC and WorkOS needs two checks before the upgrade:
+The earlier WorkOS identity removal needs two checks before the upgrade:
 
 - Delete any `identity:` block from `artifact-server-values.yaml`. The chart schema rejects unknown keys, so the upgrade fails with it present.
 - Postgres migration `0017_drop_external_identities` drops the `external_identities` table. Run `SELECT count(*) FROM external_identities;` first. It should be 0 on a deployment that never used a browser identity provider. If it is not, back up the table before upgrading, because the drop cannot be undone.
@@ -216,9 +216,9 @@ When the provider federates a directory, the `email` claim must come from the di
 Before you turn it on:
 
 - **Emails must match.** The server compares the ID token's `email` claim with member emails, without case. It never calls the userinfo endpoint, and an email with a non-ASCII character matches no member. A person whose provider email differs from their member's email is refused. Compare them first, or set `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS=admit` and accept new members.
-- **The provider is the trust boundary.** Anyone the provider will issue an ID token for, with a given email, can sign in as that member, including an administrator. Allow only sign-in sources whose emails administrators control. A directory where users can edit their own `mail` attribute, or a social login that does not verify emails, lets a user claim any member's email. A token whose `email_verified` is present and not true is refused.
+- **The provider is the trust boundary.** Anyone the provider will issue an ID token for, with a given email, can sign in as that member, including an administrator. Allow only sign-in sources whose emails administrators control. A directory where users can edit their own `mail` attribute, or a social login that does not verify emails, lets a user claim any member's email. The provider must send `email_verified` as the boolean `true`; a token without it, or with any other value, is refused.
 - **Administrators sign in this way too.** An ID token that names an administrator's email gets an administrator session, which can admit members and issue keys. Protect those accounts at the provider.
-- **Watch the logs.** Each attempt logs `auth.oidc_sign_in.succeeded`, `.rejected` with a reason (`no_member`, `missing_email`, `email_unverified`), or `.failed` with a reason and a detail. Failure reasons are `rate_limited`, `provider_error`, `invalid_callback`, `invalid_state`, `expired_state`, `replayed_state`, `token_rejected`, `invalid_id_token`, `nonce_mismatch`, and `provider_unavailable`. No line holds a code, a token, or the client secret.
+- **Watch the logs.** Each attempt logs `auth.oidc_sign_in.succeeded`, `.rejected` with a reason (`no_member`, `missing_email`, `email_unverified`), or `.failed` with a reason and a detail. Failure reasons are `rate_limited`, `provider_error`, `invalid_callback`, `invalid_state`, `expired_state`, `token_rejected`, `invalid_id_token`, `nonce_mismatch`, and `provider_unavailable`. No line holds a code, a token, or the client secret.
 
 A refused sign-in returns the person to the Review gate with a generic message. When the provider cannot be reached, answers with an error status, or serves a broken discovery document, the gate says single sign-on is unavailable, and the log line has the detail. A person must come back from the provider within 10 minutes of pressing the button, and after sign-in lands on the Review page they started from. One client address may fail 20 callbacks a minute; past that, sign-ins from it are refused for the rest of the minute without asking the provider. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
 

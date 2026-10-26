@@ -21,7 +21,6 @@ const oidcFailureReasonValues = [
   "provider_error",
   "provider_unavailable",
   "rate_limited",
-  "replayed_state",
   "token_rejected",
 ] as const;
 
@@ -51,7 +50,6 @@ export const oidcFailureReports = {
   provider_error: failed,
   provider_unavailable: {browser: "unavailable", outcome: "failed"},
   rate_limited: failed,
-  replayed_state: failed,
   token_rejected: failed,
 } as const satisfies Readonly<Record<OidcFailureReason, OidcFailureReport>>;
 

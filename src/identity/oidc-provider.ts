@@ -198,11 +198,7 @@ function identityFromClaims(claims: IdTokenClaims): Effect.Effect<OidcIdentity, 
   if (claims.email === undefined) {
     return Effect.fail(fail("missing_email", "the ID token has no email claim"));
   }
-  // Some providers send the boolean as a string. Anything else present is not a yes.
-  if (
-    claims.email_verified !== undefined &&
-    claims.email_verified !== true && claims.email_verified !== "true"
-  ) {
+  if (claims.email_verified !== true) {
     return Effect.fail(fail("email_unverified", "the provider has not verified the email"));
   }
   return Effect.succeed({

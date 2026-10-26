@@ -49,7 +49,7 @@ const newcomer: FakeOidcPerson = {
   name: "New Comer",
   sub: "newcomer-subject",
 };
-const dave: FakeOidcPerson = {email: "dave@example.com", sub: "dave-subject"};
+const dave: FakeOidcPerson = {email: "dave@example.com", email_verified: true, sub: "dave-subject"};
 
 const principalSchema = z.object({
   principal: z.object({
@@ -137,11 +137,13 @@ describe("OIDC browser sign-in", () => {
     }
   }
 
-  async function start(options: {
+  async function start({unknownUsers = unknownOidcUserPolicies.reject, ...serverOptions}: {
+    readonly applicationOrigin?: string;
     readonly observability?: boolean;
     readonly unknownUsers?: UnknownOidcUserPolicy;
   } = {}): Promise<RunningTestServer> {
     server = await startTestServer(installation, {
+      ...serverOptions,
       browserAccess: privateTeamBrowserAccess(browserLoginKinds.none, {
         provider: createOidcProvider({
           clientId: provider.clientId,
@@ -151,11 +153,10 @@ describe("OIDC browser sign-in", () => {
           redirectUri,
           scopes: "openid email profile",
         }),
-        unknownUsers: options.unknownUsers ?? unknownOidcUserPolicies.reject,
+        unknownUsers,
       }),
       clock,
       contentDomain: null,
-      observability: options.observability ?? false,
     });
     return server;
   }
@@ -261,6 +262,14 @@ describe("OIDC browser sign-in", () => {
       grant_type: "authorization_code",
       redirect_uri: redirectUri,
     });
+
+    // An https origin is production: the pending cookie is __Host- and Secure.
+    await running().stop();
+    await start({applicationOrigin: "https://artifacts.example.com"});
+    const secureStart = await fetch(`${running().baseUrl}/auth/oidc/start`, {redirect: "manual"});
+    expect(secureStart.status).toBe(302);
+    expect(secureStart.headers.getSetCookie().find((cookie) => cookie.startsWith("__Host-artifact_oidc=")))
+      .toMatch(/; Max-Age=600; Path=\/; HttpOnly; Secure; SameSite=Lax$/u);
   });
 
   test("admit creates one member for a new verified email and reuses it on the next sign-in", async () => {
@@ -274,7 +283,7 @@ describe("OIDC browser sign-in", () => {
     expect((await memberEmails()).filter((email) => email === "newcomer@example.com")).toHaveLength(1);
   });
 
-  test("FRK-024-F: an unknown email, a deactivated member, an unverified email, and a missing email are refused without a session", async () => {
+  test("FRK-024-F: an unknown email, a deactivated member, an unverified or unasserted email, and a missing email are refused without a session", async () => {
     await seedMember({email: "alice@example.com", id: "member_alice"});
     await seedMember({email: "dave@example.com", id: "member_dave"}, true);
     await start();
@@ -282,6 +291,8 @@ describe("OIDC browser sign-in", () => {
     expectRefused(await signIn(dave));
     expectRefused(await signIn({...alice, email_verified: false}));
     expectRefused(await signIn({...alice, email_verified: "false"}));
+    expectRefused(await signIn({...alice, email_verified: "true"}));
+    expectRefused(await signIn(alice, {claims: {email_verified: undefined}}));
     expectRefused(await signIn({sub: "no-email-subject"}));
     expect(await memberEmails()).toEqual(["alice@example.com", "dave@example.com"]);
   });
@@ -294,7 +305,7 @@ describe("OIDC browser sign-in", () => {
     expect(await memberEmails()).toEqual(["dave@example.com"]);
   });
 
-  test("a callback without this browser's pending sign-in, for another state, expired, edited, or replayed never redeems a new code", async () => {
+  test("a callback without this browser's pending sign-in, for another state, expired, or edited never redeems a code, and a replayed code is refused by the provider", async () => {
     await seedMember({email: "alice@example.com", id: "member_alice"});
     await start();
 
@@ -311,13 +322,13 @@ describe("OIDC browser sign-in", () => {
     const completed = await callback(redirect, started.cookie);
     expect(sessionCookies(completed)).not.toBeNull();
     expectRefused(await callback(redirect, started.cookie));
-    expect(provider.tokenRequests).toHaveLength(1);
+    expect(provider.tokenRequests).toHaveLength(2);
 
     const expiring = await begin();
     const expiringRedirect = provider.approve(expiring.authorizationUrl, alice);
     clock.advance(10 * 60_000 + 1);
     expectRefused(await callback(expiringRedirect, expiring.cookie));
-    expect(provider.tokenRequests).toHaveLength(1);
+    expect(provider.tokenRequests).toHaveLength(2);
   });
 
   test("an ID token with another nonce, audience, issuer, or client, an expired or future one, a stranger's signature, or alg none is refused", async () => {
@@ -397,7 +408,7 @@ describe("OIDC browser sign-in", () => {
     await seedMember({email: "kate@example.com", id: "member_kate"});
     await start();
     expectRefused(await signIn({email: "\u212Aate@example.com", email_verified: true, sub: "kelvin"}));
-    expect(sessionCookies(await signIn({email: "Kate@example.com", sub: "kate"}))).not.toBeNull();
+    expect(sessionCookies(await signIn({email: "Kate@example.com", email_verified: true, sub: "kate"}))).not.toBeNull();
   });
 
   test("a token endpoint that redirects is SSO unavailable, and the code never follows the redirect", async () => {

@@ -78,7 +78,6 @@ import {
   type PendingOidcSignIn,
   pendingOidcSignInLifetimeMilliseconds,
   safeReturnTo,
-  SpentOidcStates,
   startOidcSignIn,
 } from "../application/oidc-sign-in.js";
 import {
@@ -616,7 +615,6 @@ export function createHttpApp(
       ),
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
-  const spentOidcStates = new SpentOidcStates();
   const failedOidcCallbacks = new FailedSignInLimiter(
     dependencies.clock,
     oidcCallbackFailedSignInPolicy,
@@ -1036,7 +1034,6 @@ export function createHttpApp(
       completeOidcSignIn(
         oidc,
         {callback: oidcCallback(context.req.query()), pending, rateLimited},
-        spentOidcStates,
         dependencies.clock.now(),
       ).pipe(
         Effect.map((value) => ({...value, kind: "signed_in" as const})),

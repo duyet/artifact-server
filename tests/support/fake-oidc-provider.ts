@@ -86,8 +86,8 @@ const authorizationRequestSchema = z.object({
 
 /**
  * An OpenID Connect provider on a loopback port with discovery, a JWKS, and
- * a token endpoint that checks client authentication and PKCE. Codes are not
- * single use here, so a replayed callback is refused by the server itself.
+ * a token endpoint that checks client authentication and PKCE. A code is
+ * spent by its first redemption, as RFC 6749 requires, so a replay fails.
  */
 export async function startFakeOidcProvider(): Promise<FakeOidcProvider> {
   const keys = await generateKeyPair("RS256");
@@ -131,6 +131,7 @@ export async function startFakeOidcProvider(): Promise<FakeOidcProvider> {
       return json(response, 401, JSON.stringify({error: "invalid_client"}));
     }
     const issued = codes.get(body["code"] ?? "");
+    codes.delete(body["code"] ?? "");
     if (
       body["grant_type"] !== "authorization_code" || issued === undefined ||
       body["redirect_uri"] !== issued.redirectUri ||

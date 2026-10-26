@@ -68,7 +68,6 @@ export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
   function*(
     oidc: OidcSignIn,
     {callback, pending, rateLimited}: OidcCallbackRequest,
-    spentStates: SpentOidcStates,
     now: Date,
   ) {
     if (rateLimited) {
@@ -92,9 +91,6 @@ export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
     // The cookie is not signed, so an expiry past what start would set was written by hand.
     if (pending.expiresAt > now.getTime() + pendingOidcSignInLifetimeMilliseconds) {
       return yield* failure("invalid_state", "the pending sign-in claims an expiry start never sets");
-    }
-    if (!spentStates.spend(pending.state, pending.expiresAt, now.getTime())) {
-      return yield* failure("replayed_state", "the callback state was already used");
     }
     const identity = yield* oidc.provider.redeem(
       callback.code,
@@ -145,33 +141,6 @@ export function safeReturnTo(value: string | undefined): string {
       (parsed.pathname === "/review" || parsed.pathname.startsWith("/review/"))
     ? returnTo
     : fallback;
-}
-
-/**
- * States this process has redeemed, kept until they expire, so one callback
- * completes at most once even when a client replays the pending cookie.
- */
-export class SpentOidcStates {
-  readonly #expiries = new Map<string, number>();
-  readonly #maximum: number;
-
-  constructor(maximum = 10_000) {
-    this.#maximum = maximum;
-  }
-
-  /** True the first time a state is spent before it expires. */
-  spend(state: string, expiresAt: number, now: number): boolean {
-    for (const [spent, expiry] of this.#expiries) {
-      if (expiry <= now) this.#expiries.delete(spent);
-    }
-    if (this.#expiries.has(state)) return false;
-    if (this.#expiries.size >= this.#maximum) {
-      const oldest = this.#expiries.keys().next();
-      if (oldest.done !== true) this.#expiries.delete(oldest.value);
-    }
-    this.#expiries.set(state, expiresAt);
-    return true;
-  }
 }
 
 function failure(
