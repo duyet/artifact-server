@@ -389,6 +389,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "markAgentDispatchDelivered",
       "markAgentDispatchFailed",
       "markStagedFileUploaded",
+      "readAssetUsage",
       "observeAgentDispatchAddressed",
       "recordAgentActivity",
       "registerAgent",

@@ -4373,10 +4373,10 @@ requirements:
     source: {file: ../../docs/fork/ASSETS.md, anchor: asset-store}
     acceptance:
       behavior: {id: FRK-019-B, description: "Plan, upload, and commit an image over REST, replay its key for the same asset with no new version, read it from /_blob with nosniff, both content policies, an immutable cache, ETag, HEAD, a 206 range, and a 304, then add a PDF that downloads, an SVG whose policy runs no script, and JSON served as UTF-8, and list all four with their usage and quota."}
-      failure: {id: FRK-019-F, description: "HTML, XHTML, XML, and unknown types are 415; an oversized SVG and a plan over the byte quota are 413 at the plan; bytes that miss their fingerprint are 422 and the commit is 409; a version plan committed as an asset is 415; a commit past the count quota is 413; a reused key is 409; a read-only key lists but gets 403 on plan, commit, and delete; deleting an asset makes its URL 404 and leaves a version file with the same bytes serving; an account-required artifact's asset is 401 with the sandbox; an unknown ID, a trailing path, and POST are refused."}
+      failure: {id: FRK-019-F, description: "HTML, XHTML, XML, and unknown types are 415; an oversized SVG and a plan over the byte quota are 413 at the plan; bytes that miss their fingerprint are 422 and the commit is 409; a staged upload commits at most once, so a second or concurrent commit under another key is 409 UPLOAD_CLOSED or 404 UPLOAD_NOT_FOUND and its staging bytes are removed; a version plan committed as an asset is 415; a commit past the count quota is 413; a reused key is 409; a read-only key lists but gets 403 on plan, commit, and delete; deleting an asset makes its URL 404 and leaves a version file with the same bytes serving; an account-required artifact's asset is 401 with the sandbox; an unknown ID, a trailing path, and POST are refused."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved against a compact SQLite installation over a real server in path mode. The Postgres migration 0019 and its asset queries compile and lint but no test runs them, and no browser run opens an asset at top level.
+    proof_gap: Proved against a compact SQLite installation over a real server in path mode, and against two external-storage processes on Postgres and MinIO for a single-use commit, a cross-process listing, /_blob serving, and delete. No browser run opens an asset at top level.
     depends_on: [FRK-002, FRK-018]
     evidence: []
 

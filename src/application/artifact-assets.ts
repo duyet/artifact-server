@@ -110,6 +110,7 @@ export interface ArtifactAssetRepositoryPort {
     | AssetLimitExceeded
     | AssetNotFound
     | IdempotencyConflict
+    | UploadClosed
     | ArtifactRepositoryFailure
   >;
   deleteAsset(
@@ -140,6 +141,9 @@ export interface ArtifactAssetRepositoryPort {
     {readonly assets: readonly AssetRecord[]; readonly usage: AssetUsage},
     ArtifactRepositoryFailure
   >;
+  readAssetUsage(
+    artifactId: string,
+  ): Effect.Effect<AssetUsage, ArtifactRepositoryFailure>;
 }
 
 /** Dependencies used to construct the asset store service. */
@@ -282,10 +286,7 @@ function makeArtifactAssetService(
     function*(artifact: ArtifactRecord, mediaType: string, size: number) {
       const accepted = acceptedAssetMediaType(mediaType);
       if (accepted instanceof AssetTypeUnsupported) return yield* accepted;
-      const {usage} = yield* dependencies.repository.listAssets(
-        artifact.projectId,
-        artifact.id,
-      );
+      const usage = yield* dependencies.repository.readAssetUsage(artifact.id);
       const refused = assetLimitFailure(accepted, size, usage, dependencies.quota);
       if (refused !== null) return yield* refused;
       return accepted.mediaType;
@@ -304,6 +305,7 @@ function makeArtifactAssetService(
         readonly sha256: string;
         readonly size: number;
       },
+      upload: StagedUpload | null,
     ) {
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.commitAsset({
@@ -322,6 +324,9 @@ function makeArtifactAssetService(
         idempotencyKey,
         inputDigest,
         quota: dependencies.quota,
+        upload: upload === null
+          ? null
+          : {id: upload.id, principalId: upload.principalId},
       });
     },
   );
@@ -406,12 +411,28 @@ function makeArtifactAssetService(
         sha256: file.entry.sha256,
         size: file.entry.size,
       });
-      return yield* commit(artifact, command.principal, idempotencyKey, inputDigest, {
-        mediaType,
-        name: file.entry.path,
-        sha256: file.entry.sha256,
-        size: file.entry.size,
-      });
+      const committed = yield* commit(
+        artifact,
+        command.principal,
+        idempotencyKey,
+        inputDigest,
+        {
+          mediaType,
+          name: file.entry.path,
+          sha256: file.entry.sha256,
+          size: file.entry.size,
+        },
+        upload,
+      );
+      // The commit deleted the upload row, so expiry cleanup can no longer
+      // find these bytes; a failure here only leaves staging bytes behind.
+      yield* dependencies.staging.remove(upload.id, file.storageToken).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("asset.staging_cleanup.failed").pipe(
+            Effect.annotateLogs({cause: error._tag, upload_id: upload.id}),
+          )),
+      );
+      return committed;
     },
   );
 
@@ -448,7 +469,7 @@ function makeArtifactAssetService(
         name: original.name,
         sha256: original.sha256,
         size: original.size,
-      });
+      }, null);
     },
   );
 

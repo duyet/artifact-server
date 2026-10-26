@@ -1039,6 +1039,9 @@ export class PostgresArtifactRepository implements
         if (artifact === null) {
           return yield* new ArtifactNotFound({message: "The artifact does not exist."});
         }
+        if (command.upload !== null) {
+          yield* this.#consumeStagedUpload(asset.projectId, command.upload);
+        }
         // Two replicas may commit to one artifact at once; one lock per
         // artifact makes the quota check and the insert one step.
         yield* sql`SELECT pg_advisory_xact_lock(
@@ -1153,6 +1156,37 @@ export class PostgresArtifactRepository implements
         usage: yield* this.#assetUsage(artifactId),
       };
     }));
+  }
+
+  async readAssetUsage(artifactId: string): Promise<AssetUsage> {
+    return this.#database.run(this.#assetUsage(artifactId));
+  }
+
+  #consumeStagedUpload(
+    projectId: string,
+    upload: {readonly id: string; readonly principalId: string},
+  ): Effect.Effect<void, unknown, SqlClient> {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const selected = yield* sql`SELECT id FROM staged_uploads
+        WHERE installation_id = ${installationId}
+          AND project_id = ${projectId}
+          AND id = ${upload.id}
+          AND principal_id = ${upload.principalId}
+          AND status = 'open'
+        FOR UPDATE`;
+      if (selected.length !== 1) {
+        return yield* new UploadClosed({
+          message: "The staged upload is already committed.",
+        });
+      }
+      yield* sql`DELETE FROM staged_upload_files
+        WHERE installation_id = ${installationId} AND upload_id = ${upload.id}`;
+      yield* sql`DELETE FROM staged_uploads
+        WHERE installation_id = ${installationId} AND id = ${upload.id}`;
+      return undefined;
+    });
   }
 
   #assetUsage(artifactId: string) {
