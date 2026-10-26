@@ -23,9 +23,14 @@ const baseSteps: readonly VerificationStep[] = [
 // The same areas AGENTS.md names under "Performance verification".
 const gateRules: readonly GateRule[] = [
   {
+    command: "pnpm test",
+    pattern: /^(?:src|tests|apps|integrations|tools)\/|^package\.json$|^pnpm-lock\.yaml$/u,
+    reason: "code or tests",
+  },
+  {
     command: "pnpm smoke",
     pattern:
-      /^src\/(?:http|lifecycle|local)\/|^src\/storage\/(?:sqlite-|local-)|^src\/application\/(?:publish|staged-upload|expired-staging)/u,
+      /^src\/(?:application|http|lifecycle|local)\/|^src\/storage\/(?!postgres-|s3-|cloud-object-storage|object-storage-provider)/u,
     reason: "HTTP delivery, publication, SQLite, blob storage, restart, or cleanup",
   },
   {
@@ -35,8 +40,14 @@ const gateRules: readonly GateRule[] = [
   },
   {
     command: "pnpm verify:object-storage",
-    pattern: /^src\/storage\/(?:s3-|cloud-object-storage|object-storage-provider)/u,
+    pattern:
+      /^src\/storage\/(?:s3-|cloud-object-storage|object-storage-provider)|^tests\/integration\/s3-object-storage/u,
     reason: "remote blob or staging storage (needs Docker)",
+  },
+  {
+    command: "pnpm test:storage-versity",
+    pattern: /^tests\/integration\/frk-000-versity-s3/u,
+    reason: "Versity S3 gateway (needs Docker)",
   },
   {
     command: "pnpm verify:external-storage-runtime",
@@ -55,23 +66,14 @@ const gateRules: readonly GateRule[] = [
   },
 ];
 
-const unitTestPattern = /^tests\/(?!browser\/|integration\/|pi-live\/|release\/).+\.test\.ts$/u;
-
 /** The ordered verification steps the changed repository paths call for. */
 export function selectVerification(
   changedPaths: readonly string[],
 ): readonly VerificationStep[] {
-  const changedTests = changedPaths.filter((changed) => unitTestPattern.test(changed));
-  const testSteps = changedTests.length === 0
-    ? []
-    : [{
-      command: `pnpm exec vitest run ${changedTests.toSorted().join(" ")}`,
-      reason: "changed unit and conformance tests",
-    }];
   const gateSteps = gateRules
     .filter((rule) => changedPaths.some((changed) => rule.pattern.test(changed)))
     .map(({command, reason}) => ({command, reason}));
-  return [...baseSteps, ...testSteps, ...gateSteps];
+  return [...baseSteps, ...gateSteps];
 }
 
 function git(...args: string[]): readonly string[] {
@@ -79,8 +81,16 @@ function git(...args: string[]): readonly string[] {
 }
 
 function changedSince(base: string): readonly string[] {
-  const [mergeBase] = git("merge-base", base, "HEAD");
-  if (mergeBase === undefined) throw new Error(`No merge base with ${base}.`);
+  let mergeBase: string | undefined;
+  try {
+    [mergeBase] = git("merge-base", base, "HEAD");
+  } catch {
+    mergeBase = undefined;
+  }
+  if (mergeBase === undefined) {
+    console.error(`No merge base with ${base}; pass the base branch as an argument.`);
+    process.exit(2);
+  }
   return [
     ...new Set([
       ...git("diff", "--name-only", mergeBase),
