@@ -83,7 +83,7 @@ const pendingSignInSchema = z.looseObject({});
 /** Rewrite one field of a pending sign-in cookie, as a client holding it could. */
 function editedCookie(
   cookie: string,
-  edit: {readonly codeVerifier?: string; readonly returnTo?: string},
+  edit: {readonly codeVerifier?: string; readonly expiresAt?: number; readonly returnTo?: string},
 ): string {
   const value = cookie.slice(`${pendingCookie}=`.length);
   const pending = pendingSignInSchema.parse(
@@ -305,6 +305,7 @@ describe("OIDC browser sign-in", () => {
     expectRefused(await callback(redirect, other.cookie));
     expectRefused(await callback(redirect, `${pendingCookie}=not-base64-json`));
     expectRefused(await callback(redirect, editedCookie(started.cookie, {codeVerifier: "short"})));
+    expectRefused(await callback(redirect, editedCookie(started.cookie, {expiresAt: 9e15})));
     expect(provider.tokenRequests).toHaveLength(0);
 
     const completed = await callback(redirect, started.cookie);
@@ -328,6 +329,7 @@ describe("OIDC browser sign-in", () => {
       {claims: {nonce: undefined}},
       {claims: {aud: "another-client"}},
       {claims: {aud: ["artifact-server", "another-client"], azp: "another-client"}},
+      {claims: {aud: ["artifact-server", "another-client"]}},
       {claims: {iss: "https://sso.example.org"}},
       {claims: {exp: now - 120, iat: now - 600}},
       {claims: {iat: now - 3_600, exp: now + 300}},
@@ -335,6 +337,7 @@ describe("OIDC browser sign-in", () => {
       {claims: {exp: undefined}},
       {signing: "stranger"},
       {signing: "none"},
+      {signing: "client_secret"},
     ];
     for (const response of await Promise.all(tamperings.map((tampering) => signIn(alice, tampering)))) {
       expectRefused(response);
@@ -356,6 +359,8 @@ describe("OIDC browser sign-in", () => {
     await seedMember({email: "alice@example.com", id: "member_alice"});
     await start();
     const hostile = [
+      "/team/an-artifact-page/",
+      "/reviewer",
       "https://evil.example.com/review",
       "//evil.example.com/review",
       "/\\evil.example.com",
@@ -373,6 +378,34 @@ describe("OIDC browser sign-in", () => {
       editedCookie(started.cookie, {returnTo: "//evil.example.com/"}),
     );
     expect(response.headers.get("location")).toBe("/review");
+  });
+
+  test("a client that fails 20 callbacks in a minute is refused before the provider is asked, and a success costs nothing", async () => {
+    await seedMember({email: "alice@example.com", id: "member_alice"});
+    await start();
+    expect(sessionCookies(await signIn(alice))).not.toBeNull();
+    const bare = await Promise.all(Array.from({length: 20}, () =>
+      callback(`${redirectUri}?code=x&state=a-state-nobody-started`, null)));
+    for (const response of bare) expectRefused(response);
+    expectRefused(await signIn(alice));
+    expect(provider.tokenRequests).toHaveLength(1);
+    clock.advance(60_000);
+    expect(sessionCookies(await signIn(alice))).not.toBeNull();
+  });
+
+  test("an ASCII member is never matched by an email that only lowercases to theirs", async () => {
+    await seedMember({email: "kate@example.com", id: "member_kate"});
+    await start();
+    expectRefused(await signIn({email: "\u212Aate@example.com", email_verified: true, sub: "kelvin"}));
+    expect(sessionCookies(await signIn({email: "Kate@example.com", sub: "kate"}))).not.toBeNull();
+  });
+
+  test("a token endpoint that redirects is SSO unavailable, and the code never follows the redirect", async () => {
+    await seedMember({email: "alice@example.com", id: "member_alice"});
+    await start();
+    provider.redirectTokenRequests = true;
+    expectRefused(await signIn(alice), "unavailable");
+    expect(provider.tokenRequests).toHaveLength(1);
   });
 
   test("an unreachable provider is SSO unavailable at start and at the callback", async () => {

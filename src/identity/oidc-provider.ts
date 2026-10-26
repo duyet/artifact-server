@@ -113,7 +113,12 @@ export function createOidcProvider(configuration: OidcProviderConfiguration): Oi
       if (!claims.success) {
         return yield* fail("invalid_id_token", "the ID token claims have the wrong shape");
       }
-      if (claims.data.azp !== undefined && claims.data.azp !== configuration.clientId) {
+      // With several audiences, azp must name this client (OpenID Connect Core 3.1.3.7).
+      const audiences = Array.isArray(payload.aud) ? payload.aud.length : 1;
+      if (
+        (audiences > 1 && claims.data.azp === undefined) ||
+        (claims.data.azp !== undefined && claims.data.azp !== configuration.clientId)
+      ) {
         return yield* fail("invalid_id_token", "the ID token was issued to another client");
       }
       if (claims.data.nonce !== nonce) {

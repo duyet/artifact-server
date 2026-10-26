@@ -567,6 +567,9 @@ function makeInstallationAccessService(
     unknownUsers: UnknownOidcUserPolicy,
   ) {
     const noMember = new IdentityNotFound({message: "No active member has this email."});
+    // Lowercasing folds some non-ASCII letters onto ASCII ones (U+212A to k),
+    // so only an ASCII email may name a member.
+    if (!asciiPattern.test(rawEmail)) return yield* noMember;
     const email = yield* normalizeEmail(rawEmail).pipe(Effect.mapError(() => noMember));
     const findMember = () =>
       dependencies.repository.findActiveMemberByEmail(dependencies.installationId, email);
@@ -919,6 +922,8 @@ function invalidApiKey(): Effect.Effect<never, AuthenticationRequired> {
     message: "A valid Artifact Server API key is required.",
   }));
 }
+
+const asciiPattern = /^[\x20-\x7E]*$/u;
 
 const normalizeEmail = Effect.fn("InstallationAccessService.normalizeEmail")(
   function*(value: string): Effect.fn.Return<string, IdentityConflict> {

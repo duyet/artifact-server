@@ -13,6 +13,13 @@ export const defaultFailedSignInPolicy: FailedSignInPolicy = {
   windowMilliseconds: 60_000,
 };
 
+/** Failed OIDC callbacks per client address. Nothing is guessed, so the bound is loose. */
+export const oidcCallbackFailedSignInPolicy: FailedSignInPolicy = {
+  maximumAddresses: 10_000,
+  maximumFailures: 20,
+  windowMilliseconds: 60_000,
+};
+
 interface FailureWindow {
   failures: number;
   readonly resetsAt: number;

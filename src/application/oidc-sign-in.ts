@@ -27,6 +27,14 @@ export type OidcCallback =
   | {readonly error: string; readonly kind: "error"}
   | {readonly kind: "invalid"};
 
+/** One callback as the browser delivered it. */
+export interface OidcCallbackRequest {
+  readonly callback: OidcCallback;
+  readonly pending: PendingOidcSignIn | null;
+  /** This client has failed too many callbacks recently. */
+  readonly rateLimited: boolean;
+}
+
 export interface CompletedOidcSignIn {
   readonly issued: IssuedApplicationSession;
   readonly returnTo: string;
@@ -59,11 +67,13 @@ export const startOidcSignIn = Effect.fn("startOidcSignIn")(
 export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
   function*(
     oidc: OidcSignIn,
-    pending: PendingOidcSignIn | null,
-    callback: OidcCallback,
+    {callback, pending, rateLimited}: OidcCallbackRequest,
     spentStates: SpentOidcStates,
     now: Date,
   ) {
+    if (rateLimited) {
+      return yield* failure("rate_limited", "this client failed too many callbacks");
+    }
     if (callback.kind === "error") {
       return yield* failure("provider_error", `the provider answered error=${callback.error}`);
     }
@@ -78,6 +88,10 @@ export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
     }
     if (pending.expiresAt <= now.getTime()) {
       return yield* failure("expired_state", "the pending sign-in expired");
+    }
+    // The cookie is not signed, so an expiry past what start would set was written by hand.
+    if (pending.expiresAt > now.getTime() + pendingOidcSignInLifetimeMilliseconds) {
+      return yield* failure("invalid_state", "the pending sign-in claims an expiry start never sets");
     }
     if (!spentStates.spend(pending.state, pending.expiresAt, now.getTime())) {
       return yield* failure("replayed_state", "the callback state was already used");
@@ -111,20 +125,26 @@ export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
   Effect.tapError(logFailure),
 );
 
-/** The same-origin path to return to after sign-in, or `/review` for anything else. */
+/**
+ * A Review path to return to after sign-in, or `/review` for anything else.
+ * Only Review: on a server without a content domain, artifacts are served on
+ * this origin and could send a freshly signed-in person somewhere else.
+ */
 export function safeReturnTo(value: string | undefined): string {
   const fallback = "/review";
   if (
-    value === undefined || !value.startsWith("/") || value.startsWith("//") ||
-    value.includes("\\") || value.length > 1_024 || hasControlCharacter(value)
+    value === undefined || !value.startsWith("/") || value.includes("\\") ||
+    hasControlCharacter(value)
   ) {
     return fallback;
   }
   const base = new URL("https://return-to.invalid");
   const parsed = new URL(value, base);
-  // Normalizing "/..//host" yields the scheme-relative path "//host".
-  if (parsed.origin !== base.origin || parsed.pathname.startsWith("//")) return fallback;
-  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  const returnTo = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  return parsed.origin === base.origin && returnTo.length <= 1_024 &&
+      (parsed.pathname === "/review" || parsed.pathname.startsWith("/review/"))
+    ? returnTo
+    : fallback;
 }
 
 /**

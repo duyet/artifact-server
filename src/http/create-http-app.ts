@@ -156,7 +156,10 @@ import {
   versionServedRoots,
 } from "./same-host-content.js";
 import {artifactServerFailureResponse} from "./artifact-http-failure.js";
-import {FailedSignInLimiter} from "./failed-sign-in-limiter.js";
+import {
+  FailedSignInLimiter,
+  oidcCallbackFailedSignInPolicy,
+} from "./failed-sign-in-limiter.js";
 import {
   attachmentContentDisposition,
   portableDownloadFilename,
@@ -614,6 +617,10 @@ export function createHttpApp(
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
   const spentOidcStates = new SpentOidcStates();
+  const failedOidcCallbacks = new FailedSignInLimiter(
+    dependencies.clock,
+    oidcCallbackFailedSignInPolicy,
+  );
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -1018,23 +1025,30 @@ export function createHttpApp(
     });
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
+    const clientAddress = signInClientAddress(context, dependencies);
+    const rateLimited = failedOidcCallbacks.retryAfterSeconds(clientAddress) !== null;
+    // Charged before it runs, because each callback can cost a request to
+    // the provider that carries the client secret.
+    if (!rateLimited) failedOidcCallbacks.recordFailure(clientAddress);
     const completed = await runHttpApplicationEffect(
       context,
       dependencies,
       completeOidcSignIn(
         oidc,
-        pending,
-        oidcCallback(context.req.query()),
+        {callback: oidcCallback(context.req.query()), pending, rateLimited},
         spentOidcStates,
         dependencies.clock.now(),
       ).pipe(
         Effect.map((value) => ({...value, kind: "signed_in" as const})),
         Effect.catchTag("OidcSignInFailed", (failed) =>
           Effect.succeed({browser: oidcFailureReports[failed.reason].browser, kind: "refused" as const})),
-        Effect.annotateLogs({client_address: signInClientAddress(context, dependencies)}),
+        // A failure of this server's own, already logged, still lands on the gate.
+        Effect.catch(() => Effect.succeed({browser: "unavailable" as const, kind: "refused" as const})),
+        Effect.annotateLogs({client_address: clientAddress}),
       ),
     );
     if (completed.kind === "refused") return context.redirect(`/review?sso=${completed.browser}`, 303);
+    failedOidcCallbacks.refund(clientAddress);
     setApplicationSessionCookies(context, dependencies, completed.issued);
     return context.redirect(completed.returnTo, 303);
   });

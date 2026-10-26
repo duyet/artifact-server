@@ -35,8 +35,11 @@ interface IdTokenClaims {
 export interface IdTokenTampering {
   /** Claims merged over the correct ones. An undefined value removes the claim. */
   readonly claims?: IdTokenClaims;
-  /** `stranger` signs with a key the JWKS does not hold, under the provider's key ID. */
-  readonly signing?: "none" | "provider" | "stranger";
+  /**
+   * `stranger` signs with a key the JWKS does not hold, under the provider's
+   * key ID. `client_secret` signs HS256 with the client secret.
+   */
+  readonly signing?: "client_secret" | "none" | "provider" | "stranger";
 }
 
 /** One request the token endpoint received, as the server sent it. */
@@ -52,6 +55,8 @@ export interface FakeOidcProvider {
   readonly fetch: typeof globalThis.fetch;
   readonly issuer: string;
   readonly tokenRequests: readonly TokenRequest[];
+  /** When true, the token endpoint redirects to itself, so a client that follows it calls again. */
+  redirectTokenRequests: boolean;
   /** Approve one authorization request and return the URL the provider redirects to. */
   approve(authorizationUrl: string, person: FakeOidcPerson, tampering?: IdTokenTampering): string;
   /** Answer the redirect with an OAuth error instead of a code. */
@@ -104,6 +109,11 @@ export async function startFakeOidcProvider(): Promise<FakeOidcProvider> {
     }).filter(([, value]) => value !== undefined));
     const signing = issued.tampering.signing ?? "provider";
     if (signing === "none") return new UnsecuredJWT(claims).encode();
+    if (signing === "client_secret") {
+      return new SignJWT(claims)
+        .setProtectedHeader({alg: "HS256", typ: "JWT"})
+        .sign(new TextEncoder().encode(clientSecret));
+    }
     return new SignJWT(claims)
       .setProtectedHeader({alg: "RS256", kid: "provider-key", typ: "JWT"})
       .sign(signing === "provider" ? keys.privateKey : strangerKeys.privateKey);
@@ -112,6 +122,11 @@ export async function startFakeOidcProvider(): Promise<FakeOidcProvider> {
   const token = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const body = Object.fromEntries(new URLSearchParams(await text(request)));
     tokenRequests.push({authorization: request.headers.authorization, body});
+    if (fake.redirectTokenRequests) {
+      response.writeHead(307, {Location: `${loopback}/token`});
+      response.end();
+      return;
+    }
     if (!presentsClientCredentials(request.headers.authorization)) {
       return json(response, 401, JSON.stringify({error: "invalid_client"}));
     }
@@ -163,7 +178,7 @@ export async function startFakeOidcProvider(): Promise<FakeOidcProvider> {
     return authorizationRequestSchema.parse(Object.fromEntries(url.searchParams));
   };
 
-  return {
+  const fake: FakeOidcProvider = {
     approve(authorizationUrl, person, tampering = {}) {
       const request = authorizationRequest(authorizationUrl);
       const code = randomBytes(16).toString("hex");
@@ -194,12 +209,14 @@ export async function startFakeOidcProvider(): Promise<FakeOidcProvider> {
       return globalThis.fetch(`${loopback}${url.pathname}${url.search}`, init);
     },
     issuer,
+    redirectTokenRequests: false,
     stop: () => new Promise<void>((resolve, reject) => {
       server.closeAllConnections();
       server.close((error) => (error === undefined ? resolve() : reject(error)));
     }),
     tokenRequests,
   };
+  return fake;
 }
 
 function json(response: ServerResponse, status: number, body: string): void {
