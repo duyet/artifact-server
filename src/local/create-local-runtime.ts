@@ -13,6 +13,7 @@ import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import type { Clock } from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
 import type {ViewerLogo} from "../core/viewer-logo.js";
+import {defaultHelpUrl} from "../core/help-link.js";
 import { SystemClock, SystemIdGenerator } from "../core/system.js";
 import { createHttpApp } from "../http/create-http-app.js";
 import type { HttpAppDependencies } from "../http/create-http-app.js";
@@ -69,8 +70,8 @@ export interface LocalRuntimeConfig {
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
   readonly localBootstrapToken?: string;
-  /** The account menu's Help link; absent or null shows no Help item. */
-  readonly helpUrl?: string | null;
+  /** The account menu's Help link; absent means the default help page. */
+  readonly helpUrl?: string;
   /** The viewer bar's logo; absent or null shows the product mark. */
   readonly logo?: ViewerLogo | null;
   readonly observability?: boolean;
@@ -184,7 +185,7 @@ export async function createLocalRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
-      helpUrl: config.helpUrl ?? null,
+      helpUrl: config.helpUrl ?? defaultHelpUrl,
       logo: config.logo ?? null,
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),

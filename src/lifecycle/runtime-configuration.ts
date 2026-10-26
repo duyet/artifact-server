@@ -8,6 +8,7 @@ import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
+import {defaultHelpUrl} from "../core/help-link.js";
 import {
   type ViewerLogo,
   viewerLogoMaximumBytes,
@@ -113,8 +114,8 @@ export interface CompactRuntimeConfiguration {
   readonly contentDomain: string | null;
   readonly dataDirectory: string;
   readonly deploymentMode: "compact";
-  /** The account menu's Help link, or null for no Help item. */
-  readonly helpUrl: string | null;
+  /** The account menu's Help link. */
+  readonly helpUrl: string;
   readonly hostname: string;
   readonly installation: CompactInstallationMetadata;
   readonly logo: ViewerLogo | null;
@@ -139,8 +140,8 @@ export interface ExternalStorageRuntimeConfiguration {
   >>;
   readonly databaseUrl: Redacted.Redacted;
   readonly deploymentMode: "external-storage";
-  /** The account menu's Help link, or null for no Help item. */
-  readonly helpUrl: string | null;
+  /** The account menu's Help link. */
+  readonly helpUrl: string;
   readonly hostname: string;
   readonly installationId: string;
   readonly logo: ViewerLogo | null;
@@ -176,6 +177,7 @@ export interface RuntimeConfigurationSummary {
   readonly credentialSources: Readonly<Record<string, CredentialSource>>;
   readonly dataDirectory: string | null;
   readonly deploymentMode: DeploymentMode;
+  readonly helpUrl: string;
   readonly hostname: string;
   readonly installationId: string;
   readonly logo: ViewerLogoSummary | null;
@@ -556,6 +558,7 @@ export function summarizeRuntimeConfiguration(
       },
       dataDirectory: configuration.dataDirectory,
       deploymentMode: configuration.deploymentMode,
+      helpUrl: configuration.helpUrl,
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
       logo: summarizeViewerLogo(configuration.logo),
@@ -577,6 +580,7 @@ export function summarizeRuntimeConfiguration(
     },
     dataDirectory: null,
     deploymentMode: configuration.deploymentMode,
+    helpUrl: configuration.helpUrl,
     hostname: configuration.hostname,
     installationId: configuration.installationId,
     logo: summarizeViewerLogo(configuration.logo),
@@ -868,12 +872,16 @@ function parseViewerLogoLink(
 
 function parseHelpUrl(
   environment: NodeJS.ProcessEnv,
-): Effect.Effect<string | null, RuntimeConfigurationError> {
+): Effect.Effect<string, RuntimeConfigurationError> {
   const field = "ARTIFACT_SERVER_HELP_URL";
   const value = environment[field]?.trim() ?? "";
-  return value === ""
-    ? Effect.succeed(null)
-    : parseHttpsUrl(field, value, `${field} must be an https:// URL without credentials.`);
+  if (value === "") return Effect.succeed(defaultHelpUrl);
+  if (rootRelativePathPattern.test(value)) return Effect.succeed(value);
+  return parseHttpsUrl(
+    field,
+    value,
+    `${field} must be an https:// URL without credentials or a path that starts with one /.`,
+  );
 }
 
 function parseHttpsUrl(

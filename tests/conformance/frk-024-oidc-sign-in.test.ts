@@ -14,6 +14,7 @@ import {
   type UnknownOidcUserPolicy,
   unknownOidcUserPolicies,
 } from "../../src/core/oidc-sign-in.js";
+import {defaultHelpUrl} from "../../src/core/help-link.js";
 import {createOidcProvider} from "../../src/identity/oidc-provider.js";
 import {
   parseExternalStorageRuntimeConfiguration,
@@ -227,7 +228,7 @@ describe("OIDC browser sign-in", () => {
     const context = await fetch(`${running().baseUrl}/auth/context`);
     expect(await context.json()).toEqual({
       accessMode: "private_team",
-      helpUrl: null,
+      helpUrl: defaultHelpUrl,
       login: {kind: "none", oidc: true},
     });
 
@@ -474,7 +475,7 @@ describe("OIDC browser sign-in", () => {
     });
     expect(await (await fetch(`${running().baseUrl}/auth/context`)).json()).toEqual({
       accessMode: "private_team",
-      helpUrl: null,
+      helpUrl: defaultHelpUrl,
       login: {kind: "none", oidc: false},
     });
     const routes = ["/auth/oidc/start", "/auth/oidc/callback?code=x&state=yyyyyyyyyyyyyyyy"];

@@ -11,10 +11,12 @@ import {
   localOwnerBrowserAccess,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
+import {defaultHelpUrl} from "../../src/core/help-link.js";
 import {initializeCompactInstallation} from "../../src/lifecycle/compact-installation.js";
 import {
   parseCompactRuntimeConfiguration,
   parseExternalStorageRuntimeConfiguration,
+  summarizeRuntimeConfiguration,
 } from "../../src/lifecycle/runtime-configuration.js";
 import {createLocalRuntime} from "../../src/local/create-local-runtime.js";
 import {
@@ -42,7 +44,7 @@ const externalEnvironment: NodeJS.ProcessEnv = {
 const accountSchema = z.object({
   account: z.object({displayName: z.string(), email: z.string().nullable()}).strict(),
 }).loose();
-const contextSchema = z.object({helpUrl: z.string().nullable()}).loose();
+const contextSchema = z.object({helpUrl: z.string()}).loose();
 
 function sameOriginHeaders(server: RunningTestServer) {
   return {
@@ -142,7 +144,7 @@ describe("account menu session and help link", () => {
     await removeTestInstallation(installation);
   });
 
-  test("FRK-031-B: a member's session names their own display name and email, and a configured help URL reaches /auth/context", async () => {
+  test("FRK-031-B: a member's session names their own display name and email, and a configured help URL reaches /auth/context and config check", async () => {
     const alice = (await issueMemberKey("Alice Example", "alice@example.com")).token;
     await issueMemberKey("Bob Example", "bob@example.com");
     server = await startTestServer(installation, {
@@ -163,9 +165,13 @@ describe("account menu session and help link", () => {
     expect(text).not.toContain("bob@example.com");
     expect(text).not.toContain("Bob Example");
 
-    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: helpUrl})).helpUrl).toBe(helpUrl);
-    expect((await parseExternal({})).helpUrl).toBeNull();
-    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: ""})).helpUrl).toBeNull();
+    const configured = await parseExternal({ARTIFACT_SERVER_HELP_URL: helpUrl});
+    expect(configured.helpUrl).toBe(helpUrl);
+    expect(summarizeRuntimeConfiguration(configured).helpUrl).toBe(helpUrl);
+    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: "/team/help/"})).helpUrl).toBe("/team/help/");
+    // Without one, Help opens the runbook.
+    expect((await parseExternal({})).helpUrl).toBe(defaultHelpUrl);
+    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: ""})).helpUrl).toBe(defaultHelpUrl);
     const compactRoot = await mkdtemp(path.join(tmpdir(), "frk-031-compact-"));
     const compactData = path.join(compactRoot, "data");
     try {
@@ -189,7 +195,7 @@ describe("account menu session and help link", () => {
     }
   });
 
-  test("FRK-031-F: a key, even one carrying a member's principal, reads no email; no help URL reads null; an unsafe help URL stops startup", async () => {
+  test("FRK-031-F: a key, even one carrying a member's principal, reads no email; no help URL reads the default help page; an unsafe help URL stops startup", async () => {
     const alice = await issueMemberKey("Alice Example", "alice@example.com");
     const administrator = await issueMemberKey("Admin Example", "admin@example.com", "administrator");
     server = await startTestServer(installation, {
@@ -199,7 +205,7 @@ describe("account menu session and help link", () => {
     });
 
     const context = await fetch(`${running().baseUrl}/auth/context`);
-    expect(contextSchema.parse(await context.json()).helpUrl).toBeNull();
+    expect(contextSchema.parse(await context.json()).helpUrl).toBe(defaultHelpUrl);
 
     // Bearer use of an operator key stays delegated, so it is a key acting
     // on Alice's principal, not Alice, and must not learn her email.
@@ -242,7 +248,9 @@ describe("account menu session and help link", () => {
       "http://help.example.com/",
       "javascript:alert(1)",
       "https://user:secret@help.example.com/",
-      "/docs/help",
+      "//evil.example.com/help",
+      "/\\evil.example.com/help",
+      "docs/help",
       "help.example.com",
     ].map(async (value) => {
       const failure = await Effect.runPromise(Effect.flip(
@@ -254,6 +262,6 @@ describe("account menu session and help link", () => {
       ));
       return {field: failure.field, reason: failure.reason};
     }));
-    expect(refused).toEqual(Array.from({length: 5}, () => ({field, reason: "invalid_value"})));
+    expect(refused).toEqual(Array.from({length: 7}, () => ({field, reason: "invalid_value"})));
   });
 });
