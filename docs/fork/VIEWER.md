@@ -45,7 +45,7 @@ Each write carries its own idempotency key and the current version ID. If the se
 
 `canManageArtifact` in `src/application/authorization.ts` is the one rule. A principal may change an artifact's visibility when it belongs to the artifact's installation and any of these holds:
 
-- It owns the artifact. A member's own key carries the member's principal ID (`src/application/installation-access.ts`), so it owns what the member published with any of their keys.
+- It owns the artifact, either as the owner's own session or as a key that carries the owner's principal ID and holds `artifact:create`. A member's own key carries the member's principal ID (`src/application/installation-access.ts`), but a key scoped to `artifact:read`, `comment:write`, or `content-session:issue` does not own what the member published, so it cannot make the member's private artifacts public. `requireVersionPublication` draws the same line.
 - It is a direct human administrator.
 - It holds `artifact:manage:any`.
 

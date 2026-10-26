@@ -182,12 +182,28 @@ describe("artifact info and the visibility permission", () => {
     });
     expect(admitted.status).toBe(201);
     const memberId = memberSchema.parse(await admitted.json()).member.id;
+    const token = await issueMemberKey(
+      administrator,
+      memberId,
+      ["artifact:create", "artifact:read"],
+      "Example member laptop",
+    );
+    return {administrator, memberId, token};
+  }
+
+  /** Another key an administrator issues for the same member. */
+  async function issueMemberKey(
+    administrator: Awaited<ReturnType<typeof signInAdministrator>>,
+    memberId: string,
+    capabilities: readonly string[],
+    name: string,
+  ): Promise<string> {
     const issued = await fetch(`${server.baseUrl}/api/v1/api-keys`, {
       body: JSON.stringify({
-        capabilities: ["artifact:create", "artifact:read"],
+        capabilities,
         expiresAt: "2099-01-01T00:00:00.000Z",
         memberId,
-        name: "Example member laptop",
+        name,
       }),
       headers: headersFor({
         cookie: administrator.header,
@@ -197,8 +213,7 @@ describe("artifact info and the visibility permission", () => {
       method: "POST",
     });
     expect(issued.status).toBe(201);
-    const token = z.object({token: z.string()}).parse(await issued.json()).token;
-    return {administrator, memberId, token};
+    return z.object({token: z.string()}).parse(await issued.json()).token;
   }
 
   /** A direct human session for a member who is not an administrator. */
@@ -383,6 +398,38 @@ describe("artifact info and the visibility permission", () => {
     expect(errorSchema.parse(viaMcp.structuredContent).error.code)
       .toBe("AUTHORIZATION_DENIED");
     expect((await readBack(theirs.artifact.id)).accessSetting).toBe("public_link");
+
+    // A key on the owner's own principal that may only read does not own the
+    // artifact: the owner match counts only for a key that may create.
+    const readOnly = await issueMemberKey(
+      member.administrator,
+      member.memberId,
+      ["artifact:read"],
+      "Example member reader",
+    );
+    const readOnlyKey: Caller = {kind: "bearer", token: readOnly};
+    const hidden = await publishAs(member.token, "Member hidden notes", ["unlisted"]);
+    expect((await info(readOnlyKey, owned.artifact.id)).body.canManage).toBe(false);
+    expect((await patch(readOnlyKey, owned, "access", {
+      accessSetting: "account_required",
+    })).status).toBe(403);
+    expect((await patch(readOnlyKey, owned, "tags", {tags: ["unlisted"]})).status)
+      .toBe(403);
+    expect((await patch(readOnlyKey, hidden, "tags", {tags: []})).status).toBe(403);
+    const ownViaMcp = await callTool(readOnly, "artifact_set_visibility", {
+      accessSetting: "account_required",
+      artifactId: owned.artifact.id,
+      expectedCurrentVersionId: owned.version.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(ownViaMcp.isError).toBe(true);
+    expect(errorSchema.parse(ownViaMcp.structuredContent).error.code)
+      .toBe("AUTHORIZATION_DENIED");
+    expect(await readBack(owned.artifact.id)).toMatchObject({
+      accessSetting: "public_link",
+      tags: [],
+    });
+    expect((await readBack(hidden.artifact.id)).tags).toEqual(["unlisted"]);
 
     expect((await readInfo(operator(), "art_00000000-0000-4000-8000-000000000000")).status)
       .toBe(404);

@@ -143,13 +143,38 @@ describe("authorization policy", () => {
       ...humanPrincipal(owner, membershipRoles.member),
       installationId: "installation-b",
     };
+    // Keys on the owner's principal scoped below creation do not own it.
+    const ownReaderKey: Principal = {
+      ...ownMemberKey,
+      capabilities: [principalCapabilities.readArtifacts],
+    };
+    const ownCommenterKey: Principal = {
+      ...ownMemberKey,
+      capabilities: [principalCapabilities.writeComments],
+    };
+    const ownContentSessionKey: Principal = {
+      ...ownMemberKey,
+      capabilities: [principalCapabilities.issueContentSession],
+    };
 
-    await Promise.all([ownMemberKey, administrator, manager].map((allowed) =>
+    await Promise.all([
+      humanPrincipal(owner, membershipRoles.member),
+      ownMemberKey,
+      administrator,
+      manager,
+    ].map((allowed) =>
       expectAllowed((authorization) =>
         authorization.requireArtifactOwnership(allowed, artifact)
       )
     ));
-    await Promise.all([otherMember, otherMemberKey, foreignOwner].map((refused) =>
+    await Promise.all([
+      otherMember,
+      otherMemberKey,
+      foreignOwner,
+      ownReaderKey,
+      ownCommenterKey,
+      ownContentSessionKey,
+    ].map((refused) =>
       expectDenied((authorization) =>
         authorization.requireArtifactOwnership(refused, artifact)
       )

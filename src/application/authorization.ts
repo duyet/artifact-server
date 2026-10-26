@@ -93,7 +93,9 @@ export class AuthorizationService extends Context.Service<
  * Whether a principal may change who can open an artifact: the artifact's
  * owner, a direct human administrator, or a key that manages any artifact,
  * always inside the artifact's own installation. A member's own key carries
- * the member's principal ID, so it owns what the member published.
+ * the member's principal ID, but it owns what the member published only when
+ * it may also create artifacts: a key scoped to reading or commenting must not
+ * make its member's private artifacts public.
  */
 export function canManageArtifact(
   principal: Principal,
@@ -101,7 +103,13 @@ export function canManageArtifact(
   installationId: string,
 ): boolean {
   return principal.installationId === installationId && (
-    principal.id === artifact.owner.principalId ||
+    (
+      principal.id === artifact.owner.principalId &&
+      (
+        isDirectHumanPrincipal(principal) ||
+        hasCapability(principal, principalCapabilities.createArtifact)
+      )
+    ) ||
     isHumanAdministrator(principal) ||
     hasCapability(principal, principalCapabilities.manageAnyArtifact)
   );
