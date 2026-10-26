@@ -66,6 +66,8 @@ type CopyFeedback =
 const copiedResetMilliseconds = 1_600;
 
 interface ReviewShareControlProps {
+  /** Whether the reader may change access; otherwise the access screen only reads. */
+  readonly canManageAccess: boolean;
   readonly details: ArtifactDetails | null;
   readonly onArtifactChanged: (artifact: ArtifactDetails["artifact"]) => void;
   /** Controlled open state, so a menu elsewhere can open Share. */
@@ -79,6 +81,7 @@ interface ReviewShareControlProps {
 
 /** Share one artifact from either the standard viewer header or focus controls. */
 export function ReviewShareControl({
+  canManageAccess,
   details,
   onArtifactChanged,
   onOpenChange,
@@ -487,11 +490,13 @@ export function ReviewShareControl({
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
-              Choose who can open the current version from the stable artifact link.
+              {canManageAccess
+                ? "Choose who can open the current version from the stable artifact link."
+                : "Only the artifact's owner or an administrator can change who can open it."}
             </p>
             <RadioGroup
               aria-label="Who can open this artifact"
-              disabled={pending}
+              disabled={pending || !canManageAccess}
               onValueChange={(value) => {
                 if (value === "account_required" || value === "public_link") {
                   setSelectedAccess(value);
@@ -533,19 +538,21 @@ export function ReviewShareControl({
                 onClick={() => setScreen("overview")}
                 variant="outline"
               >
-                Cancel
+                {canManageAccess ? "Cancel" : "Back"}
               </Button>
-              <Button
-                disabled={
-                  details === null
-                  || pending
-                  || selectedAccess === details.artifact.accessSetting
-                }
-                onClick={() => void saveAccess()}
-              >
-                {pending ? <Spinner data-icon="inline-start" /> : null}
-                {pending ? "Saving…" : "Save"}
-              </Button>
+              {canManageAccess ? (
+                <Button
+                  disabled={
+                    details === null
+                    || pending
+                    || selectedAccess === details.artifact.accessSetting
+                  }
+                  onClick={() => void saveAccess()}
+                >
+                  {pending ? <Spinner data-icon="inline-start" /> : null}
+                  {pending ? "Saving…" : "Save"}
+                </Button>
+              ) : null}
             </div>
           </>
         )}

@@ -352,10 +352,38 @@ const artifactAnalyticsSchema = z.object({
   windowDays: z.number().int().positive(),
 });
 
+const artifactInfoSchema = z.object({
+  artifactId: z.string(),
+  canManage: z.boolean(),
+  name: z.string(),
+  owner: z.object({displayName: z.string().nullable()}).strict(),
+  updatedAt: z.string(),
+  version: z.object({id: z.string(), number: z.number().int().positive()}).strict(),
+  views: z.object({
+    daily: z.array(z.object({day: dayStringSchema, views: viewCountSchema}).strict()),
+    last30Days: viewCountSchema,
+    total: viewCountSchema,
+  }).strict(),
+  visibility: z.enum(["private", "public", "unlisted"]),
+  windowDays: z.number().int().positive(),
+}).strict();
+
+const brandingSchema = z.object({
+  logo: z.object({
+    alt: z.string(),
+    href: z.string().nullable(),
+    src: z.string(),
+  }).strict().nullable(),
+}).strict();
+
 /** One project's activity: totals, a sparse yearly series, its most viewed. */
 export type ProjectAnalytics = z.infer<typeof projectAnalyticsSchema>;
 /** One artifact's 7-day, 30-day, and all-time views with a sparse series. */
 export type ArtifactAnalytics = z.infer<typeof artifactAnalyticsSchema>;
+/** What the viewer's info popover shows about one artifact. */
+export type ArtifactInfo = z.infer<typeof artifactInfoSchema>;
+/** The installation's logo for the viewer bar, or null for the product mark. */
+export type Branding = z.infer<typeof brandingSchema>;
 
 const artifactDetailsSchema: z.ZodType<ArtifactDetails> = z.object({
   artifact: artifactSchema,
@@ -1037,6 +1065,11 @@ export const api = {
     artifactAnalyticsSchema,
     `/api/v1/artifacts/${encodeURIComponent(artifactId)}/analytics?${projectQuery(projectId)}`,
   ),
+  artifactInfo: (projectId: string, artifactId: string) => request(
+    artifactInfoSchema,
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}/info?${projectQuery(projectId)}`,
+  ),
+  branding: () => request(brandingSchema, "/api/v1/public/branding"),
   /** Change the display name; no version is saved and links stay the same. */
   rename: (
     projectId: string,
