@@ -592,6 +592,8 @@ export function createHttpApp(
       ),
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
+  const failedDirectorySignIns = new FailedSignInLimiter(dependencies.clock);
+  const failedDirectoryUsers = new FailedSignInLimiter(dependencies.clock);
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -984,18 +986,18 @@ export function createHttpApp(
     return context.body(null, 204);
   });
 
-  // Both sign-in forms share one failed-attempt budget per client address,
-  // so alternating between them buys no extra guesses.
+  // Each attempt is counted before it runs, so concurrent guesses cannot all
+  // pass the check, and refunded when it ends without a refused credential.
   const limitedSignIn = async <E>(
     context: Context<HttpEnvironment>,
-    signIn: (clientAddress: string) => Promise<
-      Effect.Effect<IssuedApplicationSession, E, ApplicationServices>
-    >,
+    counters: readonly SignInCounter[],
+    signIn: Effect.Effect<IssuedApplicationSession, E, ApplicationServices>,
   ): Promise<Response> => {
-    requireApplicationOrigin(context, dependencies);
-    const clientAddress = signInClientAddress(context, dependencies);
-    const retryAfterSeconds = failedSignIns.retryAfterSeconds(clientAddress);
-    if (retryAfterSeconds !== null) {
+    const retryAfterSeconds = Math.max(
+      0,
+      ...counters.map((counter) => counter.limiter.retryAfterSeconds(counter.key) ?? 0),
+    );
+    if (retryAfterSeconds > 0) {
       context.header("Retry-After", String(retryAfterSeconds));
       context.header("Cache-Control", "private, no-store");
       return context.json({
@@ -1005,17 +1007,20 @@ export function createHttpApp(
         },
       }, 429);
     }
-    const issued = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      (await signIn(clientAddress)).pipe(
-        Effect.tapError((failure) =>
-          failure instanceof AuthenticationRequired
-            ? Effect.sync(() => failedSignIns.recordFailure(clientAddress))
-            : Effect.void),
-      ),
-    );
-    failedSignIns.clear(clientAddress);
+    for (const counter of counters) counter.limiter.recordFailure(counter.key);
+    let issued: IssuedApplicationSession;
+    try {
+      issued = await runHttpApplicationEffect(context, dependencies, signIn);
+    } catch (failure) {
+      if (!(failure instanceof AuthenticationRequired)) {
+        for (const counter of counters) counter.limiter.refund(counter.key);
+      }
+      throw failure;
+    }
+    for (const counter of counters) {
+      if (counter.onSuccess === "clear") counter.limiter.clear(counter.key);
+      else counter.limiter.refund(counter.key);
+    }
     setApplicationSessionCookies(context, dependencies, issued);
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
@@ -1026,27 +1031,47 @@ export function createHttpApp(
     if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
       return context.notFound();
     }
-    return limitedSignIn(context, async () => {
-      const body = apiKeySignInSchema.parse(await context.req.json());
-      return InstallationAccessService.use((access) =>
+    requireApplicationOrigin(context, dependencies);
+    const body = apiKeySignInSchema.parse(await context.req.json());
+    return limitedSignIn(
+      context,
+      [{
+        key: signInClientAddress(context, dependencies),
+        limiter: failedSignIns,
+        onSuccess: "clear",
+      }],
+      InstallationAccessService.use((access) =>
         access.loginWithApiKey(
           Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
         )
-      );
-    });
+      ),
+    );
   });
 
   app.post("/auth/ldap", boundedSignInBody, async (context) => {
     const directory = directorySignIn(dependencies.browserAccess);
     if (directory === null) return context.notFound();
-    return limitedSignIn(context, async (clientAddress) => {
-      const body = directorySignInSchema.parse(await context.req.json());
-      return signInWithDirectory(
+    requireApplicationOrigin(context, dependencies);
+    const body = directorySignInSchema.parse(await context.req.json());
+    const clientAddress = signInClientAddress(context, dependencies);
+    // Passwords are guessable, unlike keys, so one person's success never
+    // resets the client's count, and each username has its own count.
+    return limitedSignIn(
+      context,
+      [
+        {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
+        {
+          key: body.username.trim().toLowerCase(),
+          limiter: failedDirectoryUsers,
+          onSuccess: "clear",
+        },
+      ],
+      signInWithDirectory(
         directory,
         body.username,
         Redacted.make(body.password, {label: "directory-password"}),
-      ).pipe(Effect.annotateLogs({client_address: clientAddress}));
-    });
+      ).pipe(Effect.annotateLogs({client_address: clientAddress})),
+    );
   });
 
   app.post("/auth/local", async (context) => {
@@ -2766,6 +2791,14 @@ function isForwardedFrom(
   return `${forwardedProtocol}:` === trustedUrl.protocol &&
     forwardedHost?.toLocaleLowerCase("en-US") ===
       trustedUrl.host.toLocaleLowerCase("en-US");
+}
+
+/** One failed sign-in count that an attempt is charged to. */
+interface SignInCounter {
+  readonly key: string;
+  readonly limiter: FailedSignInLimiter;
+  /** `clear` forgets earlier failures; `refund` returns only this attempt's charge. */
+  readonly onSuccess: "clear" | "refund";
 }
 
 function signInClientAddress(

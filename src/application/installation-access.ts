@@ -587,8 +587,13 @@ function makeInstallationAccessService(
       if (unknownUsers === unknownDirectoryUserPolicies.reject || firstEmail === undefined) {
         return yield* noMember;
       }
-      // A concurrent sign-in may admit the same email first, and a deactivated
-      // member keeps its email; both conflict, and only the first is a member.
+      // Any email of a deactivated member keeps the whole entry out, whatever
+      // order the directory returns its values in.
+      const members = yield* dependencies.repository.listMembers(dependencies.installationId);
+      if (members.some((existing) => emails.includes(existing.email))) {
+        return yield* noMember;
+      }
+      // A concurrent sign-in may admit the same email first; then it is a member.
       member = yield* dependencies.repository.admitMember({
         createdAt: dependencies.clock.now().toISOString(),
         displayName: identity.displayName ?? identity.username,

@@ -12,6 +12,7 @@ export interface DirectoryIdentity {
 
 /** Why a directory sign-in was refused. Operators see it in logs; browsers never do. */
 export const directoryRejectionReasons = {
+  entryUnreadable: "entry_unreadable",
   invalidCredentials: "invalid_credentials",
   missingEmail: "missing_email",
   noMember: "no_member",

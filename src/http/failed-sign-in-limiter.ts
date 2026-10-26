@@ -58,6 +58,13 @@ export class FailedSignInLimiter {
     });
   }
 
+  /** Return one failure charged to an attempt that refused no credential. */
+  refund(address: string): void {
+    const window = this.#windows.get(address);
+    if (window === undefined || window.resetsAt <= this.#clock.now().getTime()) return;
+    window.failures = Math.max(0, window.failures - 1);
+  }
+
   clear(address: string): void {
     this.#windows.delete(address);
   }

@@ -4,6 +4,12 @@ import type {DirectorySignIn} from "../core/directory-sign-in.js";
 import {AuthenticationRequired} from "../core/errors.js";
 import {InstallationAccessService} from "./installation-access.js";
 
+const outcomes = {
+  DirectorySignInRejected: "rejected",
+  DirectoryUnavailable: "unavailable",
+  IdentityRepositoryFailure: "failed",
+} as const;
+
 /**
  * Verify a username and password with the directory, then issue the session
  * of the member the directory's email names. Every attempt writes one audit
@@ -31,9 +37,7 @@ export const signInWithDirectory = Effect.fn("signInWithDirectory")(function*(
 }, (effect, _directory, username) =>
   effect.pipe(
     Effect.tapError((failure) =>
-      Effect.logWarning(`auth.directory_sign_in.${
-        failure._tag === "DirectoryUnavailable" ? "unavailable" : "rejected"
-      }`).pipe(
+      Effect.logWarning(`auth.directory_sign_in.${outcomes[failure._tag]}`).pipe(
         Effect.annotateLogs({
           cause: failure._tag === "DirectoryUnavailable" ? String(failure.cause) : null,
           reason: failure._tag === "DirectorySignInRejected"

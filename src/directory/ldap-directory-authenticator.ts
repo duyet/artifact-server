@@ -40,6 +40,7 @@ const credentialRefusalCodes = new Set([
 
 type EntryRead =
   | {readonly kind: "refused"}
+  | {readonly kind: "unreadable"}
   | {readonly kind: "read"; readonly entry: Entry | undefined};
 
 /** Directory sign-in by a simple bind as the user, with no service account. */
@@ -66,9 +67,13 @@ export function createLdapDirectoryAuthenticator(
         ),
       }).pipe(
         Effect.flatMap((read) =>
-          read.kind === "refused"
-            ? Effect.fail(rejected(directoryRejectionReasons.invalidCredentials))
-            : identityFromEntry(configuration, username, read.entry)),
+          read.kind === "read"
+            ? identityFromEntry(configuration, username, read.entry)
+            : Effect.fail(rejected(
+              read.kind === "refused"
+                ? directoryRejectionReasons.invalidCredentials
+                : directoryRejectionReasons.entryUnreadable,
+            ))),
       );
     },
   };
@@ -110,18 +115,24 @@ async function bindAndRead(
       }
       throw error;
     }
-    const {searchEntries} = await client.search(dn, {
-      attributes: [
-        configuration.emailAttribute,
-        configuration.displayNameAttribute,
-        "memberOf",
-      ],
-      filter: "(objectClass=*)",
-      scope: "base",
-      sizeLimit: 1,
-      timeLimit: Math.ceil(configuration.timeoutMilliseconds / 1_000),
-    });
-    return {entry: searchEntries[0], kind: "read"};
+    // After a successful bind the password is proven, so a failed read must
+    // be the same counted refusal as a wrong password, never an uncounted 503.
+    try {
+      const {searchEntries} = await client.search(dn, {
+        attributes: [
+          configuration.emailAttribute,
+          configuration.displayNameAttribute,
+          "memberOf",
+        ],
+        filter: "(objectClass=*)",
+        scope: "base",
+        sizeLimit: 1,
+        timeLimit: Math.ceil(configuration.timeoutMilliseconds / 1_000),
+      });
+      return {entry: searchEntries[0], kind: "read"};
+    } catch {
+      return {kind: "unreadable"};
+    }
   } finally {
     await client.unbind().catch(() => undefined);
   }

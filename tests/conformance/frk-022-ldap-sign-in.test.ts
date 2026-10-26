@@ -76,10 +76,15 @@ const entries = {
     displayName: ["Carol Example"],
     mail: ["carol@example.com"],
   }),
+  // The alias comes first, so a lookup of only the first email would miss
+  // that the second one belongs to a deactivated member.
   [`uid=dave,${people}`]: directoryEntry("dave password", {
     displayName: ["Dave Example"],
-    mail: ["dave@example.com"],
+    mail: ["dave.alias@example.com", "dave@example.com"],
   }),
+  [`uid=erin,${people}`]: {...directoryEntry("erin password", {
+    mail: ["erin@example.com"],
+  }), unreadable: true},
   [`uid=nomail,${people}`]: directoryEntry("nomail password", {displayName: ["No Mail"]}),
   // The RFC 4514 escaped form of the username `o,brien+x$&`.
   [`uid=o\\,brien\\+x$&,${people}`]: directoryEntry("obrien password", {
@@ -116,10 +121,11 @@ function signIn(
   server: RunningTestServer,
   username: string,
   password: string,
+  headers: Record<string, string> = sameOriginHeaders(server),
 ): Promise<Response> {
   return fetch(`${server.baseUrl}/auth/ldap`, {
     body: JSON.stringify({password, username}),
-    headers: sameOriginHeaders(server),
+    headers,
     method: "POST",
   });
 }
@@ -342,7 +348,7 @@ describe("LDAP browser sign-in", () => {
     expect((await signIn(running(), "o,brien+x$&", "obrien password")).status).toBe(204);
   });
 
-  test("FRK-022-F: a wrong password, a user with no member, a deactivated member, a missing email, and a user outside the required group get the same 401", async () => {
+  test("FRK-022-F: a wrong password, a user with no member, a deactivated member under any of its emails, a missing email, an unreadable entry, and a user outside the required group get the same 401", async () => {
     await seedDeactivatedMember();
     await start({configuration: {requiredGroupDn: editors}});
     const wrongPassword = await signIn(running(), "alice", "wrong password");
@@ -354,6 +360,7 @@ describe("LDAP browser sign-in", () => {
     await start({unknownUsers: unknownDirectoryUserPolicies.admit});
     await expectRejected(await signIn(running(), "dave", "dave password"));
     await expectRejected(await signIn(running(), "nomail", "nomail password"));
+    await expectRejected(await signIn(running(), "erin", "erin password"));
     await expectRejected(await signIn(running(), "nobody", "any password"));
     await server?.stop();
 
@@ -412,29 +419,61 @@ describe("LDAP browser sign-in", () => {
     ].toSorted());
   });
 
-  test("LDAP and API-key failures share the per-client limit, and a limited client never reaches the directory", async () => {
-    await start();
-    const apiKeySignIn = () => fetch(`${running().baseUrl}/auth/api-key`, {
-      body: JSON.stringify({
-        apiKey: "as_key_key_00000000-0000-4000-8000-000000000009_wrongSecretWithSufficientEntropy1234",
+  test("failed LDAP sign-ins are limited per client and per username, and neither a success nor a burst gets past either limit", async () => {
+    await server?.stop();
+    await issueAliceKey();
+    server = await startTestServer(installation, {
+      applicationOrigin: "https://example.test",
+      bootstrapAdministratorEmail,
+      browserAccess: privateTeamBrowserAccess(browserLoginKinds.none, {
+        authenticator: createLdapDirectoryAuthenticator(ldapConfiguration(directory)),
+        unknownUsers: unknownDirectoryUserPolicies.reject,
       }),
-      headers: sameOriginHeaders(running()),
-      method: "POST",
+      contentDomain: null,
     });
-    const failures = await Promise.all([
-      signIn(running(), "alice", "wrong password"),
-      signIn(running(), "alice", "wrong password"),
-      signIn(running(), "alice", "wrong password"),
-      apiKeySignIn(),
-      apiKeySignIn(),
-    ]);
-    expect(failures.map((response) => response.status)).toEqual([401, 401, 401, 401, 401]);
-    const bindsBefore = directory.binds.length;
-    const limited = await signIn(running(), "alice", alicePassword);
+    const from = (client: string) => ({
+      ...sameOriginHeaders(running()),
+      Origin: "https://example.test",
+      "X-Forwarded-For": client,
+      "X-Forwarded-Host": "example.test",
+      "X-Forwarded-Proto": "https",
+    });
+    const attacker = from("203.0.113.1");
+    const carolBinds = () => directory.binds.filter((dn) => dn === `uid=carol,${people}`).length;
+
+    // An attacker with their own login interleaves it with guesses at carol.
+    const firstGuesses = await Promise.all(
+      Array.from({length: 4}, () => signIn(running(), "carol", "guess", attacker)),
+    );
+    expect(firstGuesses.map((response) => response.status)).toEqual([401, 401, 401, 401]);
+    expect((await signIn(running(), "alice", alicePassword, attacker)).status).toBe(204);
+    expect((await signIn(running(), "carol", "guess", attacker)).status).toBe(401);
+    const limited = await signIn(running(), "alice", alicePassword, attacker);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(errorSchema.parse(await limited.json()).error.code).toBe("RATE_LIMITED");
-    expect(directory.binds.length).toBe(bindsBefore);
+
+    // Carol has had five guesses, so a second client gets none.
+    expect((await signIn(running(), "carol", "carol password", from("203.0.113.2"))).status)
+      .toBe(429);
+    expect(carolBinds()).toBe(5);
+
+    // A burst is charged before any bind finishes, so only five reach the directory.
+    const burst = await Promise.all(
+      Array.from({length: 8}, (_, index) =>
+        signIn(running(), `nobody${index}`, "guess", from("203.0.113.3"))),
+    );
+    expect(burst.map((response) => response.status).toSorted((left, right) => left - right))
+      .toEqual([401, 401, 401, 401, 401, 429, 429, 429]);
+    expect(directory.binds.filter((dn) => dn.startsWith("uid=nobody"))).toHaveLength(5);
+
+    // API-key sign-in keeps its own count.
+    const apiKey = await fetch(`${running().baseUrl}/auth/api-key`, {
+      body: JSON.stringify({apiKey: installation.apiToken}),
+      headers: attacker,
+      method: "POST",
+    });
+    expect(apiKey.status).toBe(204);
   });
 
   test("an unreachable or silent directory is 503 DIRECTORY_UNAVAILABLE within the timeout and is not counted as a failed sign-in", async () => {

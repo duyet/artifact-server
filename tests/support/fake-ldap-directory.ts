@@ -8,6 +8,8 @@ import {z} from "zod";
 export interface FakeLdapEntry {
   readonly attributes: Readonly<Record<string, readonly string[]>>;
   readonly password: string;
+  /** Bind succeeds, but reading the entry is refused, as a strict ACL would. */
+  readonly unreadable?: boolean;
 }
 
 export interface FakeLdapDirectory {
@@ -27,6 +29,7 @@ const operations = {
 } as const;
 const resultCodes = {
   authMethodNotSupported: 7,
+  insufficientAccessRights: 50,
   invalidCredentials: 49,
   noSuchObject: 32,
   success: 0,
@@ -94,6 +97,10 @@ export async function startFakeLdapDirectory(options: {
           reader.readSequence(operations.searchRequest);
           const base = reader.readString() ?? "";
           const entry = bound ? options.entries[base] : undefined;
+          if (entry?.unreadable === true) {
+            socket.write(result(messageId, operations.searchDone, resultCodes.insufficientAccessRights));
+            continue;
+          }
           if (entry !== undefined) socket.write(searchEntry(messageId, base, entry));
           socket.write(result(
             messageId,
