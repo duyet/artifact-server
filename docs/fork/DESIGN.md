@@ -252,6 +252,21 @@ On a private-team server, Review shows a form that posts `{"apiKey": "..."}` to 
 - Sign-out is the existing `POST /api/v1/session/logout`.
 - A key session is a cookie on the application origin, so artifact code is the risk. Same-host content keeps the CSP sandbox without `allow-same-origin` (section 4), so artifact script runs in an opaque origin and its requests carry neither the right `Origin` nor the CSRF token.
 
+### LDAP sign-in
+
+An optional second form on the same Review gate posts `{"username": "...", "password": "..."}` to `POST /auth/ldap`. The route exists only when `ARTIFACT_SERVER_LDAP_URL` is set and answers 404 otherwise. `GET /auth/context` reports `login.directory: true` so Review shows the form.
+
+- The data shape is `DirectorySignIn` in `src/core/directory-sign-in.ts`: a `DirectoryAuthenticator` port and the `reject` or `admit` policy for unknown users. It lives on the private-team `BrowserAccess`, so a local-owner server cannot have it.
+- The adapter (`src/directory/ldap-directory-authenticator.ts`, on `ldapts`) refuses an empty password before it connects, because an LDAP simple bind with an empty password is an unauthenticated bind that succeeds (RFC 4513 section 5.1.2). It escapes the username per RFC 4514 into the DN template, binds as that DN, and reads that one entry with a base-scope search for the email, the display name, and `memberOf`. It never searches by filter, so no RFC 4515 filter is built from user input. No service account exists.
+- Startup refuses a template unless `{username}` is one whole attribute value. A template that is only `{username}` would let a username such as `EXTERNAL` select a SASL mechanism in `ldapts`.
+- `InstallationAccessService.loginWithDirectoryIdentity` maps the first email that names an active member to a member session, the same subject the local-owner login issues. With no member, `reject` refuses and `admit` creates one with role `member`. A deactivated member's email stays refused, because `admitMember` conflicts and the second lookup finds no active member.
+- Every refusal (wrong password, no member, no email, an entry the user cannot read, outside the required group) is the same 401 `AUTHENTICATION_REQUIRED`, so a caller cannot tell them apart by status or body. A correct password for a user with no member still takes one more directory read than a wrong one, so the two can differ in timing.
+- Passwords are guessable, unlike keys, so the limits differ from API-key sign-in. Five attempts per minute are allowed per client address and, separately, per username. An attempt is charged before it runs, so a burst of concurrent requests cannot all pass the check, and it is refunded when it ends without refusing a credential (a 503, or a success). A success clears that username's count but not the client's, so someone with their own login cannot reset the count between guesses at another user. A directory that is down, slow, or presents an untrusted certificate is 503 `DIRECTORY_UNAVAILABLE`. API-key sign-in keeps its own per-address count, now charged before it runs too.
+- With `admit`, an entry is refused when any of its emails belongs to a deactivated member, whatever order the directory returns them in.
+- One log line per attempt, `auth.directory_sign_in.succeeded`, `.rejected`, `.unavailable`, or `.failed` (a database error), carries the username, the client address, the reason, and the member ID. The password is a `Redacted` value from the request body to the bind.
+
+The trust boundary is the directory. It decides who a person is, and the email attribute decides which member they become. Any directory user who can change their own email attribute can sign in as any member. FreeIPA's default `User Self service` rule leaves `mail` out. Many OpenLDAP access lists do (`by self write`). Use an attribute only directory administrators can write, or a required group. An administrator member also becomes reachable with one directory password, held back only by the limits above and the directory's own lockout.
+
 ## 6. Helm chart
 
 ### Patch the upstream chart

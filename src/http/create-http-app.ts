@@ -64,10 +64,12 @@ import {
   VersionNotFound,
 } from "../core/errors.js";
 import type { IssuedApplicationSession } from "../core/installation-identity.js";
+import { signInWithDirectory } from "../application/directory-sign-in.js";
 import {
   browserAccessModes,
   browserLoginKinds,
   defaultAccessSetting,
+  directorySignIn,
   type BrowserAccess,
 } from "../core/browser-access.js";
 import {
@@ -464,6 +466,24 @@ const issueApiKeySchema = z.object({
 const apiKeySignInSchema = z.object({
   apiKey: z.string().min(1).max(1_024),
 }).strict();
+const directorySignInSchema = z.object({
+  password: z.string().min(1).max(1_024),
+  username: z.string().min(1).max(200),
+}).strict();
+
+// Characters RFC 4518 section 2.2 maps to nothing before a directory compares names.
+const ignoredUsernameCharacters =
+  /[\u00AD\u200B-\u200D\u2060\uFEFF]|\u034F|[\u180B-\u180D]|[\uFE00-\uFE0F]/gu;
+
+/** One failed-sign-in key for every spelling a directory treats as the same username. */
+function directoryUsernameKey(username: string): string {
+  return username
+    .normalize("NFKC")
+    .replaceAll(ignoredUsernameCharacters, "")
+    .replaceAll(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -586,6 +606,8 @@ export function createHttpApp(
       ),
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
+  const failedDirectorySignIns = new FailedSignInLimiter(dependencies.clock);
+  const failedDirectoryUsers = new FailedSignInLimiter(dependencies.clock);
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -942,7 +964,12 @@ export function createHttpApp(
     context.header("Cache-Control", "private, no-store");
     return context.json({
       accessMode: dependencies.browserAccess.mode,
-      login: {kind: dependencies.browserAccess.loginKind},
+      login: dependencies.browserAccess.mode === browserAccessModes.privateTeam
+        ? {
+          directory: dependencies.browserAccess.directory !== null,
+          kind: dependencies.browserAccess.loginKind,
+        }
+        : {kind: dependencies.browserAccess.loginKind},
     });
   });
 
@@ -974,14 +1001,18 @@ export function createHttpApp(
     return context.body(null, 204);
   });
 
-  app.post("/auth/api-key", boundedSignInBody, async (context) => {
-    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
-      return context.notFound();
-    }
-    requireApplicationOrigin(context, dependencies);
-    const clientAddress = signInClientAddress(context, dependencies);
-    const retryAfterSeconds = failedSignIns.retryAfterSeconds(clientAddress);
-    if (retryAfterSeconds !== null) {
+  // Each attempt is counted before it runs, so concurrent guesses cannot all
+  // pass the check, and refunded when it ends without a refused credential.
+  const limitedSignIn = async <E>(
+    context: Context<HttpEnvironment>,
+    counters: readonly SignInCounter[],
+    signIn: Effect.Effect<IssuedApplicationSession, E, ApplicationServices>,
+  ): Promise<Response> => {
+    const retryAfterSeconds = Math.max(
+      0,
+      ...counters.map((counter) => counter.limiter.retryAfterSeconds(counter.key) ?? 0),
+    );
+    if (retryAfterSeconds > 0) {
       context.header("Retry-After", String(retryAfterSeconds));
       context.header("Cache-Control", "private, no-store");
       return context.json({
@@ -991,24 +1022,71 @@ export function createHttpApp(
         },
       }, 429);
     }
-    const body = apiKeySignInSchema.parse(await context.req.json());
-    const issued = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      InstallationAccessService.use((access) =>
-        access.loginWithApiKey(
-          Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
-        )
-      ).pipe(
-        Effect.tapErrorTag("AuthenticationRequired", () =>
-          Effect.sync(() => failedSignIns.recordFailure(clientAddress))),
-      ),
-    );
-    failedSignIns.clear(clientAddress);
+    for (const counter of counters) counter.limiter.recordFailure(counter.key);
+    let issued: IssuedApplicationSession;
+    try {
+      issued = await runHttpApplicationEffect(context, dependencies, signIn);
+    } catch (failure) {
+      if (!(failure instanceof AuthenticationRequired)) {
+        for (const counter of counters) counter.limiter.refund(counter.key);
+      }
+      throw failure;
+    }
+    for (const counter of counters) {
+      if (counter.onSuccess === "clear") counter.limiter.clear(counter.key);
+      else counter.limiter.refund(counter.key);
+    }
     setApplicationSessionCookies(context, dependencies, issued);
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
     return context.body(null, 204);
+  };
+
+  app.post("/auth/api-key", boundedSignInBody, async (context) => {
+    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
+      return context.notFound();
+    }
+    requireApplicationOrigin(context, dependencies);
+    const body = apiKeySignInSchema.parse(await context.req.json());
+    return limitedSignIn(
+      context,
+      [{
+        key: signInClientAddress(context, dependencies),
+        limiter: failedSignIns,
+        onSuccess: "clear",
+      }],
+      InstallationAccessService.use((access) =>
+        access.loginWithApiKey(
+          Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
+        )
+      ),
+    );
+  });
+
+  app.post("/auth/ldap", boundedSignInBody, async (context) => {
+    const directory = directorySignIn(dependencies.browserAccess);
+    if (directory === null) return context.notFound();
+    requireApplicationOrigin(context, dependencies);
+    const body = directorySignInSchema.parse(await context.req.json());
+    const clientAddress = signInClientAddress(context, dependencies);
+    // Passwords are guessable, unlike keys, so one person's success never
+    // resets the client's count, and each username has its own count.
+    return limitedSignIn(
+      context,
+      [
+        {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
+        {
+          key: directoryUsernameKey(body.username),
+          limiter: failedDirectoryUsers,
+          onSuccess: "clear",
+        },
+      ],
+      signInWithDirectory(
+        directory,
+        body.username,
+        Redacted.make(body.password, {label: "directory-password"}),
+      ).pipe(Effect.annotateLogs({client_address: clientAddress})),
+    );
   });
 
   app.post("/auth/local", async (context) => {
@@ -2728,6 +2806,14 @@ function isForwardedFrom(
   return `${forwardedProtocol}:` === trustedUrl.protocol &&
     forwardedHost?.toLocaleLowerCase("en-US") ===
       trustedUrl.host.toLocaleLowerCase("en-US");
+}
+
+/** One failed sign-in count that an attempt is charged to. */
+interface SignInCounter {
+  readonly key: string;
+  readonly limiter: FailedSignInLimiter;
+  /** `clear` forgets earlier failures; `refund` returns only this attempt's charge. */
+  readonly onSuccess: "clear" | "refund";
 }
 
 function signInClientAddress(

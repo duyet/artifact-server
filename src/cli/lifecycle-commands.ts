@@ -23,6 +23,7 @@ import {
   summarizeRuntimeConfiguration,
   type CompactRuntimeConfiguration,
   type ExternalStorageRuntimeConfiguration,
+  type LdapSignInConfiguration,
 } from "../lifecycle/runtime-configuration.js";
 import {inspectRuntimeConfiguration} from
   "../lifecycle/runtime-inspection.js";
@@ -38,6 +39,9 @@ import {
   startLocalServer,
 } from "../local/start-local-server.js";
 import {membershipRoles, type MembershipRole} from "../core/identity.js";
+import type {DirectorySignIn} from "../core/directory-sign-in.js";
+import {createLdapDirectoryAuthenticator} from
+  "../directory/ldap-directory-authenticator.js";
 import {PostgresDatabase} from "../storage/postgres-database.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
@@ -370,7 +374,10 @@ function configureExternalStorageStart(
         applicationOrigin: parsed.applicationOrigin,
         assetQuota: parsed.assetQuota,
         bootstrapAdministratorEmail: parsed.bootstrapAdministratorEmail,
-        browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+        browserAccess: privateTeamBrowserAccess(
+          browserLoginKinds.none,
+          ldapDirectorySignIn(parsed.ldapSignIn),
+        ),
         completedRequestLogSampleRate: parsed.completedRequestLogSampleRate,
         contentDomain: parsed.contentDomain,
         databaseUrl: parsed.databaseUrl,
@@ -403,7 +410,10 @@ async function startCompactServer(
     applicationOrigin: configuration.applicationOrigin,
     assetQuota: configuration.assetQuota,
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
-    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+    browserAccess: privateTeamBrowserAccess(
+      browserLoginKinds.none,
+      ldapDirectorySignIn(configuration.ldapSignIn),
+    ),
     completedRequestLogSampleRate: configuration.completedRequestLogSampleRate,
     contentDomain: configuration.contentDomain,
     dataDirectory: configuration.dataDirectory,
@@ -416,6 +426,15 @@ async function startCompactServer(
     shutdownDeadlineMilliseconds: configuration.shutdownDeadlineMilliseconds,
     stagingCleanupPolicy: configuration.stagingCleanupPolicy,
   });
+}
+
+function ldapDirectorySignIn(
+  configuration: LdapSignInConfiguration | null,
+): DirectorySignIn | null {
+  return configuration === null ? null : {
+    authenticator: createLdapDirectoryAuthenticator(configuration.directory),
+    unknownUsers: configuration.unknownUsers,
+  };
 }
 
 async function lifecycleConfiguration(

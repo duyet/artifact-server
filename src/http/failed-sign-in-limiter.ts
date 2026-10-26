@@ -58,6 +58,13 @@ export class FailedSignInLimiter {
     });
   }
 
+  /** Return one failure charged to an attempt that refused no credential. */
+  refund(address: string): void {
+    const window = this.#windows.get(address);
+    if (window === undefined || window.resetsAt <= this.#clock.now().getTime()) return;
+    window.failures = Math.max(0, window.failures - 1);
+  }
+
   clear(address: string): void {
     this.#windows.delete(address);
   }
@@ -66,9 +73,14 @@ export class FailedSignInLimiter {
     for (const [address, window] of this.#windows) {
       if (window.resetsAt <= now) this.#windows.delete(address);
     }
-    for (const address of this.#windows.keys()) {
-      if (this.#windows.size < this.#policy.maximumAddresses) return;
-      this.#windows.delete(address);
+    // Locked-out keys go last, so a spray of new keys cannot reset a target's count.
+    for (const evictLocked of [false, true]) {
+      for (const [address, window] of this.#windows) {
+        if (this.#windows.size < this.#policy.maximumAddresses) return;
+        if ((window.failures >= this.#policy.maximumFailures) === evictLocked) {
+          this.#windows.delete(address);
+        }
+      }
     }
   }
 }

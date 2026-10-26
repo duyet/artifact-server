@@ -36,4 +36,21 @@ describe("failed sign-in limiter", () => {
       limiter.retryAfterSeconds("overflow"),
     ]).toEqual([null, 1, 1]);
   });
+
+  test("foundation: a spray of new keys past capacity cannot evict a locked-out key and reset its count", () => {
+    const clock = new SteppedClock();
+    const limiter = new FailedSignInLimiter(clock, {
+      maximumAddresses: 3,
+      maximumFailures: 5,
+      windowMilliseconds: 60_000,
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) limiter.recordFailure("alice");
+    for (let junk = 0; junk < 10; junk += 1) {
+      clock.milliseconds += 1;
+      limiter.recordFailure(`junk${junk}`);
+    }
+
+    expect(limiter.retryAfterSeconds("alice")).toBe(60);
+  });
 });

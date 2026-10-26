@@ -15,6 +15,7 @@ export const errorCodes = {
   commentResolved: "COMMENT_RESOLVED",
   dispatchNotFound: "DISPATCH_NOT_FOUND",
   dispatchStateConflict: "DISPATCH_STATE_CONFLICT",
+  directoryUnavailable: "DIRECTORY_UNAVAILABLE",
   contentBootstrapRejected: "CONTENT_BOOTSTRAP_REJECTED",
   contentNotPublic: "CONTENT_NOT_PUBLIC",
   idempotencyConflict: "IDEMPOTENCY_CONFLICT",
@@ -324,6 +325,12 @@ export class ContentNotPublic extends Schema.TaggedError<ContentNotPublic>()(
   messageField,
 ) {}
 
+/** The configured LDAP directory could not be reached or did not answer in time. */
+export class DirectoryUnavailable extends Schema.TaggedError<DirectoryUnavailable>()(
+  "DirectoryUnavailable",
+  {cause: Schema.Defect(), message: Schema.String},
+) {}
+
 /** A deployment-gated capability is not available on this installation. */
 export class CapabilityUnavailable extends Schema.TaggedError<CapabilityUnavailable>()(
   "CapabilityUnavailable",
@@ -507,6 +514,7 @@ const artifactServerFailureSchema = Schema.Union([
   VersionNotFound,
   ContentNotPublic,
   CapabilityUnavailable,
+  DirectoryUnavailable,
   ArtifactRepositoryFailure,
   IdentityRepositoryFailure,
   BlobStorageFailure,
