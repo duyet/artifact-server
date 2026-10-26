@@ -4516,6 +4516,6 @@ requirements:
       failure: {id: FRK-031-F, description: "A bearer operator key on a member's principal, the bootstrap key, and a browser session made from an administrator-issued key on a member's principal each read a null email; without a help URL /auth/context reads null; an anonymous /api/v1/session is 401, and so is the old session cookie after Sign out; an http, javascript:, credentialed, relative, or bare-host help URL stops startup with ARTIFACT_SERVER_HELP_URL and invalid_value."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved against the configuration parsers and a real local server over SQLite. The email lookup reuses the identity repository's findMember, which both SQLite and Postgres implement, but the Postgres path runs only in CI with Docker, the browser spec runs only where Chromium is installed, and no deployed run exists.
+    proof_gap: Proved against the configuration parsers and a real local server over SQLite, and in headless Chromium against a real local server with a private-team member session. Sign in's SSO route is proved only by tests/web/home-sign-in-context.test.ts against a recorded /auth/context answer, not by a browser run against an OIDC provider. The email lookup reuses the identity repository's findMember, which both SQLite and Postgres implement; the Postgres session read runs only through tests/integration/external-storage-runtime.test.ts with Docker, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
