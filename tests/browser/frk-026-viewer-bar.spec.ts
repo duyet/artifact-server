@@ -161,6 +161,7 @@ test.describe("FRK-026 viewer bar", () => {
       await page.keyboard.press("Escape");
 
       await page.emulateMedia({colorScheme: "light"});
+      await page.getByRole("button", {name: "Close inspector"}).click();
       await page.setViewportSize({height: 844, width: 390});
       await expect(header.getByRole("heading", {level: 1, name: artifactName})).toBeVisible();
       expect(await page.evaluate(() =>
@@ -173,6 +174,7 @@ test.describe("FRK-026 viewer bar", () => {
       await expect(page.getByRole("menuitem", {exact: true, name: "Full screen"})).toBeVisible();
       await expect(page.getByRole("menuitem", {exact: true, name: "Open raw"})).toBeVisible();
       await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toHaveCount(0);
       await page.screenshot({path: "test-results/browser/viewer-bar-phone.png"});
     } finally {
       await stopBrowserFixture(fixture);
