@@ -220,7 +220,9 @@ Before you turn it on:
 - **Administrators sign in this way too.** An ID token that names an administrator's email gets an administrator session, which can admit members and issue keys. Protect those accounts at the provider.
 - **Watch the logs.** Each attempt logs `auth.oidc_sign_in.succeeded`, `.rejected` with a reason (`no_member`, `missing_email`, `email_unverified`), or `.failed` with a reason and a detail. Failure reasons are `rate_limited`, `provider_error`, `invalid_callback`, `invalid_state`, `expired_state`, `token_rejected`, `invalid_id_token`, `nonce_mismatch`, and `provider_unavailable`. No line holds a code, a token, or the client secret.
 
-A refused sign-in returns the person to the Review gate with a generic message. When the provider cannot be reached, answers with an error status, or serves a broken discovery document, the gate says single sign-on is unavailable, and the log line has the detail. A person must come back from the provider within 10 minutes of pressing the button, and after sign-in lands on the Review page they started from. One client address may fail 20 callbacks a minute; past that, sign-ins from it are refused for the rest of the minute without asking the provider. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+A refused sign-in returns the person to the Review gate with a generic message. When the provider cannot be reached, answers with an error status, or serves a broken discovery document, the gate says single sign-on is unavailable, and the log line has the detail. A person must come back from the provider within 10 minutes of pressing the button. After sign-in they land where they started: the Review page, the home page, or the artifact page whose bar they signed in from. An artifact page travels as its ID only. The server looks the artifact up again for the new session and sends the browser to that artifact's own address; an unknown, deleted, or unreadable artifact lands on `/review` instead. One client address may fail 20 callbacks a minute; past that, sign-ins from it are refused for the rest of the minute without asking the provider. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+
+**Sign out ends only this server's session.** It revokes the session on the server and clears its cookies, but it does not sign the person out of the provider. A later **Sign in** can therefore come straight back without asking for a password while the provider's own session lasts. On a shared computer, sign out of the provider too.
 
 ## Publishing
 
@@ -307,13 +309,13 @@ kubectl --namespace artifact-server exec statefulset/artifact-server -- \
 
 ### Help link in the account menu
 
-The home page header shows **Sign in** to a signed-out reader and an account menu to a signed-in one. To add a **Help** item to that menu, set one variable and restart the server:
+The home page header and the bar above a page at its readable URL show **Sign in** to a signed-out reader and an account menu to a signed-in one. The menu's **Help** item opens this runbook unless you point it somewhere else. Set one variable and restart the server:
 
-| Variable | Required | Meaning |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `ARTIFACT_SERVER_HELP_URL` | no | An `https://` URL without credentials, such as your team's runbook. Unset or empty shows no Help item. |
+| `ARTIFACT_SERVER_HELP_URL` | this runbook on GitHub | An `https://` URL without credentials, such as your team's own guide, or a path on this server that starts with one `/`, such as `/team/help/`. Unset or empty keeps the default. |
 
-Any other value, such as an `http://` URL or a relative path, stops startup with the variable's name, and `config check` refuses it the same way. The value is public: `/auth/context` reports it as `helpUrl` to every browser.
+Any other value, such as an `http://` URL, `//host`, or a relative path, stops startup with the variable's name, and `config check` refuses it the same way. `config check` reports the value in use as `helpUrl`. The value is public: `/auth/context` reports it as `helpUrl` to every browser.
 
 ## Viewer logo
 
