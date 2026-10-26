@@ -671,6 +671,16 @@ export interface CommitAsset {
   readonly idempotencyKey: string;
   readonly inputDigest: string;
   readonly quota: AssetQuota;
+  /** The open staged upload the bytes came from, or null for a copy. */
+  readonly upload: StagedUploadClaim | null;
+}
+
+/** An open staged upload as the committer read it, ended by the commit. */
+export interface StagedUploadClaim {
+  /** The deadline the committer read; the commit fails if it changed. */
+  readonly expiresAt: string;
+  readonly id: string;
+  readonly principalId: string;
 }
 
 /** One asset row together with whether an idempotent retry returned it. */
@@ -690,9 +700,11 @@ export interface ArtifactAssetRepository {
   /**
    * Insert the asset unless the key already committed one. The quota is
    * checked again under the same lock as the insert, so two concurrent
-   * commits cannot both pass it. Throws AssetLimitExceeded, ArtifactNotFound,
-   * IdempotencyConflict, or AssetNotFound for a replayed key whose asset was
-   * deleted.
+   * commits cannot both pass it. A named upload's deadline moves to the
+   * commit time in the same transaction, so it commits at most once and
+   * expiry cleanup reclaims its staging bytes. Throws AssetLimitExceeded,
+   * ArtifactNotFound, IdempotencyConflict, UploadClosed when the upload is no
+   * longer open, or AssetNotFound for a replayed key whose asset was deleted.
    */
   commitAsset(command: CommitAsset): Promise<CommittedAsset>;
   /** Tombstone one live asset and return it. Throws AssetNotFound. */
@@ -715,6 +727,8 @@ export interface ArtifactAssetRepository {
     projectId: string,
     artifactId: string,
   ): Promise<{readonly assets: readonly AssetRecord[]; readonly usage: AssetUsage}>;
+  /** What the live assets of one artifact use of its quota. */
+  readAssetUsage(artifactId: string): Promise<AssetUsage>;
 }
 
 /** One coalesced group of view counts for one artifact on one UTC day. */

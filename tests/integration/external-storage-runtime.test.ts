@@ -32,6 +32,15 @@ import type {Clock} from "../../src/core/ports.js";
 import {createS3ObjectStorageProviderFactory} from
   "../../src/storage/s3-object-storage.js";
 import {PostgresDatabase} from "../../src/storage/postgres-database.js";
+import {
+  assetPlanSchema,
+  commitAsset,
+  committedAssetSchema,
+  deleteAsset,
+  listAssets,
+  planAsset,
+  putAssetBytes,
+} from "../support/assets.js";
 import {requiredPostgresSchemaVersion} from
   "../../src/storage/postgres-migrations.js";
 import {PostgresArtifactRepository} from "../../src/storage/postgres-artifact-repository.js";
@@ -747,6 +756,68 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     );
     expect(folder.status).toBe(200);
     expect(await folder.text()).toBe(content);
+  });
+
+  test("external-storage foundation: Postgres commits a staged asset once across two processes, serves it from either, and stops serving it after delete", async () => {
+    const assetToken = managedTestKey("asset-store-installation");
+    const assetInstallationId = "asset-store-external-storage-installation";
+    const options = {
+      apiToken: assetToken,
+      installationId: assetInstallationId,
+      sameHost: true,
+    };
+    const [first, second] = await Promise.all([
+      startExternalStorageProcess(environment, options),
+      startExternalStorageProcess(environment, options),
+    ]);
+    const published = await publishNew(first.baseUrl, assetToken, {
+      content: "<h1>asset page</h1>",
+      idempotencyKey: `asset-page-${randomUUID()}`,
+      name: "Asset page",
+    });
+    expect(published.response.status).toBe(201);
+    const artifactId = published.body.artifact.id;
+    const chart = {
+      bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 8, 7, 6]),
+      mediaType: "image/png",
+      name: "chart.png",
+    };
+
+    const planned = await planAsset(first, assetToken, artifactId, chart);
+    expect(planned.status).toBe(201);
+    const plan = assetPlanSchema.parse(await planned.json());
+    expect((await putAssetBytes(plan.file.uploadUrl, assetToken, chart.bytes)).status).toBe(200);
+    const keys = [`asset-commit-a-${randomUUID()}`, `asset-commit-b-${randomUUID()}`];
+    const raced = await Promise.all([
+      commitAsset(plan, assetToken, keys[0] ?? ""),
+      commitAsset({...plan, commitUrl: plan.commitUrl.replace(first.baseUrl, second.baseUrl)},
+        assetToken, keys[1] ?? ""),
+    ]);
+    const winner = raced.findIndex((response) => response.status === 201);
+    expect(winner).not.toBe(-1);
+    // The losing commit either read the upload before the winner ended it
+    // and was refused inside the transaction, or read it already ended.
+    const loser = raced[1 - winner];
+    expect([409, 410]).toContain(loser?.status);
+    expect(["UPLOAD_CLOSED", "UPLOAD_EXPIRED"]).toContain(
+      z.object({error: z.object({code: z.string()})}).parse(await loser?.json()).error.code,
+    );
+    const committed = committedAssetSchema.parse(await raced[winner]?.json());
+    const replay = await commitAsset(plan, assetToken, keys[winner] ?? "");
+    expect(replay.status).toBe(200);
+    expect(committedAssetSchema.parse(await replay.json()).asset.id).toBe(committed.asset.id);
+
+    const listing = await listAssets(second, assetToken, artifactId);
+    expect(listing.assets.map((asset) => asset.id)).toEqual([committed.asset.id]);
+    expect(listing.usage).toEqual({assetCount: 1, byteCount: chart.bytes.byteLength});
+    const blobPath = new URL(committed.asset.url).pathname;
+    const served = await fetch(`${second.baseUrl}${blobPath}`);
+    expect(served.status).toBe(200);
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(chart.bytes);
+
+    expect((await deleteAsset(first, assetToken, artifactId, committed.asset.id)).status).toBe(200);
+    expect((await fetch(`${second.baseUrl}${blobPath}`)).status).toBe(404);
+    expect((await listAssets(second, assetToken, artifactId)).assets).toEqual([]);
   });
 
   test("external-storage foundation: two processes racing for one artifact path admit exactly one create and both serve it", async () => {

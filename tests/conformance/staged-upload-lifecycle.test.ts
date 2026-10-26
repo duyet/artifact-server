@@ -8,6 +8,7 @@ import {afterEach, beforeEach, describe, expect, test} from "vitest";
 
 import {defaultAssetQuota} from "../../src/core/asset-policy.js";
 import type {ApplicationRuntime} from "../../src/application/application-runtime.js";
+import {ArtifactAssetService} from "../../src/application/artifact-assets.js";
 import {StagedUploadService} from "../../src/application/staged-upload.js";
 import {ExpiredStagingCleanupService} from
   "../../src/application/expired-staging-cleanup.js";
@@ -39,7 +40,7 @@ describe("staged upload lifecycle", () => {
     clock = new ControlledClock(new Date("2026-08-13T00:00:00.000Z"));
     const databasePath = path.join(dataDirectory, "artifact-server.db");
     blobs = new LocalBlobStore(path.join(dataDirectory, "blobs"));
-    repository = new SqliteArtifactRepository(databasePath);
+    repository = new SqliteArtifactRepository(databasePath, "test-installation");
     identityRepository = new SqliteIdentityRepository(databasePath);
     staging = new LocalStagingStore(path.join(dataDirectory, "staging"));
     runtime = ManagedRuntime.make(createLocalApplicationLayer({
@@ -275,6 +276,92 @@ describe("staged upload lifecycle", () => {
         uploadId: live.id,
       })
     );
+  });
+
+  test("foundation: an asset commit ends its staged upload once, a stale claim is refused in the transaction, and expiry cleanup reclaims the bytes", async () => {
+    const principal = testPrincipal("asset-principal");
+    const page = new TextEncoder().encode("<h1>asset host</h1>");
+    const pageUpload = await runStaged(runtime, (service) => service.createUpload({
+      entryPath: "index.html",
+      files: [{
+        mediaType: "text/html",
+        path: "index.html",
+        sha256: createHash("sha256").update(page).digest("hex"),
+        size: page.byteLength,
+      }],
+      principal,
+    }));
+    await runStaged(runtime, (service) => service.uploadFile({
+      body: byteStream(page),
+      declaredLength: null,
+      principal,
+      storageToken: pageUpload.files[0]?.storageToken ?? "",
+      uploadId: pageUpload.id,
+    }));
+    const host = await runStaged(runtime, (service) => service.commitUpload({
+      idempotencyKey: "asset-host-page-publish",
+      principal,
+      target: {accessSetting: "public_link", kind: "new_artifact", name: "Asset host", path: null},
+      uploadId: pageUpload.id,
+    }));
+
+    const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const planned = await runtime.runPromise(ArtifactAssetService.use((assets) =>
+      assets.createUpload({
+        artifactId: host.artifact.id,
+        mediaType: "image/png",
+        name: "chart.png",
+        principal,
+        projectId: host.artifact.projectId,
+        sha256,
+        size: bytes.byteLength,
+      })));
+    const slot = planned.files[0];
+    if (slot === undefined) throw new Error("The asset plan has no file slot.");
+    await runStaged(runtime, (service) => service.uploadFile({
+      body: byteStream(bytes),
+      declaredLength: null,
+      principal,
+      storageToken: slot.storageToken,
+      uploadId: planned.id,
+    }));
+    const committed = await runtime.runPromise(ArtifactAssetService.use((assets) =>
+      assets.commitUpload({
+        artifactId: host.artifact.id,
+        idempotencyKey: "asset-ends-upload-once-first",
+        principal,
+        projectId: host.artifact.projectId,
+        uploadId: planned.id,
+      })));
+    expect(committed.replayed).toBe(false);
+
+    // A second committer that read the upload before the first one ended it
+    // still holds the old deadline, and its clock may run behind; the
+    // transaction must refuse it even though its time is before the end.
+    await expect(repository.commitAsset({
+      asset: {
+        ...committed.asset,
+        createdAt: new Date(Date.parse(committed.asset.createdAt) - 1).toISOString(),
+        id: new SystemIdGenerator().assetId(),
+      },
+      idempotencyKey: "asset-ends-upload-once-stale",
+      inputDigest: "stale-claim",
+      quota: defaultAssetQuota,
+      upload: {expiresAt: planned.expiresAt, id: planned.id, principalId: principal.id},
+    })).rejects.toMatchObject({_tag: "UploadClosed"});
+    const listed = await repository.listAssets(host.artifact.projectId, host.artifact.id);
+    expect(listed.assets.map((asset) => asset.id)).toEqual([committed.asset.id]);
+
+    clock.set(new Date(clock.now().getTime() + 10 * 60 * 1_000));
+    const report = await runCleanup(runtime, 100);
+    expect(report.deleted).toBeGreaterThanOrEqual(1);
+    await expect(repository.findStagedUpload(planned.projectId, planned.id, principal.id))
+      .resolves.toBeNull();
+    await expect(staging.open(planned.id, slot.storageToken)).rejects
+      .toThrow(/ENOENT|no such file/u);
+    const served = await blobs.open(sha256);
+    expect(new Uint8Array(await new Response(served.body).arrayBuffer())).toEqual(bytes);
   });
 
   test("PUB-009-B OPS-006-F: cleanup is bounded, waits for settle, tolerates concurrent passes, and preserves committed work", async () => {

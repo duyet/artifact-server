@@ -94,6 +94,7 @@ import type {
   CommitArtifactVersion,
   ArtifactAssetRepository,
   CommitAsset,
+  StagedUploadClaim,
   CommitNewArtifact,
   CommittedAsset,
   ContentSessionRepository,
@@ -1040,6 +1041,9 @@ export class PostgresArtifactRepository implements
         if (artifact === null) {
           return yield* new ArtifactNotFound({message: "The artifact does not exist."});
         }
+        if (command.upload !== null) {
+          yield* this.#endStagedUpload(asset.projectId, command.upload, asset.createdAt);
+        }
         // Two replicas may commit to one artifact at once; one lock per
         // artifact makes the quota check and the insert one step.
         yield* sql`SELECT pg_advisory_xact_lock(
@@ -1154,6 +1158,36 @@ export class PostgresArtifactRepository implements
         usage: yield* this.#assetUsage(artifactId),
       };
     }));
+  }
+
+  async readAssetUsage(artifactId: string): Promise<AssetUsage> {
+    return this.#database.run(this.#assetUsage(artifactId));
+  }
+
+  #endStagedUpload(
+    projectId: string,
+    upload: StagedUploadClaim,
+    endedAt: string,
+  ): Effect.Effect<void, unknown, SqlClient> {
+    const installationId = this.#installationId;
+    return Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const ended = yield* sql`UPDATE staged_uploads SET expires_at = ${endedAt}
+        WHERE installation_id = ${installationId}
+          AND project_id = ${projectId}
+          AND id = ${upload.id}
+          AND principal_id = ${upload.principalId}
+          AND status = 'open'
+          AND expires_at = ${upload.expiresAt}
+          AND expires_at > ${endedAt}
+        RETURNING id`;
+      if (ended.length !== 1) {
+        return yield* new UploadClosed({
+          message: "The staged upload is already committed.",
+        });
+      }
+      return undefined;
+    });
   }
 
   #assetUsage(artifactId: string) {

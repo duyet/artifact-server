@@ -101,6 +101,7 @@ import type {
   ArtifactAssetRepository,
   CommitArtifactVersion,
   CommitAsset,
+  StagedUploadClaim,
   CommitNewArtifact,
   CommittedAsset,
   ContentSessionRepository,
@@ -1063,6 +1064,9 @@ export class SqliteArtifactRepository implements
         if (this.#readArtifactOrNull(asset.projectId, asset.artifactId) === null) {
           throw new ArtifactNotFound({message: "The artifact does not exist."});
         }
+        if (command.upload !== null) {
+          this.#endStagedUpload(asset.projectId, command.upload, asset.createdAt);
+        }
         const refused = assetQuotaFailure(
           asset.size,
           this.#assetUsage(asset.artifactId),
@@ -1168,6 +1172,27 @@ export class SqliteArtifactRepository implements
         usage: this.#assetUsage(artifactId),
       };
     });
+  }
+
+  readAssetUsage(artifactId: string): Promise<AssetUsage> {
+    return Promise.resolve().then(() => this.#assetUsage(artifactId));
+  }
+
+  #endStagedUpload(
+    projectId: string,
+    upload: StagedUploadClaim,
+    endedAt: string,
+  ): void {
+    const ended = this.#database
+      .prepare(
+        `UPDATE staged_uploads SET expires_at = ?
+         WHERE project_id = ? AND id = ? AND principal_id = ? AND status = 'open'
+           AND expires_at = ? AND expires_at > ?`,
+      )
+      .run(endedAt, projectId, upload.id, upload.principalId, upload.expiresAt, endedAt);
+    if (ended.changes !== 1) {
+      throw new UploadClosed({message: "The staged upload is already committed."});
+    }
   }
 
   #assetUsage(artifactId: string): AssetUsage {
