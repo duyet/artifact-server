@@ -173,7 +173,7 @@ describe("artifact tree owners and manage handles", () => {
     readonly administrator: string;
     readonly carol: string;
   }> {
-    const alice = await issueMemberKey("Alice Example", "alice@example.com", "Alice Example");
+    const alice = await issueMemberKey("Alice Example", "alice@example.com", "Alice Example @ laptop");
     const carol = await issueMemberKey("carol@example.com", "carol@example.com", "carol@example.com");
     const administrator = await issueMemberKey(
       "Admin Example",
@@ -257,7 +257,7 @@ describe("artifact tree owners and manage handles", () => {
     }))).toEqual([
       // Carol's stored name is her email, so the tree names no owner.
       {manage: null, mine: false, name: "Carol report", owner: null, visibility: "public"},
-      {manage: null, mine: false, name: "Alice public", owner: "Alice Example", visibility: "public"},
+      {manage: null, mine: false, name: "Alice public", owner: "Alice Example @ laptop", visibility: "public"},
     ]);
 
     const cookies = await signIn(running(), alice);
@@ -274,8 +274,8 @@ describe("artifact tree owners and manage handles", () => {
     }))).toEqual([
       {access: "public_link", mine: false, name: "Carol unlisted", owner: null, visibility: "unlisted"},
       {access: "public_link", mine: false, name: "Carol report", owner: null, visibility: "public"},
-      {access: "account_required", mine: true, name: "Alice private", owner: "Alice Example", visibility: "private"},
-      {access: "public_link", mine: true, name: "Alice public", owner: "Alice Example", visibility: "public"},
+      {access: "account_required", mine: true, name: "Alice private", owner: "Alice Example @ laptop", visibility: "private"},
+      {access: "public_link", mine: true, name: "Alice public", owner: "Alice Example @ laptop", visibility: "public"},
     ]);
     // A member may change any artifact's visibility, as the access and tags
     // APIs allow, so every row carries a handle, with its tags sorted.

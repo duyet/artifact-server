@@ -279,8 +279,8 @@ export interface PublicArtifactCatalogItem {
   /** True when the viewer is the artifact's owner. */
   readonly mine: boolean;
   /**
-   * The owner's display name, or null when none was recorded or it contains
-   * an `@`, so an email address is never shown.
+   * The owner's display name, or null when none was recorded or it holds an
+   * email address, so an address is never shown.
    */
   readonly ownerName: string | null;
   /** Only the days inside the window that have views, ascending. */

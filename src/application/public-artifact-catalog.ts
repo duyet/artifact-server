@@ -239,12 +239,18 @@ function catalogScopeFor(
   );
 }
 
+/** Text joined to text by an `@` with no space on either side. */
+const emailAddressPattern = /[^\s@]+@[^\s@]+/u;
+
 /**
- * The owner's display name as the tree may show it. A name with an `@` may
- * be an email address, so it is withheld rather than shown to anyone.
+ * The owner's display name as the tree may show it. A name holding an email
+ * address is withheld rather than shown to anyone. A key name such as
+ * `Ada Lovelace @ laptop` holds no address and is shown.
  */
 function ownerName(displayName: string | null): string | null {
-  return displayName === null || displayName.includes("@") ? null : displayName;
+  return displayName === null || emailAddressPattern.test(displayName)
+    ? null
+    : displayName;
 }
 
 function visibilityOf(artifact: PublicArtifactSummary): ArtifactVisibility {
