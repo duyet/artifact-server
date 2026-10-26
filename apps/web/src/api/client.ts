@@ -31,6 +31,8 @@ const deploymentCapabilitiesSchema = z.object({
 });
 
 const sessionSchema = z.object({
+  /** The caller's own name; the email is null for a key or service principal. */
+  account: z.object({displayName: z.string(), email: z.string().nullable()}),
   authenticationMethod: z.enum(["bearer", "session"]),
   capabilities: deploymentCapabilitiesSchema,
   principal: principalSchema,

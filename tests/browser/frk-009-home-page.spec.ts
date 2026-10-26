@@ -325,7 +325,7 @@ function dayLabel(instant: Date): string {
 
 /** The artifact links the tree currently shows, in page order. */
 function visibleArtifacts(page: Page) {
-  return page.getByRole("main").getByRole("link").filter({hasNotText: "Workbench"});
+  return page.getByRole("main").getByRole("link").filter({hasNotText: "Sign in"});
 }
 
 /** A day's keyboard target must sit over the bar it names. */
