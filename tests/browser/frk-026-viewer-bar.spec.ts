@@ -162,11 +162,17 @@ test.describe("FRK-026 viewer bar", () => {
 
       await page.emulateMedia({colorScheme: "light"});
       await page.getByRole("button", {name: "Close inspector"}).click();
+      await expect(page.getByRole("complementary", {name: "Artifact inspector"})).toHaveCount(0);
       await page.setViewportSize({height: 844, width: 390});
       await expect(header.getByRole("heading", {level: 1, name: artifactName})).toBeVisible();
-      expect(await page.evaluate(() =>
-        document.documentElement.scrollWidth <= window.innerWidth
-      )).toBe(true);
+      // The elements past the right edge ride along so a failure names them.
+      await expect.poll(() => page.evaluate(() => ({
+        fits: document.documentElement.scrollWidth <= window.innerWidth,
+        pastRightEdge: [...document.querySelectorAll("body *")]
+          .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+          .map((element) => `${element.tagName.toLowerCase()}.${element.className}`.slice(0, 120))
+          .slice(0, 8),
+      }))).toMatchObject({fits: true});
       const phoneBar = await header.boundingBox();
       expect(phoneBar?.height).toBeLessThanOrEqual(44);
       await expect(header.getByRole("button", {name: "Full screen"})).toBeHidden();
