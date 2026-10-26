@@ -34,7 +34,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
+import {Toggle} from "@/components/ui/toggle";
 import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
+import {Tooltip, TooltipContent, TooltipTrigger} from "@/components/ui/tooltip";
 
 import {
   buildPublicArtifactTree,
@@ -45,19 +48,22 @@ import {
   sparklineBars,
   sparklineBox,
   sumDailySeries,
+  treeSorts,
   windowDays,
   type DailyMetric,
   type DayTone,
   type PublicArtifactTreeEntry,
   type PublicArtifactTreeFolder,
+  type TreeSort,
 } from "./home-tree.js";
 import type {PublicCatalog} from "./home-client.js";
+import {ArtifactRowMenu, visibilityLabels} from "./home-row-menu.js";
 
 /** The copy each chart measure brings to the card and the tree filter. */
 const dailyCharts = {
   updates: {
     color: "var(--chart-updates)",
-    description: "Versions published across every public artifact.",
+    description: "Versions published across every artifact listed below.",
     filter: "Updated on",
     title: "Updated per day",
     toggle: "Updated",
@@ -65,7 +71,7 @@ const dailyCharts = {
   },
   views: {
     color: "var(--chart-views)",
-    description: "Across every public artifact.",
+    description: "Across every artifact listed below.",
     filter: "Viewed on",
     title: "Views per day",
     toggle: "Views",
@@ -87,19 +93,74 @@ interface DayFilter {
   readonly metric: DailyMetric;
 }
 
+/** The words each tree order shows in the sort control and the description. */
+const treeSortLabels = {
+  name: {description: "by name", option: "Name"},
+  updated: {description: "newest first", option: "Last updated"},
+  views: {description: "most viewed first", option: "Most viewed"},
+} as const satisfies Record<TreeSort, {readonly description: string; readonly option: string}>;
+
+/** Where this browser remembers the reader's tree order. */
+const treeSortStorageKey = "artifact-server-home-sort";
+
+/**
+ * The order this browser last chose. Storage can be missing or refuse access
+ * in a private window, and the page then starts newest first.
+ */
+function storedTreeSort(): TreeSort {
+  try {
+    const stored = window.localStorage.getItem(treeSortStorageKey);
+    return treeSorts.find((sort) => sort === stored) ?? "updated";
+  } catch {
+    return "updated";
+  }
+}
+
+function storeTreeSort(sort: TreeSort): void {
+  try {
+    window.localStorage.setItem(treeSortStorageKey, sort);
+  } catch {
+    // The choice still applies to this page; it is only not remembered.
+  }
+}
+
+/** What every artifact row needs besides its own artifact. */
+interface RowContext {
+  readonly days: readonly string[];
+  readonly now: number;
+  readonly onChanged: () => void;
+  /** True when the viewer is signed in, so rows keep a column for the menu. */
+  readonly signedIn: boolean;
+}
+
 /**
  * The home page. Every colour is a semantic token, so the application's theme
  * reaches this page without an edit here.
  */
-export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
+export function HomePage({
+  catalog,
+  onChanged,
+}: {
+  readonly catalog: PublicCatalog;
+  /** Read the catalog again after this page changed an artifact. */
+  readonly onChanged: () => void;
+}) {
   const now = Date.now();
   const days = windowDays(todayUtc(), catalog.windowDays);
   const [filter, setFilter] = useState<DayFilter>({day: null, metric: "views"});
+  const [sort, setSort] = useState<TreeSort>(storedTreeSort);
+  // The account menu's "My artifacts" opens the page with `?mine=1`.
+  const [mineOnly, setMineOnly] = useState(
+    () => new URLSearchParams(window.location.search).get("mine") === "1",
+  );
+  const signedIn = catalog.viewer !== null;
   const chartRef = useRef<HTMLDivElement>(null);
-  const shown = filter.day === null
+  const onDay = filter.day === null
     ? catalog.artifacts
     : entriesOnDay(catalog.artifacts, filter.metric, filter.day);
-  const tree = buildPublicArtifactTree(shown);
+  const shown = signedIn && mineOnly ? onDay.filter((artifact) => artifact.mine) : onDay;
+  const tree = buildPublicArtifactTree(shown, sort);
+  const row: RowContext = {days, now, onChanged, signedIn};
   // A filtered tree opens every folder, so a match never hides in a
   // collapsed one.
   const collapsed = new Set(filter.day === null ? catalog.collapsedFolders : []);
@@ -130,7 +191,7 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
             Artifact Server
           </h1>
           <p className="text-sm text-muted-foreground">
-            {artifactCount(catalog.artifacts.length)}
+            {artifactCount(catalog.artifacts.length, signedIn)}
           </p>
         </div>
         <nav aria-label="Primary" className="flex items-center gap-2">
@@ -162,7 +223,7 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
           <Alert>
             <IconInfoCircle />
             <AlertDescription>
-              This installation holds more public artifacts than this page shows.
+              This installation holds more artifacts than this page shows.
             </AlertDescription>
           </Alert>
         )
@@ -176,11 +237,11 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
               <CardTitle>Artifacts</CardTitle>
               <CardDescription aria-live="polite">
                 {filterDay === null
-                  ? "Shared by link, newest first."
-                  : `${artifactCount(shown.length)} ${filterVerb.toLowerCase()} ${filterDay}.`}
+                  ? `${treeScope(signedIn, mineOnly)}, ${treeSortLabels[sort].description}.`
+                  : `${artifactCount(shown.length, signedIn)} ${filterVerb.toLowerCase()} ${filterDay}.`}
               </CardDescription>
-              {filterDay === null ? null : (
-                <CardAction>
+              <CardAction className="flex flex-wrap items-center justify-end gap-2">
+                {filterDay === null ? null : (
                   <Button
                     aria-label={`${filterVerb} ${filterDay}, clear`}
                     onClick={clearFilter}
@@ -190,8 +251,37 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
                     {filterVerb} {filterDay}
                     <IconX data-icon="inline-end" />
                   </Button>
-                </CardAction>
-              )}
+                )}
+                {signedIn
+                  ? (
+                    <Toggle
+                      onPressedChange={setMineOnly}
+                      pressed={mineOnly}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Mine
+                    </Toggle>
+                  )
+                  : null}
+                <NativeSelect
+                  aria-label="Sort artifacts"
+                  onChange={(event) => {
+                    const next = treeSorts.find((value) => value === event.target.value);
+                    if (next === undefined) return;
+                    setSort(next);
+                    storeTreeSort(next);
+                  }}
+                  size="sm"
+                  value={sort}
+                >
+                  {treeSorts.map((value) => (
+                    <NativeSelectOption key={value} value={value}>
+                      {treeSortLabels[value].option}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </CardAction>
             </CardHeader>
             <CardContent
               className="flex flex-col gap-1"
@@ -199,24 +289,21 @@ export function HomePage({catalog}: {readonly catalog: PublicCatalog}) {
               // state again rather than where the last filter left it.
               key={filter.day ?? ""}
             >
+              {mineOnly && shown.length === 0
+                ? <p className="px-2 py-4 text-sm text-muted-foreground">You own no artifact here yet.</p>
+                : null}
               {tree.folders.map((folder) => (
                 <FolderNode
                   key={folder.path}
                   collapsed={collapsed}
-                  days={days}
                   folder={folder}
-                  now={now}
+                  row={row}
                 />
               ))}
               {tree.ungrouped.length === 0 ? null : (
                 <TreeFolder id="home-ungrouped" name="Without a path">
                   {tree.ungrouped.map((artifact) => (
-                    <ArtifactNode
-                      key={artifact.url}
-                      artifact={artifact}
-                      days={days}
-                      now={now}
-                    />
+                    <ArtifactNode key={artifact.url} artifact={artifact} row={row} />
                   ))}
                 </TreeFolder>
               )}
@@ -585,14 +672,12 @@ function TreeFolder({
 
 function FolderNode({
   collapsed,
-  days,
   folder,
-  now,
+  row,
 }: {
   readonly collapsed: ReadonlySet<string>;
-  readonly days: readonly string[];
   readonly folder: PublicArtifactTreeFolder;
-  readonly now: number;
+  readonly row: RowContext;
 }) {
   return (
     <TreeFolder
@@ -602,34 +687,35 @@ function FolderNode({
       prefix={folder.path.slice(0, folder.path.length - folder.label.length)}
     >
       {folder.artifacts.map((artifact) => (
-        <ArtifactNode key={artifact.url} artifact={artifact} days={days} now={now} />
+        <ArtifactNode key={artifact.url} artifact={artifact} row={row} />
       ))}
       {folder.folders.map((child) => (
-        <FolderNode
-          key={child.path}
-          collapsed={collapsed}
-          days={days}
-          folder={child}
-          now={now}
-        />
+        <FolderNode key={child.path} collapsed={collapsed} folder={child} row={row} />
       ))}
     </TreeFolder>
   );
 }
 
+/**
+ * One artifact row: its name, owner, a 30-day sparkline whose tooltip and
+ * accessible name carry the exact counts, when it last changed, and, when the
+ * viewer may change it, the row menu.
+ */
 function ArtifactNode({
   artifact,
-  days,
-  now,
+  row,
 }: {
   readonly artifact: PublicArtifactTreeEntry;
-  readonly days: readonly string[];
-  readonly now: number;
+  readonly row: RowContext;
 }) {
-  const counts = densifyDailySeries(artifact.series, days);
+  const counts = densifyDailySeries(artifact.series, row.days);
   const bars = sparklineBars(counts, sparklineBox);
+  const views = artifact.views;
+  const summary = `${viewCount(views.last7Days)} in 7 days, ` +
+    `${formatCount(views.last30Days)} in ${counts.length} days, ` +
+    `${formatCount(views.total)} in all`;
   return (
-    <div className="flex items-center gap-3 rounded-lg pr-2 hover:bg-muted/50">
+    <div className="flex items-center gap-3 rounded-lg pr-2 hover:bg-muted/50" data-slot="tree-row">
       <ButtonLink
         className="min-w-0 flex-1 justify-start font-normal"
         href={artifact.url}
@@ -639,43 +725,56 @@ function ArtifactNode({
         <IconFileText />
         <span className="truncate">{artifact.name}</span>
       </ButtonLink>
-      <span className="hidden w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
-        {artifact.views.last7Days} / 7d
+      {artifact.visibility === "public" ? null : (
+        <Badge variant="outline">{visibilityLabels[artifact.visibility]}</Badge>
+      )}
+      <span className="hidden w-36 shrink-0 truncate text-xs text-muted-foreground md:block">
+        {artifact.owner ?? ""}
       </span>
-      <span className="sr-only">
-        {`${artifact.views.last30Days} views over ${counts.length} days, ` +
-          `${artifact.views.total} in all`}
-      </span>
-      <span className="hidden shrink-0 sm:block">
-        <svg
-          aria-hidden="true"
-          className="block text-muted-foreground"
-          height={sparklineBox.height}
-          role="presentation"
-          viewBox={`0 0 ${sparklineBox.width} ${sparklineBox.height}`}
-          width={sparklineBox.width}
-        >
-          {bars.map((bar, index) => (
-            <rect
-              className="fill-current"
-              height={bar.height}
-              key={days[index]}
-              width={bar.width}
-              x={bar.x}
-              y={sparklineBox.height - bar.height}
+      <Tooltip>
+        <TooltipTrigger
+          render={(
+            <span
+              aria-label={`${artifact.name}: ${summary}`}
+              className="hidden shrink-0 rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:block"
+              data-slot="tree-sparkline"
+              role="img"
+              tabIndex={0}
             />
-          ))}
-        </svg>
-      </span>
-      <Badge className="tabular-nums" variant="secondary">
-        {formatCount(artifact.views.total)}
-      </Badge>
+          )}
+        >
+          <svg
+            aria-hidden="true"
+            className="block text-(--chart-views)"
+            height={sparklineBox.height}
+            viewBox={`0 0 ${sparklineBox.width} ${sparklineBox.height}`}
+            width={sparklineBox.width}
+          >
+            {bars.map((bar, index) => (
+              <rect
+                className="fill-current"
+                height={bar.height}
+                key={row.days[index]}
+                width={bar.width}
+                x={bar.x}
+                y={sparklineBox.height - bar.height}
+              />
+            ))}
+          </svg>
+        </TooltipTrigger>
+        <TooltipContent>{summary}</TooltipContent>
+      </Tooltip>
       <time
         className="hidden w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums md:block"
         dateTime={artifact.updatedAt}
       >
-        {formatUpdated(artifact.updatedAt, now)}
+        {formatUpdated(artifact.updatedAt, row.now)}
       </time>
+      {artifact.manage === null
+        // A signed-in reader keeps the column, so rows they cannot change
+        // stay aligned with the ones they can.
+        ? (row.signedIn ? <span aria-hidden="true" className="size-7 shrink-0" /> : null)
+        : <ArtifactRowMenu artifact={artifact} handle={artifact.manage} onChanged={row.onChanged} />}
     </div>
   );
 }
@@ -698,8 +797,20 @@ function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function artifactCount(count: number): string {
-  return count === 1 ? "1 public artifact" : `${formatCount(count)} public artifacts`;
+/** "3 public artifacts" for an anonymous reader, "3 artifacts" for a member. */
+function artifactCount(count: number, signedIn: boolean): string {
+  const noun = signedIn ? "artifact" : "public artifact";
+  return count === 1 ? `1 ${noun}` : `${formatCount(count)} ${noun}s`;
+}
+
+function viewCount(count: number): string {
+  return count === 1 ? "1 view" : `${formatCount(count)} views`;
+}
+
+/** Which artifacts the tree lists, as its description opens. */
+function treeScope(signedIn: boolean, mineOnly: boolean): string {
+  if (!signedIn) return "Shared by link";
+  return mineOnly ? "Yours" : "Every artifact you can open";
 }
 
 function formatCount(value: number): string {

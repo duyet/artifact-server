@@ -9,6 +9,7 @@ import {
   sparklineBars,
   sparklineBox,
   sumDailySeries,
+  visibilityWrites,
   windowDays,
   type PublicArtifactTreeEntry,
 } from "../../apps/web/src/home/home-tree.js";
@@ -20,13 +21,17 @@ function entry(
   overrides: Partial<PublicArtifactTreeEntry> = {},
 ): PublicArtifactTreeEntry {
   return {
+    manage: null,
+    mine: false,
     name,
+    owner: null,
     path,
     series: [],
     updatedAt,
     updates: [],
     url: `https://artifacts.example.internal/${path ?? `loose-${name}`}/`,
     views: {last7Days: 0, last30Days: 0, total: 0},
+    visibility: "public",
     ...overrides,
   };
 }
@@ -230,6 +235,69 @@ describe("daily chart tones and summary", () => {
     // A tie goes to the latest day.
     expect(busiestDay([3, 1, 3], days)).toEqual({count: 3, day: "2026-10-17"});
     expect(busiestDay([5, 1, 3], days)).toEqual({count: 5, day: "2026-10-15"});
+  });
+});
+
+function views(total: number): PublicArtifactTreeEntry["views"] {
+  return {last7Days: 0, last30Days: 0, total};
+}
+
+describe("tree order", () => {
+  const entries = [
+    entry("beta", "team/beta", "2026-10-03T00:00:00.000Z", {views: views(1)}),
+    entry("Alpha", "team/alpha", "2026-10-01T00:00:00.000Z", {views: views(9)}),
+    entry("gamma", "team/gamma", "2026-10-02T00:00:00.000Z", {views: views(4)}),
+    entry("Zed", "archive/zed", "2026-10-04T00:00:00.000Z", {views: views(2)}),
+    entry("loose b", null, "2026-10-05T00:00:00.000Z", {views: views(0)}),
+    entry("Loose a", null, "2026-10-06T00:00:00.000Z", {views: views(3)}),
+  ];
+  const order = (sort: "name" | "updated" | "views") => {
+    const tree = buildPublicArtifactTree(entries, sort);
+    return {
+      folders: tree.folders.map((folder) => folder.label),
+      team: names(tree.folders.find((folder) => folder.label === "team")?.artifacts ?? []),
+      ungrouped: names(tree.ungrouped),
+    };
+  };
+
+  test("each order sorts within a folder and never moves an artifact across folders", () => {
+    expect(order("updated")).toEqual({
+      folders: ["archive", "team"],
+      team: ["beta", "gamma", "Alpha"],
+      ungrouped: ["Loose a", "loose b"],
+    });
+    // Names compare without case, and folders by their label.
+    expect(order("name")).toEqual({
+      folders: ["archive", "team"],
+      team: ["Alpha", "beta", "gamma"],
+      ungrouped: ["Loose a", "loose b"],
+    });
+    // A folder ranks by every view beneath it: team has 14, archive 2.
+    expect(order("views")).toEqual({
+      folders: ["team", "archive"],
+      team: ["Alpha", "gamma", "beta"],
+      ungrouped: ["Loose a", "loose b"],
+    });
+  });
+});
+
+describe("visibility writes", () => {
+  test("a change writes the tags before the access, and only what differs", () => {
+    const tags = ["report"];
+    expect(visibilityWrites({tags, visibility: "public"}, "private"))
+      .toEqual({accessSetting: "account_required", tags: null});
+    expect(visibilityWrites({tags, visibility: "public"}, "unlisted"))
+      .toEqual({accessSetting: null, tags: ["report", "unlisted"]});
+    expect(visibilityWrites({tags: ["report", "unlisted"], visibility: "unlisted"}, "public"))
+      .toEqual({accessSetting: null, tags: ["report"]});
+    // A private artifact that still carries the tag becomes public only once
+    // the tag is gone.
+    expect(visibilityWrites({tags: ["unlisted"], visibility: "private"}, "public"))
+      .toEqual({accessSetting: "public_link", tags: []});
+    expect(visibilityWrites({tags: [], visibility: "private"}, "unlisted"))
+      .toEqual({accessSetting: "public_link", tags: ["unlisted"]});
+    expect(visibilityWrites({tags, visibility: "private"}, "private"))
+      .toEqual({accessSetting: null, tags: null});
   });
 });
 

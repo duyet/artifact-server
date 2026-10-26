@@ -1,11 +1,12 @@
-import {StrictMode, useEffect, useState} from "react";
+import {StrictMode, useCallback, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 import {IconAlertCircle} from "@tabler/icons-react";
 
 import {Alert, AlertDescription, AlertTitle} from "@/components/ui/alert";
 import {Skeleton} from "@/components/ui/skeleton";
-import {applyStoredTheme} from "@/lib/theme";
+import {Toaster} from "@/components/ui/sonner";
+import {applyStoredTheme, readThemePreference} from "@/lib/theme";
 
 import {HomePage} from "./home-app.js";
 import {readPublicCatalog, type PublicCatalog} from "./home-client.js";
@@ -16,6 +17,11 @@ applyStoredTheme();
 function HomeShell() {
   const [catalog, setCatalog] = useState<PublicCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // Bumped after the page changes an artifact, so the tree reads it again.
+  const [revision, setRevision] = useState(0);
+  const reload = useCallback(() => {
+    setRevision((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +43,7 @@ function HomeShell() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [revision]);
 
   if (failure !== null) {
     return (
@@ -69,7 +75,12 @@ function HomeShell() {
       </main>
     );
   }
-  return <HomePage catalog={catalog} />;
+  return (
+    <>
+      <HomePage catalog={catalog} onChanged={reload} />
+      <Toaster position="bottom-right" theme={readThemePreference()} />
+    </>
+  );
 }
 
 const rootElement = document.querySelector("#home-root");
