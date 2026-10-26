@@ -4435,3 +4435,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server, and the pure day filter and per-measure sums with no server and no browser. The Postgres read and the browser toggle, bar click, and keyboard path run only in CI, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
+
+  - id: FRK-024
+    kind: behavior
+    behavior: The home page daily chart draws each measure in its own validated accent token, keeps a selected day at the full accent while the other days recede to a tint and the day under the pointer or keyboard focus sits one step between, marks today, shows a summary of the window total and the busiest day, and shows the day's date and count in a tooltip on hover and on keyboard focus.
+    owner: web-application
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-chart}
+    acceptance:
+      behavior: {id: FRK-024-B, description: "In a browser, in the light and the dark theme, read the window total and the busiest day, see every views bar in the views accent, hover a day to see its tooltip and its hover step, select today to keep it full while yesterday tints, focus yesterday's button to see the same tooltip, find today's dot under today's column, pass axe, and switch to updates to see its own accent."}
+      failure: {id: FRK-024-F, description: "With no day selected no bar is tinted, a selected day under the pointer stays full, an all-zero window names no busiest day, and a tie for the busiest day names the latest."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: The tone and summary rules are proved as pure functions with no browser. The colours, tooltip, and today mark run only in the CI browser job, and no deployed run exists.
+    depends_on: [FRK-023]
+    evidence: []

@@ -158,7 +158,151 @@ test.describe("public home page", () => {
       await removeTestInstallation(installation);
     }
   });
+
+  test("FRK-024-B: each measure wears its accent, a selected day keeps it while the rest tint, hover and focus show the day's tooltip, and today is marked", async ({browser}) => {
+    const installation = await createTestInstallation();
+    const today = new Date();
+    const yesterday = new Date(today.getTime() - 86_400_000);
+    const clock = {instant: yesterday, now() {
+      return this.instant;
+    }};
+    const server = await startTestServer(installation, {clock, contentDomain: null});
+    try {
+      await publishSite(server, installation, {
+        accessSetting: "public_link",
+        name: "Agent console",
+        path: "2026/10/agent-console",
+      });
+      await publishSite(server, installation, {
+        accessSetting: "public_link",
+        name: "Cost report",
+        path: "2026/10/cost-report",
+      });
+      await fetch(`${server.baseUrl}/2026/10/agent-console/`);
+      await fetch(`${server.baseUrl}/2026/10/agent-console/`);
+      await server.flushArtifactViews();
+      clock.instant = today;
+      await fetch(`${server.baseUrl}/2026/10/agent-console/`);
+      await fetch(`${server.baseUrl}/2026/10/cost-report/`);
+      await server.flushArtifactViews();
+
+      // One theme after the other: both share the server and its counts.
+      await expectChartTones(browser, server, "light", today, yesterday);
+      await expectChartTones(browser, server, "dark", today, yesterday);
+    } finally {
+      await server.stop();
+      await removeTestInstallation(installation);
+    }
+  });
 });
+
+/**
+ * The chart's tones, tooltip, summary, and today's mark in one theme, with a
+ * screenshot of each measure's card.
+ */
+async function expectChartTones(
+  browser: Browser,
+  server: RunningTestServer,
+  theme: "dark" | "light",
+  today: Date,
+  yesterday: Date,
+): Promise<void> {
+  const todayLabel = dayLabel(today);
+  const yesterdayLabel = dayLabel(yesterday);
+  const context = await browser.newContext({colorScheme: theme});
+  try {
+    const page = await context.newPage();
+    await page.clock.setFixedTime(today);
+    await page.goto(server.baseUrl);
+    await expect(page.locator("html")).toHaveClass(new RegExp(String.raw`\b${theme}\b`, "u"));
+    // A day with no count draws no path, so in views the only two marks are
+    // yesterday's and today's.
+    const marks = page.locator("[data-slot=chart] .recharts-bar-rectangle path");
+    const yesterdayBar = marks.first();
+    const todayBar = marks.last();
+    const tooltip = page.getByRole("tooltip");
+    const views = await toneColours(page, "--chart-views");
+
+    // The summary counts the window and names the busiest day; a tie
+    // goes to the latest one.
+    await expect(page.locator("[data-slot=chart-summary]"))
+      .toHaveText(`4 views in 30 days, busiest on ${todayLabel} with 2`);
+
+    // With no day selected every bar wears the accent.
+    expect(await fillOf(todayBar)).toBe(views.full);
+    expect(await fillOf(yesterdayBar)).toBe(views.full);
+
+    // Hover steps a bar down and shows its date and count.
+    await yesterdayBar.hover();
+    await expect(tooltip).toHaveText(`${yesterdayLabel}2 views`);
+    expect(await fillOf(yesterdayBar)).toBe(views.hover);
+
+    // A selected day keeps the accent and the rest recede to the tint.
+    await todayBar.click();
+    await expect(tooltip).toHaveText(`Today, ${todayLabel}2 views`);
+    await page.getByRole("heading", {name: "Artifact Server"}).hover();
+    await expect(tooltip).toHaveCount(0);
+    await expect.poll(() => fillOf(yesterdayBar)).toBe(views.muted);
+    expect(await fillOf(todayBar)).toBe(views.full);
+
+    // Keyboard focus shows the same tooltip as hover.
+    const yesterdayButton = page.getByRole("button", {name: `${yesterdayLabel}: 2 views`});
+    await yesterdayButton.focus();
+    await expect(tooltip).toHaveText(`${yesterdayLabel}2 views`);
+    expect(await fillOf(yesterdayBar)).toBe(views.hover);
+
+    // Today's dot sits under today's column.
+    const dot = await page.locator("[data-slot=chart-today]").boundingBox();
+    const column = await page.getByRole("button", {name: `${todayLabel}: 2 views`}).boundingBox();
+    if (dot === null || column === null) throw new Error("Today's dot or column is not drawn.");
+    expect(dot.x + dot.width / 2).toBeGreaterThan(column.x);
+    expect(dot.x + dot.width / 2).toBeLessThan(column.x + column.width);
+
+    const violations = await new AxeBuilder({page}).analyze();
+    expect(violations.violations).toEqual([]);
+    await page.locator("[data-slot=card]").filter({hasText: "Views per day"}).screenshot({
+      path: `test-results/browser/home-chart-views-${theme}.png`,
+    });
+
+    // The other measure wears its own accent.
+    await page.getByRole("button", {exact: true, name: "Updated"}).click();
+    await expect(page.getByText("Updated per day")).toBeVisible();
+    const updates = await toneColours(page, "--chart-updates");
+    expect(updates.full).not.toBe(views.full);
+    // Both artifacts were published yesterday, so that is the only bar.
+    await expect.poll(() => fillOf(yesterdayBar)).toBe(updates.full);
+    await yesterdayBar.hover();
+    await expect(tooltip).toHaveText(`${yesterdayLabel}2 versions`);
+    expect(await fillOf(yesterdayBar)).toBe(updates.hover);
+    await page.locator("[data-slot=card]").filter({hasText: "Updated per day"}).screenshot({
+      path: `test-results/browser/home-chart-updates-${theme}.png`,
+    });
+  } finally {
+    await context.close();
+  }
+}
+
+/** The computed colour each bar tone resolves to for one measure's accent. */
+async function toneColours(page: Page, accent: "--chart-updates" | "--chart-views") {
+  const [full = "", hover = "", muted = ""] = await page.evaluate((values) =>
+    values.map((value) => {
+      const probe = document.createElement("span");
+      probe.style.color = value;
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    }), [
+    `var(${accent})`,
+    `color-mix(in oklab, var(${accent}) 75%, var(--card))`,
+    `color-mix(in oklab, var(${accent}) 55%, var(--card))`,
+  ]);
+  return {full, hover, muted};
+}
+
+async function fillOf(mark: ReturnType<Page["locator"]>): Promise<string> {
+  return mark.evaluate((element) => getComputedStyle(element).fill);
+}
 
 /** The day as the page prints it: "26 Oct", on the UTC calendar. */
 function dayLabel(instant: Date): string {
@@ -247,16 +391,8 @@ async function capture(
       .toBeVisible();
     // The page CSP blocks inline <style>; a bar whose colour never arrived
     // falls back to a black fill.
-    const colours = await page.evaluate(() => {
-      const bar = document.querySelector("[data-slot=chart] .recharts-bar-rectangle path");
-      const probe = document.createElement("span");
-      probe.style.color = "var(--muted-foreground)";
-      document.body.append(probe);
-      const expected = getComputedStyle(probe).color;
-      probe.remove();
-      return {bar: bar === null ? null : getComputedStyle(bar).fill, expected};
-    });
-    expect(colours.bar).toBe(colours.expected);
+    const bar = page.locator("[data-slot=chart] .recharts-bar-rectangle path").first();
+    expect(await fillOf(bar)).toBe((await toneColours(page, "--chart-views")).full);
     const violations = await new AxeBuilder({page}).analyze();
     expect(violations.violations).toEqual([]);
     await page.screenshot({

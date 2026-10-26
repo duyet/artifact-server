@@ -2,6 +2,8 @@ import {describe, expect, test} from "vitest";
 
 import {
   buildPublicArtifactTree,
+  busiestDay,
+  dayTone,
   densifyDailySeries,
   entriesOnDay,
   sparklineBars,
@@ -207,6 +209,27 @@ describe("day filter", () => {
     expect(updated.folders[0]?.folders.map((folder) => folder.path))
       .toEqual(["2026/10", "2026/11"]);
     expect(updated.ungrouped).toEqual([]);
+  });
+});
+
+describe("daily chart tones and summary", () => {
+  test("FRK-024-F: no selection keeps every bar full, a selection tints the rest, and an empty window names no busiest day", () => {
+    const days = ["2026-10-15", "2026-10-16", "2026-10-17"];
+    // With nothing selected the chart wears its accent, and only the day
+    // under the pointer steps down.
+    expect(days.map((day) => dayTone(day, null, null))).toEqual(["full", "full", "full"]);
+    expect(days.map((day) => dayTone(day, null, "2026-10-16"))).toEqual(["full", "hover", "full"]);
+    // A selection keeps its accent even under the pointer, and every other
+    // day recedes to the tint.
+    expect(days.map((day) => dayTone(day, "2026-10-17", null))).toEqual(["muted", "muted", "full"]);
+    expect(days.map((day) => dayTone(day, "2026-10-17", "2026-10-15"))).toEqual(["hover", "muted", "full"]);
+    expect(dayTone("2026-10-17", "2026-10-17", "2026-10-17")).toBe("full");
+
+    expect(busiestDay([0, 0, 0], days)).toBeNull();
+    expect(busiestDay([], [])).toBeNull();
+    // A tie goes to the latest day.
+    expect(busiestDay([3, 1, 3], days)).toEqual({count: 3, day: "2026-10-17"});
+    expect(busiestDay([5, 1, 3], days)).toEqual({count: 5, day: "2026-10-15"});
   });
 });
 

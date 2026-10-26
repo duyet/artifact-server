@@ -7,7 +7,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {useRef, useState, type KeyboardEvent} from "react";
-import {Bar, BarChart, CartesianGrid, XAxis} from "recharts";
+import {Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis} from "recharts";
 
 import {ThemeMenu} from "@/components/theme-menu";
 import {Alert, AlertDescription} from "@/components/ui/alert";
@@ -21,12 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
+import {ChartContainer, type ChartConfig} from "@/components/ui/chart";
 import {
   Collapsible,
   CollapsibleContent,
@@ -43,6 +38,8 @@ import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
 
 import {
   buildPublicArtifactTree,
+  busiestDay,
+  dayTone,
   densifyDailySeries,
   entriesOnDay,
   sparklineBars,
@@ -50,6 +47,7 @@ import {
   sumDailySeries,
   windowDays,
   type DailyMetric,
+  type DayTone,
   type PublicArtifactTreeEntry,
   type PublicArtifactTreeFolder,
 } from "./home-tree.js";
@@ -58,6 +56,7 @@ import type {PublicCatalog} from "./home-client.js";
 /** The copy each chart measure brings to the card and the tree filter. */
 const dailyCharts = {
   updates: {
+    color: "var(--chart-updates)",
     description: "Versions published across every public artifact.",
     filter: "Updated on",
     title: "Updated per day",
@@ -65,6 +64,7 @@ const dailyCharts = {
     unit: ["version", "versions"],
   },
   views: {
+    color: "var(--chart-views)",
     description: "Across every public artifact.",
     filter: "Viewed on",
     title: "Views per day",
@@ -72,6 +72,8 @@ const dailyCharts = {
     unit: ["view", "views"],
   },
 } as const satisfies Record<DailyMetric, {
+  /** The measure's accent, a theme token validated for contrast and CVD. */
+  readonly color: string;
   readonly description: string;
   readonly filter: string;
   readonly title: string;
@@ -252,7 +254,18 @@ function TotalCard({label, value}: {readonly label: string; readonly value: numb
 }
 
 /** No inset, so each day's band spans exactly 1/n of the chart's width. */
-const dailyChartMargin = {bottom: 0, left: 0, right: 0, top: 4};
+const dailyChartMargin = {bottom: 0, left: 0, right: 0, top: 8};
+
+/**
+ * Each tone mixes the measure's accent into the card. The two tints were run
+ * through the data-viz ordinal check: the lightest still clears 2:1 against
+ * the card in both themes, and each step sits a visible lightness gap apart.
+ */
+const toneFill = {
+  full: "var(--color-count)",
+  hover: "color-mix(in oklab, var(--color-count) 75%, var(--card))",
+  muted: "color-mix(in oklab, var(--color-count) 55%, var(--card))",
+} as const satisfies Record<DayTone, string>;
 
 /**
  * One bar per day, summed across every public artifact, in the chosen measure.
@@ -273,16 +286,29 @@ function DailyChart({
 }) {
   const chart = dailyCharts[filter.metric];
   const data = days.map((day, index) => ({count: values[index] ?? 0, day}));
+  const [pointerDay, setPointerDay] = useState<string | null>(null);
+  const [focusDay, setFocusDay] = useState<string | null>(null);
+  const activeDay = pointerDay ?? focusDay;
+  const activeIndex = data.findIndex((row) => row.day === activeDay);
+  const today = days.at(-1);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const busiest = busiestDay(values, days);
   // One day is the tab stop and the arrow keys move between the rest, so the
   // chart costs a keyboard reader one Tab, not one per day.
   const tabStop = filter.day ?? data.findLast((row) => row.count > 0)?.day;
   const config = {
-    count: {color: "var(--muted-foreground)", label: capitalize(chart.unit[1])},
+    count: {color: chart.color, label: capitalize(chart.unit[1])},
   } satisfies ChartConfig;
+  const unit = (count: number) => chart.unit[count === 1 ? 0 : 1];
   // A day with no count filters to an empty tree, so it is not a target.
   const toggleDay = (day: string) => {
     if (!data.some((row) => row.day === day && row.count > 0)) return;
     onFilterChange({day: filter.day === day ? null : day, metric: filter.metric});
+  };
+  // The column under the pointer, from the same equal split the buttons use.
+  const dayAt = (event: React.PointerEvent<HTMLElement> | React.MouseEvent<HTMLElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return data[Math.floor(((event.clientX - box.left) / box.width) * data.length)]?.day ?? null;
   };
   return (
     <Card>
@@ -309,36 +335,56 @@ function DailyChart({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
+        <p className="text-sm text-muted-foreground" data-slot="chart-summary">
+          <span className="font-medium text-foreground tabular-nums">{formatCount(total)}</span>
+          {` ${unit(total)} in ${days.length} days`}
+          {busiest === null
+            ? null
+            : `, busiest on ${formatDay(busiest.day)} with ${formatCount(busiest.count)}`}
+        </p>
         <div className="relative" ref={ref}>
           <ChartContainer
             className="aspect-auto h-32 w-full cursor-pointer"
             config={config}
-            // The column under the pointer, from the same equal split the
-            // buttons use. Recharts' own click state lags a fast click by a
-            // frame, so it is not read here.
+            // Recharts' own click state lags a fast click by a frame, so the
+            // column is read from the pointer position instead.
             onClick={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-              const index = Math.floor(((event.clientX - box.left) / box.width) * data.length);
-              const row = data[index];
-              if (row !== undefined) toggleDay(row.day);
+              const day = dayAt(event);
+              if (day !== null) toggleDay(day);
+            }}
+            onPointerLeave={() => {
+              setPointerDay(null);
+            }}
+            onPointerMove={(event) => {
+              setPointerDay(dayAt(event));
             }}
           >
             <BarChart data={data} margin={dailyChartMargin}>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" hide />
-              <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
-              <Bar
-                dataKey="count"
-                fill="var(--color-count)"
-                isAnimationActive={false}
-                radius={2}
+              {/* Mirrored, so the ticks sit inside the plot and take no width. */}
+              <YAxis
+                allowDecimals={false}
+                axisLine={false}
+                mirror
+                tick={{fontSize: 10}}
+                tickCount={3}
+                tickLine={false}
               />
+              <Bar dataKey="count" isAnimationActive={false} radius={2}>
+                {data.map((row) => (
+                  <Cell
+                    fill={toneFill[dayTone(row.day, filter.day, activeDay)]}
+                    key={row.day}
+                  />
+                ))}
+              </Bar>
             </BarChart>
           </ChartContainer>
           {/*
             The keyboard path: one button per day laid over its column. They
-            let the pointer through, so hovering still reaches the tooltip and
-            a click lands on the chart's handler above.
+            let the pointer through, so a click lands on the chart's handler
+            above.
           */}
           <div
             aria-label={chart.title}
@@ -350,15 +396,19 @@ function DailyChart({
               ? <span key={row.day} />
               : (
                 <button
-                  aria-label={`${formatDay(row.day)}: ${formatCount(row.count)} ${
-                    chart.unit[row.count === 1 ? 0 : 1]
-                  }`}
+                  aria-label={`${formatDay(row.day)}: ${formatCount(row.count)} ${unit(row.count)}`}
                   aria-pressed={filter.day === row.day}
-                  className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-pressed:bg-foreground/10"
+                  className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   data-day={row.day}
                   key={row.day}
+                  onBlur={() => {
+                    setFocusDay(null);
+                  }}
                   onClick={() => {
                     toggleDay(row.day);
+                  }}
+                  onFocus={() => {
+                    setFocusDay(row.day);
                   }}
                   onKeyDown={moveBetweenDays}
                   tabIndex={row.day === tabStop ? 0 : -1}
@@ -366,13 +416,71 @@ function DailyChart({
                 />
               ))}
           </div>
+          {activeIndex === -1 ? null : (
+            <DayTooltip
+              count={data[activeIndex]?.count ?? 0}
+              day={data[activeIndex]?.day ?? ""}
+              position={(activeIndex + 0.5) / data.length}
+              today={data[activeIndex]?.day === today}
+              unit={unit(data[activeIndex]?.count ?? 0)}
+            />
+          )}
+        </div>
+        {/* Today's column carries a dot, so the newest bar reads as today. */}
+        <div
+          aria-hidden="true"
+          className="grid"
+          style={{gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))`}}
+        >
+          {data.map((row) => (
+            <span className="flex justify-center" key={row.day}>
+              {row.day === today
+                ? <span className="size-1 rounded-full bg-foreground" data-slot="chart-today" />
+                : null}
+            </span>
+          ))}
         </div>
         <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
-          <span>{days[0] ?? ""}</span>
-          <span>{days[days.length - 1] ?? ""}</span>
+          <span>{days[0] === undefined ? "" : formatDay(days[0])}</span>
+          <span>Today</span>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The date and count of the day under the pointer or keyboard focus, drawn
+ * above its column. Near either edge it anchors to that edge so it stays
+ * inside the card.
+ */
+function DayTooltip({
+  count,
+  day,
+  position,
+  today,
+  unit,
+}: {
+  readonly count: number;
+  readonly day: string;
+  /** The column centre as a fraction of the chart width. */
+  readonly position: number;
+  readonly today: boolean;
+  readonly unit: string;
+}) {
+  const shift = position < 0.15 ? "0%" : position > 0.85 ? "-100%" : "-50%";
+  return (
+    <div
+      className="pointer-events-none absolute top-0 z-10 flex flex-col rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm"
+      role="tooltip"
+      style={{
+        left: `${position * 100}%`,
+        transform: `translate(${shift}, calc(-100% - 4px))`,
+      }}
+    >
+      <span className="font-medium">{today ? `Today, ${formatDay(day)}` : formatDay(day)}</span>
+      <span className="text-muted-foreground tabular-nums">{`${formatCount(count)} ${unit}`}</span>
+    </div>
   );
 }
 
