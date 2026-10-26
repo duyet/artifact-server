@@ -144,6 +144,7 @@ A prefix rule rather than an allowlist of exact paths, so the next anonymous rea
       "path": "2026/10/release-checklist",
       "series": [{"count": 2, "day": "2026-10-17"}],
       "updatedAt": "2026-10-17T07:41:02.113Z",
+      "updates": [{"count": 1, "day": "2026-10-16"}, {"count": 2, "day": "2026-10-17"}],
       "url": "https://artifacts.example.internal/2026/10/release-checklist/",
       "views": {"last7Days": 2, "last30Days": 2, "total": 2}
     }
@@ -162,6 +163,7 @@ Field decisions:
 - **`name`, not `title`.** Issue 5 says title; the artifact record's field is `name` (`src/core/model.ts:76`) and the page has no other title to show. A renamed field would be a second name for one value.
 - **`updatedAt` is the current version's `createdAt`** (`VersionRecord.createdAt`, `src/core/model.ts`). Artifacts have no `updated_at`, and a version's creation is the last change to the artifact. A restored version keeps its own `createdAt`, which is the honest answer for when the visible content was produced.
 - **`series` is sparse and ascending.** Days with no views are absent, so the payload stays small on a quiet server. The client densifies against `windowDays`. A dense 30-element array per artifact would be 30 times the bytes for the same information.
+- **`updates` counts versions published per UTC day**, in the same window and the same sparse shape as `series`. It is read from `versions.created_at`, the column `updatedAt` already comes from, so it needs no new table. A restore moves the current version without publishing one, so it does not count. Only the artifacts the tree already lists are read, so a private, deleted, or unlisted artifact contributes nothing. Accepted tradeoff: the count includes every version of a currently public artifact in the window, even versions published before it became public. Only the per-day count shows, never the content of those versions.
 - **`url` is absolute** and comes from `artifactBrowserUrl` (`src/http/artifact-http-links.ts:4`), the same builder `links.artifact` uses, so the home page can never advertise a URL the server would not serve. In path mode it is `/<path>/`, otherwise `/<folder>/`.
 - **`access` is always `public_link`.** The field exists so the client does not have to assume, and so issue 4 can widen the endpoint to authenticated callers without changing the item shape.
 - **`loginKind` is `local_owner` or `none`** from `dependencies.browserAccess` (`src/core/browser-access.ts`). The home page reads it to decide whether to offer a sign-in link. Issue 4 owns the link itself.
@@ -172,7 +174,7 @@ There is no `nextCursor`. The response is the whole public catalog for one insta
 
 ### Reading it
 
-One query for the artifacts, one for the window rows, one for the totals.
+One query for the artifacts, one for the window rows, one for the totals, and one for the versions per day.
 
 ```sql
 -- artifacts: the 500 newest live public artifacts, in every project
@@ -189,6 +191,14 @@ SELECT artifact_id, day, count FROM artifact_views
 -- all-time totals for exactly those artifacts
 SELECT artifact_id, SUM(count) FROM artifact_views
  WHERE artifact_id = ANY(…) GROUP BY artifact_id;
+
+-- versions published per day for exactly those artifacts, through the
+-- (project_id, artifact_id) version index
+SELECT v.artifact_id, substr(v.created_at, 1, 10) AS day, COUNT(*)
+  FROM artifacts a JOIN versions v
+    ON v.project_id = a.project_id AND v.artifact_id = a.id
+ WHERE a.id = ANY(…) AND substr(v.created_at, 1, 10) BETWEEN ? AND ?
+ GROUP BY v.artifact_id, day;
 ```
 
 Both view queries are bounded by the artifact set the first query returned, so the payload is `O(artifacts × days actually used)`, not `O(all history)`. The totals query has no day bound because "total" is not a window; it reads at most one row per artifact.
@@ -214,7 +224,8 @@ The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPub
 
 `views` is a per-day count, not a rate, and a single installation is rarely busy enough for a log scale to matter.
 
-- **Home page.** One bar per day summed across every public artifact, 30 days, on `--chart-2`. The client sums the sparse series it already received, so the headline chart and the rows can never disagree. Rendered as inline SVG from `sparklineBars`: no chart library, no layout measurement, no client code beyond 30 `<rect>` elements.
+- **Home page.** One bar per day summed across every public artifact, 30 days. A switch on the card picks the measure: views per day from `series`, or updated per day from `updates`. The client sums the sparse series it already received, so the headline chart and the rows can never disagree.
+- **A day filters the tree.** Clicking a day's column filters the tree to the artifacts viewed on that day, or updated on it in the updates measure. The tree is built from the filtered list, so only folders that hold a match render. A filtered tree opens every folder, including one set to start collapsed, so a match never hides. Clearing the filter returns each folder to its default state. A chip above the tree names the filter ("Updated on 26 Oct") and clears it, as does the same day again. Switching the measure clears the day, because a day means something else in the other measure. Each day with a count is also a real `<button>` laid over its column with `aria-pressed`. It is one tab stop, the arrow keys, Home, and End move between days, and Enter or Space toggles. The buttons let the pointer through, so hovering still shows the chart tooltip. A day with no count is not a target, because it would filter to an empty tree.
 - **Each artifact row.** The same function at 30 bars in a fixed 96×24 box beside the total. A row with no views draws the bars at zero height, so the column stays aligned instead of collapsing.
 
 Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that a screen reader reads, because a chart nobody can read is not an accessible chart.
@@ -237,7 +248,7 @@ Both charts are `aria-hidden`, with the numbers beside them in a `<table>` that 
 
 Two requirements, because the counting and the tree fail differently.
 
-`FRK-008` owns the counters and the port. `FRK-009` owns the endpoint and the page. Both carry `status: implementing` with a `proof_gap` that names the Docker-backed work, the same way FRK-006 and FRK-007 do.
+`FRK-008` owns the counters and the port. `FRK-009` owns the endpoint and the page. `FRK-023` owns the `updates` series, the chart's measure switch, and the day filter on the tree. All three carry `status: implementing` with a `proof_gap` that names the Docker-backed work, the same way FRK-006 and FRK-007 do.
 
 ## 5. Commits
 

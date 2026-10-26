@@ -407,6 +407,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "createProject",
       "findProject",
       "listProjects",
+      "readArtifactVersionDays",
       "readArtifactViewDays",
       "readMostViewedArtifacts",
       "readProjectActivityDays",

@@ -51,6 +51,7 @@ import {
   type ArtifactState,
   type ArtifactTombstone,
   type ArtifactVersion,
+  type ArtifactVersionDay,
   type ArtifactViewDay,
   type ArtifactViewTotal,
   type CommentAuthor,
@@ -1259,6 +1260,39 @@ export class PostgresArtifactRepository implements
         [installationId, limit, unlistedArtifactTag],
       );
       return z.array(publicArtifactSummaryRowSchema).parse(rows);
+    }));
+  }
+
+  async readArtifactVersionDays(
+    command: ReadArtifactViewDays,
+  ): Promise<readonly ArtifactVersionDay[]> {
+    if (command.artifactIds.length === 0) return [];
+    const installationId = this.#installationId;
+    return this.#database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      // Joining through the artifact keeps the read on the
+      // (installation_id, project_id, artifact_id) version index.
+      const rows = yield* sql.unsafe<object>(
+        `SELECT version.artifact_id AS "artifactId",
+           LEFT(version.created_at, 10) AS "day", COUNT(*) AS "count"
+         FROM artifacts artifact
+         JOIN versions version
+           ON version.installation_id = artifact.installation_id
+          AND version.project_id = artifact.project_id
+          AND version.artifact_id = artifact.id
+         WHERE artifact.installation_id = $1
+           AND artifact.id = ANY($2::text[])
+           AND LEFT(version.created_at, 10) BETWEEN $3::text AND $4::text
+         GROUP BY version.artifact_id, LEFT(version.created_at, 10)
+         ORDER BY version.artifact_id, LEFT(version.created_at, 10)`,
+        [
+          installationId,
+          command.artifactIds,
+          command.sinceDay,
+          command.untilDay,
+        ],
+      );
+      return z.array(artifactViewDayRowSchema).parse(rows);
     }));
   }
 

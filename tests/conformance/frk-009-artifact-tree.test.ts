@@ -17,9 +17,14 @@ import {publishSite} from "../support/same-host-site.js";
 import {
   commitStagedUpload,
   createStagedUpload,
+  publishVersion,
   uploadEveryStagedFile,
 } from "../support/publishing.js";
 
+const dailyCountsSchema = z.array(z.object({
+  count: z.number().int().positive(),
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+}));
 const viewCountsSchema = z.object({
   last7Days: z.number().int().nonnegative(),
   last30Days: z.number().int().nonnegative(),
@@ -30,11 +35,9 @@ const publicTreeSchema = z.object({
     access: z.literal("public_link"),
     name: z.string(),
     path: z.string().nullable(),
-    series: z.array(z.object({
-      count: z.number().int().nonnegative(),
-      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-    })),
+    series: dailyCountsSchema,
     updatedAt: z.iso.datetime(),
+    updates: dailyCountsSchema,
     url: z.url(),
     views: viewCountsSchema,
   })),
@@ -58,6 +61,8 @@ function movableClock(start: Date) {
 const today = new Date("2026-10-17T09:00:00.000Z");
 const twoDaysAgo = new Date("2026-10-15T09:00:00.000Z");
 const twentySevenDaysAgo = new Date("2026-09-20T09:00:00.000Z");
+// The 30-day window opens on 2026-09-18, so this day sits just outside it.
+const thirtyDaysAgo = new Date("2026-09-17T23:59:00.000Z");
 
 async function readTree(server: RunningTestServer): Promise<PublicTree> {
   const response = await fetch(`${server.baseUrl}/api/v1/public/tree`);
@@ -215,6 +220,127 @@ describe("public artifact tree", () => {
     const stamps = capped.artifacts.map((artifact) => artifact.updatedAt);
     expect(stamps.toSorted().toReversed()).toEqual(stamps);
   }, 120_000);
+
+  test("FRK-023-B: each artifact's updates count the versions it published per day inside the window", async () => {
+    clock.instant = twentySevenDaysAgo;
+    const report = await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Cost report",
+      path: "2026/09/cost-report",
+    });
+    clock.instant = twoDaysAgo;
+    const agentConsole = await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Agent console",
+      path: "2026/10/agent-console",
+    });
+
+    // Two versions of one artifact today and one of the other: a day counts
+    // versions, not artifacts, so the same artifact can count twice.
+    clock.instant = today;
+    const second = await publishVersion(server, installation, {
+      artifactId: agentConsole.artifact.id,
+      content: "<!doctype html><title>Agent console v2</title>",
+      expectedCurrentVersionId: agentConsole.version.id,
+      idempotencyKey: "frk-023-console-v2",
+    });
+    expect(second.response.status).toBe(201);
+    const third = await publishVersion(server, installation, {
+      artifactId: agentConsole.artifact.id,
+      content: "<!doctype html><title>Agent console v3</title>",
+      expectedCurrentVersionId: second.body.version.id,
+      idempotencyKey: "frk-023-console-v3",
+    });
+    expect(third.response.status).toBe(201);
+    const revised = await publishVersion(server, installation, {
+      artifactId: report.artifact.id,
+      content: "<!doctype html><title>Cost report v2</title>",
+      expectedCurrentVersionId: report.version.id,
+      idempotencyKey: "frk-023-report-v2",
+    });
+    expect(revised.response.status).toBe(201);
+
+    const tree = await readTree(server);
+    expect(treeEntry(tree, "Agent console").updates).toEqual([
+      {count: 1, day: "2026-10-15"},
+      {count: 2, day: "2026-10-17"},
+    ]);
+    expect(treeEntry(tree, "Cost report").updates).toEqual([
+      {count: 1, day: "2026-09-20"},
+      {count: 1, day: "2026-10-17"},
+    ]);
+    // Views and updates are separate series: publishing is not a view.
+    expect(treeEntry(tree, "Agent console").series).toEqual([]);
+  });
+
+  test("FRK-023-F: a version before the window, a restore, and a private or unlisted artifact add no updates", async () => {
+    clock.instant = thirtyDaysAgo;
+    const report = await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Cost report",
+      path: "2026/09/cost-report",
+    });
+    const ledger = await publishSite(server, installation, {
+      accessSetting: "account_required",
+      name: "Internal ledger",
+      path: "2026/09/internal-ledger",
+    });
+    clock.instant = today;
+    const revised = await publishVersion(server, installation, {
+      artifactId: report.artifact.id,
+      content: "<!doctype html><title>Cost report v2</title>",
+      expectedCurrentVersionId: report.version.id,
+      idempotencyKey: "frk-023-report-v2",
+    });
+    expect(revised.response.status).toBe(201);
+    const ledgerRevision = await publishVersion(server, installation, {
+      artifactId: ledger.artifact.id,
+      content: "<!doctype html><title>Internal ledger v2</title>",
+      expectedCurrentVersionId: ledger.version.id,
+      idempotencyKey: "frk-023-ledger-v2",
+    });
+    expect(ledgerRevision.response.status).toBe(201);
+
+    // The first version predates the window, so only today's counts.
+    expect(treeEntry(await readTree(server), "Cost report").updates).toEqual([
+      {count: 1, day: "2026-10-17"},
+    ]);
+
+    // A restore points the artifact at an older version without publishing
+    // one, so the day keeps its count.
+    const restored = await fetch(
+      `${server.baseUrl}/api/v1/artifacts/${report.artifact.id}/restore`,
+      {
+        body: JSON.stringify({
+          expectedCurrentVersionId: revised.body.version.id,
+          versionId: report.version.id,
+        }),
+        headers: apiHeaders(installation, "frk-023-restore-first-version"),
+        method: "POST",
+      },
+    );
+    expect(restored.status).toBe(200);
+    expect(treeEntry(await readTree(server), "Cost report").updates).toEqual([
+      {count: 1, day: "2026-10-17"},
+    ]);
+
+    // An unlisted artifact keeps its link but leaves the tree, versions and all.
+    const tagged = await fetch(
+      `${server.baseUrl}/api/v1/artifacts/${report.artifact.id}/tags`,
+      {
+        body: JSON.stringify({
+          expectedCurrentVersionId: report.version.id,
+          tags: ["unlisted"],
+        }),
+        headers: apiHeaders(installation, "frk-023-unlist-cost-report"),
+        method: "PATCH",
+      },
+    );
+    expect(tagged.status).toBe(200);
+    // The private artifact published a version today too, and neither it
+    // nor the unlisted one is in the tree to carry an update.
+    expect((await readTree(server)).artifacts).toEqual([]);
+  });
 
   test("FRK-016-B FRK-016-F: the tree names the trusted origin behind a TLS-ending ingress, and keeps the request URL when nothing matches", async () => {
     await server.stop();

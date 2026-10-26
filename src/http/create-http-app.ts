@@ -948,6 +948,7 @@ export function createHttpApp(
         path: item.artifact.path,
         series: item.series.map((day) => ({count: day.count, day: day.day})),
         updatedAt: item.artifact.currentVersionCreatedAt,
+        updates: item.updates.map((day) => ({count: day.count, day: day.day})),
         url: artifactBrowserUrl(
           requestUrl,
           dependencies.contentDomain,

@@ -2,7 +2,7 @@ import {z} from "zod";
 
 import type {PublicArtifactTreeEntry} from "./home-tree.js";
 
-const dailyViewSchema = z.object({
+const dailyCountSchema = z.object({
   count: z.number().int().nonnegative(),
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
 });
@@ -11,8 +11,9 @@ const publicArtifactSchema = z.object({
   access: z.literal("public_link"),
   name: z.string().min(1).max(200),
   path: z.string().min(1).max(200).nullable(),
-  series: z.array(dailyViewSchema),
+  series: z.array(dailyCountSchema),
   updatedAt: z.iso.datetime(),
+  updates: z.array(dailyCountSchema),
   url: z.url(),
   views: z.object({
     last7Days: z.number().int().nonnegative(),
@@ -65,6 +66,7 @@ export async function readPublicCatalog(
       path: artifact.path,
       series: artifact.series,
       updatedAt: artifact.updatedAt,
+      updates: artifact.updates,
       url: artifact.url,
       views: artifact.views,
     })),
