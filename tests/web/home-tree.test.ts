@@ -213,17 +213,17 @@ describe("day filter", () => {
 });
 
 describe("daily chart tones and summary", () => {
-  test("FRK-025-F: no selection keeps every bar full, a selection tints the rest, and an empty window names no busiest day", () => {
+  test("FRK-025-F: no selection keeps every bar at the accent, a selection tints the rest, and an empty window names no busiest day", () => {
     const days = ["2026-10-15", "2026-10-16", "2026-10-17"];
-    // With nothing selected the chart wears its accent, and only the day
-    // under the pointer steps down.
-    expect(days.map((day) => dayTone(day, null, null))).toEqual(["full", "full", "full"]);
-    expect(days.map((day) => dayTone(day, null, "2026-10-16"))).toEqual(["full", "hover", "full"]);
-    // A selection keeps its accent even under the pointer, and every other
-    // day recedes to the tint.
-    expect(days.map((day) => dayTone(day, "2026-10-17", null))).toEqual(["muted", "muted", "full"]);
-    expect(days.map((day) => dayTone(day, "2026-10-17", "2026-10-15"))).toEqual(["hover", "muted", "full"]);
-    expect(dayTone("2026-10-17", "2026-10-17", "2026-10-17")).toBe("full");
+    // With nothing selected the chart wears its accent, and the day under
+    // the pointer previews the selected step.
+    expect(days.map((day) => dayTone(day, null, null))).toEqual(["accent", "accent", "accent"]);
+    expect(days.map((day) => dayTone(day, null, "2026-10-16"))).toEqual(["accent", "strong", "accent"]);
+    // A selection keeps the strong step even under the pointer, every other
+    // day recedes to the tint, and the pointer lifts one back to the accent.
+    expect(days.map((day) => dayTone(day, "2026-10-17", null))).toEqual(["muted", "muted", "strong"]);
+    expect(days.map((day) => dayTone(day, "2026-10-17", "2026-10-15"))).toEqual(["accent", "muted", "strong"]);
+    expect(dayTone("2026-10-17", "2026-10-17", "2026-10-17")).toBe("strong");
 
     expect(busiestDay([0, 0, 0], days)).toBeNull();
     expect(busiestDay([], [])).toBeNull();

@@ -263,14 +263,17 @@ interface ActiveDay {
 const dailyChartMargin = {bottom: 0, left: 0, right: 0, top: 8};
 
 /**
- * Each tone mixes the measure's accent into the card. The two tints were
- * checked against the card: the lightest still clears 3:1 (WCAG 1.4.11) in
- * both themes, and each step sits a visible lightness gap apart.
+ * The tint mixes the accent into the card and the strong step mixes it toward
+ * the text colour, so the strong step gains contrast in both themes. Checked
+ * with the data-viz validator's ordinal check against the card in light and
+ * dark, for both accents: every step clears 3:1 (WCAG 1.4.11 for data
+ * marks), and neighbouring steps sit at least 0.076 apart in OKLCH lightness
+ * against a 0.06 floor.
  */
 const toneFill = {
-  full: "var(--color-count)",
-  hover: "color-mix(in oklab, var(--color-count) 90%, var(--card))",
-  muted: "color-mix(in oklab, var(--color-count) 80%, var(--card))",
+  accent: "var(--color-count)",
+  muted: "color-mix(in oklab, var(--color-count) 82%, var(--card))",
+  strong: "color-mix(in oklab, var(--color-count) 75%, var(--foreground))",
 } as const satisfies Record<DayTone, string>;
 
 /**
