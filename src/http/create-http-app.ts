@@ -35,6 +35,10 @@ import {
   ArtifactManagementService,
 } from "../application/artifact-management.js";
 import {
+  type ArtifactInfo,
+  readArtifactInfo,
+} from "../application/artifact-info.js";
+import {
   type MakePublicLinkPrivateResult,
   PublicLinkAdministrationService,
   type PublicLinkInventoryPage,
@@ -1761,6 +1765,19 @@ export function createHttpApp(
     return context.json(report);
   });
 
+  app.get("/api/v1/artifacts/:artifactId/info", async (context) => {
+    const info = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      readArtifactInfo({
+        artifactId: context.req.param("artifactId"),
+        principal: context.get("principal"),
+        projectId: requestedProjectId(context),
+      }),
+    );
+    return context.json(artifactInfoResponse(info));
+  });
+
   app.get("/api/v1/artifacts/:artifactId/actions", async (context) => {
     const query = pageQuerySchema.parse(context.req.query());
     const page = await runHttpApplicationEffect(
@@ -3111,6 +3128,28 @@ function publishResponse(
     },
     replayed: published.replayed,
     version: published.version,
+  };
+}
+
+/**
+ * The viewer's info popover. The owner appears by stored display name only:
+ * the owner's principal ID and any email stay out of this response.
+ */
+function artifactInfoResponse(info: ArtifactInfo) {
+  return {
+    artifactId: info.artifact.id,
+    canManage: info.canManage,
+    name: info.artifact.name,
+    owner: {displayName: info.artifact.owner.displayName},
+    updatedAt: info.current.createdAt,
+    version: {id: info.current.id, number: info.current.number},
+    views: {
+      daily: info.activity.daily.map((day) => ({day: day.day, views: day.views})),
+      last30Days: info.activity.views.last30Days,
+      total: info.activity.views.total,
+    },
+    visibility: info.visibility,
+    windowDays: info.activity.windowDays,
   };
 }
 

@@ -2,6 +2,7 @@ import { caseFold } from "unicode-case-folding";
 import { Effect } from "effect";
 
 import {InvalidArtifactTags} from "../core/errors.js";
+import {accessSettings, type ArtifactRecord} from "../core/model.js";
 
 const maximumArtifactTagCount = 20;
 const maximumArtifactTagLength = 40;
@@ -16,6 +17,20 @@ const whitespace = /\s+/gu;
  * redirects to where its content moved.
  */
 export const unlistedArtifactTag = "unlisted";
+
+/**
+ * Who can find and open an artifact. Private needs an account; unlisted opens
+ * by its link but stays out of the public tree; public is both.
+ */
+export type ArtifactVisibility = "private" | "public" | "unlisted";
+
+/** Derive visibility from the stored access setting and tags. */
+export function artifactVisibility(
+  artifact: Pick<ArtifactRecord, "accessSetting" | "tags">,
+): ArtifactVisibility {
+  if (artifact.accessSetting === accessSettings.accountRequired) return "private";
+  return artifact.tags.includes(unlistedArtifactTag) ? "unlisted" : "public";
+}
 
 /** What replacing an artifact's tag set changes, judged on normalized tags. */
 export interface ArtifactTagChanges {
