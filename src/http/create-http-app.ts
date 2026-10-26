@@ -35,6 +35,10 @@ import {
   ArtifactManagementService,
 } from "../application/artifact-management.js";
 import {
+  type ArtifactInfo,
+  readArtifactInfo,
+} from "../application/artifact-info.js";
+import {
   type MakePublicLinkPrivateResult,
   PublicLinkAdministrationService,
   type PublicLinkInventoryPage,
@@ -113,6 +117,7 @@ import {
   type VersionRecord,
 } from "../core/model.js";
 import type { BlobStore, Clock as WallClock } from "../core/ports.js";
+import type {ViewerLogo} from "../core/viewer-logo.js";
 import {
   decideByteRange,
   ifRangeAllowsPartialResponse,
@@ -534,6 +539,8 @@ export interface HttpAppDependencies {
   readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
+  /** The viewer bar's logo, or null to show the product mark. */
+  readonly logo: ViewerLogo | null;
   readonly readiness?: ReadinessProbe;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly trustedApplicationOrigin: string | null;
@@ -987,6 +994,15 @@ export function createHttpApp(
       loginKind: dependencies.browserAccess.loginKind,
     });
   });
+
+  // Review's viewer bar reads the installation logo; no credential needed.
+  app.get("/api/v1/public/branding", (context) => {
+    context.header("Cache-Control", "no-cache");
+    return context.json({logo: brandingLogo(dependencies.logo)});
+  });
+
+  app.on(["GET", "HEAD"], viewerLogoPath, (context) =>
+    serveViewerLogo(context, dependencies.logo));
 
   app.get("/auth/context", (context) => {
     context.header("Cache-Control", "private, no-store");
@@ -1784,6 +1800,19 @@ export function createHttpApp(
       ),
     );
     return context.json(report);
+  });
+
+  app.get("/api/v1/artifacts/:artifactId/info", async (context) => {
+    const info = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      readArtifactInfo({
+        artifactId: context.req.param("artifactId"),
+        principal: context.get("principal"),
+        projectId: requestedProjectId(context),
+      }),
+    );
+    return context.json(artifactInfoResponse(info));
   });
 
   app.get("/api/v1/artifacts/:artifactId/actions", async (context) => {
@@ -3196,6 +3225,28 @@ function publishResponse(
   };
 }
 
+/**
+ * The viewer's info popover. The owner appears by stored display name only:
+ * the owner's principal ID and any email stay out of this response.
+ */
+function artifactInfoResponse(info: ArtifactInfo) {
+  return {
+    artifactId: info.artifact.id,
+    canManage: info.canManage,
+    name: info.artifact.name,
+    owner: {displayName: info.artifact.owner.displayName},
+    updatedAt: info.current.createdAt,
+    version: {id: info.current.id, number: info.current.number},
+    views: {
+      daily: info.activity.daily.map((day) => ({day: day.day, views: day.views})),
+      last30Days: info.activity.views.last30Days,
+      total: info.activity.views.total,
+    },
+    visibility: info.visibility,
+    windowDays: info.activity.windowDays,
+  };
+}
+
 function artifactDetailsResponse(
   requestUrl: URL,
   contentDomain: string | null,
@@ -4416,7 +4467,7 @@ async function serveWebAsset(
         dependencies.contentDomain,
         responseApplicationUrl(context, dependencies).origin,
       )
-      : "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'",
+      : applicationShellContentSecurityPolicy(dependencies.logo),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
   });
@@ -4434,6 +4485,54 @@ async function serveWebAsset(
     headers,
     status: 200,
   });
+}
+
+/**
+ * The policy of every application page. A logo served from a URL adds that
+ * URL's exact origin to img-src and changes nothing else.
+ */
+function applicationShellContentSecurityPolicy(logo: ViewerLogo | null): string {
+  const source = logo?.source;
+  const logoOrigin = source?.kind === "url" ? ` ${new URL(source.url).origin}` : "";
+  return `default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:${logoOrigin}; object-src 'none'; script-src 'self'; style-src 'self'`;
+}
+
+const viewerLogoPath = "/api/v1/public/logo";
+// A logo file opened at its own URL is a document on the application origin,
+// so an SVG must not run script there.
+const viewerLogoContentSecurityPolicy =
+  "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+
+function brandingLogo(logo: ViewerLogo | null) {
+  return logo === null ? null : {
+    alt: logo.alt,
+    href: logo.link,
+    src: logo.source.kind === "url" ? logo.source.url : viewerLogoPath,
+  };
+}
+
+function serveViewerLogo(
+  context: Context<HttpEnvironment>,
+  logo: ViewerLogo | null,
+): Response | Promise<Response> {
+  const source = logo?.source;
+  if (source?.kind !== "file") return context.notFound();
+  const etag = `"${source.sha256}"`;
+  const headers = new Headers({
+    "Cache-Control": "no-cache",
+    "Content-Security-Policy": viewerLogoContentSecurityPolicy,
+    "Content-Type": source.mediaType,
+    ETag: etag,
+    "X-Content-Type-Options": "nosniff",
+  });
+  if (etagMatches(context.req.header("if-none-match"), etag)) {
+    return new Response(null, {headers, status: 304});
+  }
+  headers.set("Content-Length", String(source.bytes.byteLength));
+  return new Response(
+    context.req.method === "HEAD" ? null : source.bytes,
+    {headers, status: 200},
+  );
 }
 
 function copyAssetHeader(

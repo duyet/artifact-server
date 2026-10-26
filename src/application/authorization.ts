@@ -41,6 +41,11 @@ export interface AuthorizationOperations {
     principal: Principal,
     artifact: ArtifactRecord,
   ) => boolean;
+  /** Fail unless {@link canManageArtifact} holds in this installation. */
+  readonly requireArtifactOwnership: (
+    principal: Principal,
+    artifact: ArtifactRecord,
+  ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireArtifactRead: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -252,6 +257,15 @@ function makeAuthorizationService(
     yield* denied();
   });
 
+  const requireArtifactOwnership = Effect.fn(
+    "AuthorizationService.requireArtifactOwnership",
+  )(function*(principal: Principal, artifact: ArtifactRecord) {
+    if (canManageArtifact(principal, artifact, dependencies.installationId)) {
+      return;
+    }
+    yield* denied();
+  });
+
   const requirePublicationPreparation = Effect.fn(
     "AuthorizationService.requirePublicationPreparation",
   )(function*(principal: Principal) {
@@ -325,6 +339,7 @@ function makeAuthorizationService(
     requireArtifactListing,
     requireArtifactCreation,
     requireArtifactManagement,
+    requireArtifactOwnership,
     requireArtifactRead,
     requireCommentRead,
     requireCommentWrite,

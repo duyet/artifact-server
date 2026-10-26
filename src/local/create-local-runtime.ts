@@ -12,6 +12,7 @@ import {
 import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import type { Clock } from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
+import type {ViewerLogo} from "../core/viewer-logo.js";
 import { SystemClock, SystemIdGenerator } from "../core/system.js";
 import { createHttpApp } from "../http/create-http-app.js";
 import type { HttpAppDependencies } from "../http/create-http-app.js";
@@ -68,6 +69,8 @@ export interface LocalRuntimeConfig {
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
   readonly localBootstrapToken?: string;
+  /** The viewer bar's logo; absent or null shows the product mark. */
+  readonly logo?: ViewerLogo | null;
   readonly observability?: boolean;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly installationId?: string;
@@ -179,6 +182,7 @@ export async function createLocalRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
+      logo: config.logo ?? null,
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),
     };

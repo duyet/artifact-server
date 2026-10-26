@@ -10,6 +10,7 @@ import {
 import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import type {Clock} from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
+import type {ViewerLogo} from "../core/viewer-logo.js";
 import {SystemClock, SystemIdGenerator} from "../core/system.js";
 import {createHttpApp} from "../http/create-http-app.js";
 import type {HttpAppDependencies} from "../http/create-http-app.js";
@@ -67,6 +68,8 @@ export interface ExternalStorageRuntimeConfig {
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
   readonly installationId: string;
   readonly localBootstrapCredential?: Redacted.Redacted;
+  /** The viewer bar's logo; absent or null shows the product mark. */
+  readonly logo?: ViewerLogo | null;
   readonly objectStorage: ObjectStorageProviderFactory;
   readonly postgresMaxConnections?: number;
   readonly runtimeLifecycle?: RuntimeLifecycle;
@@ -174,6 +177,7 @@ export async function createExternalStorageRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
+      logo: config.logo ?? null,
       readiness: () => externalStorageReadiness(database, connectedObjectStorage),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(),

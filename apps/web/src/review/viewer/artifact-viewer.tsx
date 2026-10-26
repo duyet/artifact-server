@@ -44,6 +44,7 @@ import {useReviewPanelMotion} from "../use-review-panel-motion.ts";
 import {useReviewResizablePanel} from "../use-review-resizable-panel.ts";
 import {ArtifactInspector} from "./artifact-inspector.tsx";
 import {FocusComments, FocusDock} from "./focus-mode.tsx";
+import {useArtifactInfo} from "./use-artifact-info.ts";
 import {useArtifactViewer} from "./use-artifact-viewer.ts";
 import {ViewerTopBar} from "./viewer-top-bar.tsx";
 
@@ -140,6 +141,11 @@ export function ArtifactViewer({
     versionId,
   });
   const {details, selectedVersion} = viewer;
+  const info = useArtifactInfo({
+    artifact: details?.artifact ?? null,
+    onArtifactChanged: viewer.updateArtifact,
+    projectId,
+  });
   const openCommentCount = comments.threads.filter((thread) => thread.state === "open").length;
 
   useEffect(() => {
@@ -303,8 +309,11 @@ export function ArtifactViewer({
       go({artifactId: result.artifact.id, path: null, versionId: result.version.id, view: null}, "push");
     }
   };
+  // The info read also reads views, so while it loads or fails the controls
+  // stay open and the server decides; only a known false makes them read-only.
   const share = (variant: "ghost" | "outline") => (
     <ReviewShareControl
+      canManageAccess={info.info?.canManage ?? true}
       details={details}
       key={`share-${details?.artifact.id ?? "empty"}`}
       onArtifactChanged={viewer.updateArtifact}
@@ -327,6 +336,7 @@ export function ArtifactViewer({
           currentVersionId={details?.artifact.currentVersionId ?? null}
           download={download}
           fullScreenDisabled={versionId === null}
+          info={info}
           inspectorOpen={inspectorOpen}
           menu={{
             onDelete: canAct ? () => setAction("delete") : null,
@@ -334,7 +344,7 @@ export function ArtifactViewer({
             onEditFile: canAct && editable ? () => setAction("edit") : null,
             onRename: canAct ? () => setAction("rename") : null,
             onShare: () => setShareOpen(true),
-            onShowHistory: () => {
+            onShowVersions: () => {
               setInspectorTab("versions");
               setInspectorOpen(true);
             },

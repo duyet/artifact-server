@@ -836,15 +836,14 @@ test.describe("Artifact Server frontend MVP", () => {
         })}`,
       );
 
-      const standardDownload = fixture.page.getByRole("link", {
+      // The viewer bar keeps Download in its actions menu.
+      await fixture.page.getByRole("button", {name: "Artifact actions"}).click();
+      const standardDownload = fixture.page.getByRole("menuitem", {
         exact: true,
         name: "Download",
       });
       await expect(standardDownload).toBeVisible();
-      // The control's description is its tooltip.
-      await standardDownload.hover();
-      await expect(fixture.page.getByText("Download 2 files as a ZIP", {exact: true}))
-        .toBeVisible();
+      await expect(standardDownload).toHaveAttribute("title", "Download 2 files as a ZIP");
       const [standardArchive] = await Promise.all([
         fixture.page.waitForEvent("download"),
         standardDownload.click(),
@@ -1326,9 +1325,10 @@ test.describe("Artifact Server frontend MVP", () => {
       await expect(galleryRow(fixture.page, "Private fixture")).toBeVisible();
 
       await openArtifactFromGallery(fixture.page, "Public fixture");
+      await fixture.page.getByRole("button", {name: "Artifact actions"}).click();
       const [publicPage] = await Promise.all([
         fixture.context.waitForEvent("page"),
-        fixture.page.getByRole("button", {name: "Open raw artifact"}).click(),
+        fixture.page.getByRole("menuitem", {exact: true, name: "Open raw"}).click(),
       ]);
       await expect(publicPage.locator("body")).toContainText("public browser content");
       await publicPage.close();
@@ -1339,9 +1339,10 @@ test.describe("Artifact Server frontend MVP", () => {
       }).click();
       await expect(fixture.page.getByRole("heading", {exact: true, level: 1, name: "Private fixture"}))
         .toBeVisible();
+      await fixture.page.getByRole("button", {name: "Artifact actions"}).click();
       const [privatePage] = await Promise.all([
         fixture.context.waitForEvent("page"),
-        fixture.page.getByRole("button", {name: "Open raw artifact"}).click(),
+        fixture.page.getByRole("menuitem", {exact: true, name: "Open raw"}).click(),
       ]);
       await expect(privatePage.locator("body")).toContainText("private browser content");
       await privatePage.close();

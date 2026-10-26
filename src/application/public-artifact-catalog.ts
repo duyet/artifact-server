@@ -184,9 +184,8 @@ function makePublicArtifactCatalogService(
     },
   );
 
-  // Folders are not owned by anyone, so the gate is the one that guards
-  // every artifact setting. Whoever may tag an artifact unlisted can already
-  // hide it from the tree, which is more than collapsing its folder does.
+  // Folders are not owned by anyone, so the gate is the management rule that
+  // guards an artifact's other metadata, not the owner rule for visibility.
   const setFolderDefaultState = Effect.fn(
     "PublicArtifactCatalogService.setFolderDefaultState",
   )(function*(command: SetFolderDefaultStateCommand) {
