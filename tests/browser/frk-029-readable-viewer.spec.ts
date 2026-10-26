@@ -224,7 +224,7 @@ test.describe("FRK-029 readable URL viewer", () => {
     }
   });
 
-  test("FRK-029-B: after an ordinary link moves the frame to another page, the bar stops naming the first artifact and links back to it", async ({browser}) => {
+  test("FRK-029-B: after an ordinary link moves the frame to another page, the bar stops naming the first artifact, drops its visibility control, and reopens it", async ({browser}) => {
     const fixture = await startBrowserFixture(browser, {contentDomain: null});
     try {
       const page = fixture.page;
@@ -245,26 +245,43 @@ test.describe("FRK-029 readable URL viewer", () => {
         path: nextPath,
       });
       const readableUrl = `${fixture.server.baseUrl}/${readablePath}/`;
+      // A manager sees the visibility control, which must never act on the
+      // first artifact while the frame shows another.
+      await localLogin(fixture);
+      const visibility = page.getByRole("combobox", {name: "Visibility"});
 
       await page.goto(readableUrl);
       const bar = viewerBar(page);
       await expect(bar.getByRole("heading", {level: 1, name: artifactName})).toBeVisible();
-      const frame = await pageFrame(page);
-      await frame.getByRole("link", {name: "Open the next page"}).click();
+      await bar.getByRole("button", {name: "Artifact info"}).click();
+      await expect(visibility).toBeVisible();
+      await page.keyboard.press("Escape");
+      await (await pageFrame(page)).getByRole("link", {name: "Open the next page"}).click();
 
       await expect(bar.getByRole("heading", {level: 1, name: "Navigated away"})).toBeVisible();
+      await expect(bar.getByRole("heading", {name: artifactName})).toHaveCount(0);
       await expect(page).toHaveURL(readableUrl);
       await expect(page).toHaveTitle("Navigated away");
       await expect(bar.getByRole("button", {name: "Artifact info"})).toHaveCount(0);
+      await expect(visibility).toHaveCount(0);
       await bar.getByRole("button", {name: "Artifact actions"}).click();
-      await expect(page.getByRole("menuitem")).toHaveText(["Full screen"]);
+      await expect(page.getByRole("menuitem")).toHaveText(["Open raw", "Full screen"]);
       await page.keyboard.press("Escape");
 
-      await bar.getByRole("link", {name: `Back to ${artifactName}`}).click();
+      await bar.getByRole("link", {name: "Open this page"}).click();
       await expect(bar.getByRole("heading", {level: 1, name: artifactName})).toBeVisible();
-      await expect(bar.getByRole("button", {name: "Artifact info"})).toBeVisible();
-      const reloaded = await pageFrame(page);
-      await expect(reloaded.getByRole("link", {name: "Open the next page"})).toBeVisible();
+      await bar.getByRole("button", {name: "Artifact info"}).click();
+      await expect(visibility).toBeVisible();
+      await page.keyboard.press("Escape");
+      await (await pageFrame(page)).getByRole("link", {name: "Open the next page"}).click();
+      await expect(bar.getByRole("heading", {level: 1, name: "Navigated away"})).toBeVisible();
+
+      // Open raw still opens the first artifact's page, alone.
+      await bar.getByRole("button", {name: "Artifact actions"}).click();
+      await page.getByRole("menuitem", {exact: true, name: "Open raw"}).click();
+      await expect(page).toHaveURL(`${readableUrl}?raw=1`);
+      await expect(page.getByRole("link", {name: "Open the next page"})).toBeVisible();
+      await expect(viewerBar(page)).toHaveCount(0);
     } finally {
       await stopBrowserFixture(fixture);
     }
