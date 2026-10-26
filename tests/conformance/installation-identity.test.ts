@@ -306,6 +306,7 @@ describe("installation identity and access", () => {
     expect(contextResponse.headers.get("cache-control")).toBe("private, no-store");
     await expect(contextResponse.json()).resolves.toEqual({
       accessMode: "local_owner",
+      helpUrl: null,
       login: {kind: "local_owner"},
     });
 
@@ -423,6 +424,7 @@ describe("installation identity and access", () => {
     const contextResponse = await fetch(`${server.baseUrl}/auth/context`);
     await expect(contextResponse.json()).resolves.toEqual({
       accessMode: "private_team",
+      helpUrl: null,
       login: {kind: "none", oidc: false},
     });
     const boundaryHeaders = {

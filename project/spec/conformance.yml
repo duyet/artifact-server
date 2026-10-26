@@ -4505,3 +4505,17 @@ requirements:
     proof_gap: Proved against the configuration parsers, a real local server, and a spawned compact server. The external-storage server command passes the parsed logo the same way but runs only in CI with Postgres, the browser view of the logo runs only in CI, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
+
+  - id: FRK-031
+    kind: security
+    behavior: The home page header shows Sign in to a signed-out reader and an account menu to a signed-in one, with the member's own name and email, My artifacts, Workbench, an optional Help link, and Sign out, which revokes the session on the server; /api/v1/session names the caller's own display name and, only for a person's direct session, their email, and /auth/context names the operator's https Help URL from ARTIFACT_SERVER_HELP_URL or null.
+    owner: web-application
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: 7-account-menu}
+    acceptance:
+      behavior: {id: FRK-031-B, description: "Sign a member's browser in and read their own display name and email from /api/v1/session with no other member's name or email in the body; read a configured help URL from /auth/context; parse ARTIFACT_SERVER_HELP_URL in the external-storage and compact parsers, and read null when it is unset or empty. In a browser, a signed-out reader sees Sign in, a signed-in reader opens the avatar menu from the keyboard and reads their name, My artifacts, Workbench, and Help, Escape closes it and returns focus to the avatar, and Sign out lands on the home page with Sign in shown again."}
+      failure: {id: FRK-031-F, description: "A bearer operator key on a member's principal, the bootstrap key, and a browser session made from an administrator-issued key on a member's principal each read a null email; without a help URL /auth/context reads null; an anonymous /api/v1/session is 401, and so is the old session cookie after Sign out; an http, javascript:, credentialed, relative, or bare-host help URL stops startup with ARTIFACT_SERVER_HELP_URL and invalid_value."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against the configuration parsers and a real local server over SQLite. The email lookup reuses the identity repository's findMember, which both SQLite and Postgres implement, but the Postgres path runs only in CI with Docker, the browser spec runs only where Chromium is installed, and no deployed run exists.
+    depends_on: [FRK-009]
+    evidence: []

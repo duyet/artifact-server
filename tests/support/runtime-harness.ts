@@ -85,6 +85,7 @@ export async function startTestServer(
     readonly developmentProxyCredential?: string;
     readonly externalApiBearerVerifier?: BearerCredentialVerifier;
     readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
+    readonly helpUrl?: string;
     readonly hostname?: string;
     readonly logo?: ViewerLogo;
     readonly observability?: boolean;
@@ -141,6 +142,9 @@ export async function startTestServer(
       ...config,
       externalMcpBearerVerifier: options.externalMcpBearerVerifier,
     };
+  }
+  if (options.helpUrl !== undefined) {
+    config = {...config, helpUrl: options.helpUrl};
   }
   if (options.hostname !== undefined) {
     config = {...config, hostname: options.hostname};

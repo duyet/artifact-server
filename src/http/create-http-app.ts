@@ -540,6 +540,8 @@ export interface HttpAppDependencies {
   readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
+  /** Where the home page's account menu sends Help, or null for no Help item. */
+  readonly helpUrl: string | null;
   /** The viewer bar's logo, or null to show the product mark. */
   readonly logo: ViewerLogo | null;
   readonly readiness?: ReadinessProbe;
@@ -1009,6 +1011,7 @@ export function createHttpApp(
     context.header("Cache-Control", "private, no-store");
     return context.json({
       accessMode: dependencies.browserAccess.mode,
+      helpUrl: dependencies.helpUrl,
       login: dependencies.browserAccess.mode === browserAccessModes.privateTeam
         ? {
           kind: dependencies.browserAccess.loginKind,
@@ -1219,14 +1222,22 @@ export function createHttpApp(
     return context.redirect("/", 303);
   });
 
-  app.get("/api/v1/session", (context) =>
-    context.json({
+  app.get("/api/v1/session", async (context) => {
+    const principal = context.get("principal");
+    const account = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) => access.ownAccount(principal)),
+    );
+    return context.json({
+      account,
       authenticationMethod: context.get("authenticationMethod"),
       capabilities: {
         editing: {maximumTextFileBytes: maximumEditableTextBytes},
       },
-      principal: context.get("principal"),
-    }));
+      principal,
+    });
+  });
 
   app.post("/api/v1/session/logout", async (context) => {
     const sessionToken = context.get("sessionToken");

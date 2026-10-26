@@ -68,6 +68,8 @@ export interface ExternalStorageRuntimeConfig {
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
   readonly installationId: string;
   readonly localBootstrapCredential?: Redacted.Redacted;
+  /** The account menu's Help link; absent or null shows no Help item. */
+  readonly helpUrl?: string | null;
   /** The viewer bar's logo; absent or null shows the product mark. */
   readonly logo?: ViewerLogo | null;
   readonly objectStorage: ObjectStorageProviderFactory;
@@ -177,6 +179,7 @@ export async function createExternalStorageRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
+      helpUrl: config.helpUrl ?? null,
       logo: config.logo ?? null,
       readiness: () => externalStorageReadiness(database, connectedObjectStorage),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
