@@ -85,13 +85,16 @@ const entries = {
   [`uid=erin,${people}`]: {...directoryEntry("erin password", {
     mail: ["erin@example.com"],
   }), unreadable: true},
-  // A directory ignores the padding, so this entry stands for `frank` signed in with spaces.
-  [`uid=\\ frank\\ ,${people}`]: directoryEntry("frank password", {
+  [`uid=frank,${people}`]: directoryEntry("frank password", {
     mail: ["frank@example.com"],
   }),
   // An administrator's address delegated to grace sits after her own.
   [`uid=grace,${people}`]: directoryEntry("grace password", {
     mail: ["grace@example.com", "admin@example.com"],
+  }),
+  [`uid=jo.doe,${people}`]: directoryEntry("jo password", {
+    displayName: ["Jo Doe"],
+    mail: ["jo.doe@example.com"],
   }),
   [`uid=nomail,${people}`]: directoryEntry("nomail password", {displayName: ["No Mail"]}),
   // The RFC 4514 escaped form of the username `o,brien+x$&`.
@@ -360,18 +363,20 @@ describe("LDAP browser sign-in", () => {
     expect(second.id).toBe(first.id);
   });
 
-  test("a username with DN special characters binds as its own escaped DN, and a required group admits its members", async () => {
+  test("a required group admits its members, and the adapter binds a username with DN special characters as its own escaped DN", async () => {
     await start({
       configuration: {requiredGroupDn: editors.toUpperCase()},
       unknownUsers: unknownDirectoryUserPolicies.admit,
     });
     expect((await signIn(running(), "alice", alicePassword)).status).toBe(204);
-    await expectRejected(await signIn(running(), "o,brien+x$&", "obrien password"));
-    expect(directory.binds).toContain(`uid=o\\,brien\\+x$&,${people}`);
+    await expectRejected(await signIn(running(), "carol", "carol password"));
 
-    await server?.stop();
-    await start({unknownUsers: unknownDirectoryUserPolicies.admit});
-    expect((await signIn(running(), "o,brien+x$&", "obrien password")).status).toBe(204);
+    const authenticator = createLdapDirectoryAuthenticator(ldapConfiguration(directory));
+    const identity = await Effect.runPromise(
+      authenticator.authenticate("o,brien+x$&", Redacted.make("obrien password")),
+    );
+    expect(identity.emails).toEqual(["obrien@example.com"]);
+    expect(directory.binds).toContain(`uid=o\\,brien\\+x$&,${people}`);
   });
 
   test("FRK-022-F: a wrong password, a user with no member, a deactivated member under any of its emails, a missing email, an unreadable entry, and a user outside the required group get the same 401", async () => {
@@ -437,8 +442,26 @@ describe("LDAP browser sign-in", () => {
     expect(directory.binds).toEqual([]);
   });
 
-  test("usernames that try to rewrite the DN bind only as their own escaped value", async () => {
+  test("a username outside letters, digits, and ._@- is the same 401 before any bind and is charged to the client", async () => {
     await start({unknownUsers: unknownDirectoryUserPolicies.admit});
+    const refused = await Promise.all(["alice\u0001", "a lice", " alice", "alice,ou=people", ""]
+      .map((username) => signIn(running(), username, alicePassword)));
+    await Promise.all(refused.map(expectRejected));
+    expect(directory.binds).toEqual([]);
+    // Five refusals use up this client's count, so even a valid sign-in waits.
+    expect((await signIn(running(), "jo.doe", "jo password")).status).toBe(429);
+    await server?.stop();
+
+    await start({unknownUsers: unknownDirectoryUserPolicies.admit});
+    const dotted = await signIn(running(), "jo.doe", "jo password");
+    expect(dotted.status).toBe(204);
+    expect(await sessionPrincipal(running(), browserCookies(dotted)))
+      .toMatchObject({displayName: "Jo Doe"});
+    expect(directory.binds).toEqual([`uid=jo.doe,${people}`]);
+  });
+
+  test("the adapter binds usernames that try to rewrite the DN only as their own escaped value", async () => {
+    const authenticator = createLdapDirectoryAuthenticator(ldapConfiguration(directory));
     const attempts = [
       `alice,${people}`,
       `uid=alice,${people}`,
@@ -450,14 +473,12 @@ describe("LDAP browser sign-in", () => {
       "alice\0",
       "EXTERNAL",
     ];
-    const rejectAll = (usernames: readonly string[]) =>
-      Promise.all(usernames.map(async (username) =>
-        expectRejected(await signIn(running(), username, alicePassword))));
-    // A fresh server for the last four keeps the failed sign-in limit out of the way.
-    await rejectAll(attempts.slice(0, 5));
-    await server?.stop();
-    await start({unknownUsers: unknownDirectoryUserPolicies.admit});
-    await rejectAll(attempts.slice(5));
+    const rejected = await Promise.all(attempts.map((username) =>
+      Effect.runPromise(Effect.flip(
+        authenticator.authenticate(username, Redacted.make(alicePassword)),
+      ))));
+    expect(rejected.map((failure) => failure._tag))
+      .toEqual(attempts.map(() => "DirectorySignInRejected"));
     expect(directory.binds.toSorted()).toEqual([
       `uid=alice\\,ou=people\\,dc=example\\,dc=com,${people}`,
       `uid=uid=alice\\,ou=people\\,dc=example\\,dc=com,${people}`,
@@ -547,7 +568,7 @@ describe("LDAP browser sign-in", () => {
     expect(apiKey.status).toBe(204);
   });
 
-  test("a username's case, width, invisible characters, and spacing do not buy a directory user more guesses", async () => {
+  test("a username's case and width do not buy a directory user more guesses, and invisible characters and spacing never reach the directory", async () => {
     await server?.stop();
     server = await startTestServer(installation, {
       applicationOrigin: "https://example.test",
@@ -565,17 +586,23 @@ describe("LDAP browser sign-in", () => {
       "X-Forwarded-Host": "example.test",
       "X-Forwarded-Proto": "https",
     });
-    const variants = ["carol", "CAROL", "\uFF43\uFF41\uFF52\uFF4F\uFF4C", "car\u00ADol", " carol\u200B "];
+    const variants = ["carol", "CAROL", "Carol", "\uFF43\uFF41\uFF52\uFF4F\uFF4C", "cArOl"];
     const guesses = await Promise.all([...variants, ...variants].map((username, index) =>
       signIn(running(), username, "guess", from(`203.0.113.${index + 10}`))));
     expect(guesses.map((response) => response.status)).toEqual(Array.from({length: 10}, () => 401));
     expect((await signIn(running(), "carol", "carol password", from("203.0.113.99"))).status)
       .toBe(429);
+
+    const bindsBefore = directory.binds.length;
+    await Promise.all(["car\u00ADol", " carol\u200B ", "carol\u0001"].map(async (username, index) =>
+      expectRejected(await signIn(running(), username, "guess", from(`203.0.113.${index + 50}`)))));
+    expect(directory.binds).toHaveLength(bindsBefore);
   });
 
-  test("an admitted directory user with no display name is named by the username without its padding", async () => {
+  test("an admitted directory user with no display name is named by the username, and a padded username is refused", async () => {
     await start({unknownUsers: unknownDirectoryUserPolicies.admit});
-    const response = await signIn(running(), " frank ", "frank password");
+    await expectRejected(await signIn(running(), " frank ", "frank password"));
+    const response = await signIn(running(), "frank", "frank password");
     expect(response.status).toBe(204);
     expect(await sessionPrincipal(running(), browserCookies(response))).toMatchObject({
       displayName: "frank",
@@ -640,14 +667,16 @@ describe("LDAP browser sign-in", () => {
     expect((await signIn(running(), "alice", alicePassword)).status).toBe(204);
     await expectRejected(await signIn(running(), "carol", "carol password"));
     await expectRejected(await signIn(running(), "alice", "a distinctive wrong password"));
+    await expectRejected(await signIn(running(), "alice\u0001", alicePassword));
 
     const audit = lines.filter((line) => line.includes("auth.directory_sign_in."));
-    expect(audit).toHaveLength(3);
+    expect(audit).toHaveLength(4);
     expect(audit[0]).toContain("auth.directory_sign_in.succeeded");
     expect(audit[0]).toContain("alice");
     expect(audit[1]).toContain("auth.directory_sign_in.rejected");
     expect(audit[1]).toContain("no_member");
     expect(audit[2]).toContain("invalid_credentials");
+    expect(audit[3]).toContain("invalid_username");
     for (const line of lines) {
       expect(line).not.toContain(alicePassword);
       expect(line).not.toContain("a distinctive wrong password");

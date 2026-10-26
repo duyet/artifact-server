@@ -469,9 +469,16 @@ const issueApiKeySchema = z.object({
 const apiKeySignInSchema = z.object({
   apiKey: z.string().min(1).max(1_024),
 }).strict();
+// Letters, digits, and `._@-` only, so a username carries no DN syntax and
+// nothing a directory might drop or fold into another user's name.
+const directoryUsernamePattern = /^[\p{L}\p{N}._@-]{1,200}$/u;
 const directorySignInSchema = z.object({
   password: z.string().min(1).max(1_024),
-  username: z.string().min(1).max(200),
+  // Null for a username outside the pattern, which is refused like a wrong password.
+  username: z.string().transform((username) => {
+    const normalized = username.normalize("NFC");
+    return directoryUsernamePattern.test(normalized) ? normalized : null;
+  }),
 }).strict();
 
 // Characters RFC 4518 section 2.2 maps to nothing before a directory compares names.
@@ -1078,16 +1085,20 @@ export function createHttpApp(
     // Passwords are guessable, unlike keys, so a success resets neither
     // count: not the client's, and not the username's, which a victim's own
     // sign-in would otherwise clear for whoever is guessing at it.
+    const counters: SignInCounter[] = [
+      {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
+    ];
+    // A refused username never reaches the directory, so only the client pays.
+    if (body.username !== null) {
+      counters.push({
+        key: directoryUsernameKey(body.username),
+        limiter: failedDirectoryUsers,
+        onSuccess: "refund",
+      });
+    }
     return limitedSignIn(
       context,
-      [
-        {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
-        {
-          key: directoryUsernameKey(body.username),
-          limiter: failedDirectoryUsers,
-          onSuccess: "refund",
-        },
-      ],
+      counters,
       signInWithDirectory(
         directory,
         body.username,

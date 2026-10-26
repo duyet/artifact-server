@@ -1,6 +1,10 @@
 import {Effect, type Redacted} from "effect";
 
-import type {DirectorySignIn} from "../core/directory-sign-in.js";
+import {
+  type DirectorySignIn,
+  directoryRejectionReasons,
+  DirectorySignInRejected,
+} from "../core/directory-sign-in.js";
 import {AuthenticationRequired} from "../core/errors.js";
 import {InstallationAccessService} from "./installation-access.js";
 
@@ -15,13 +19,19 @@ const outcomes = {
  * of the member the directory's email names. Every attempt writes one audit
  * log line with the username and outcome. The password never reaches a log.
  * Each refusal reason reaches the browser as the same 401, so a caller cannot
- * tell a wrong password from a user who has no member.
+ * tell a wrong password from a user who has no member. A null username is one
+ * the caller already refused; it is rejected without contacting the directory.
  */
 export const signInWithDirectory = Effect.fn("signInWithDirectory")(function*(
   directory: DirectorySignIn,
-  username: string,
+  username: string | null,
   password: Redacted.Redacted,
 ) {
+  if (username === null) {
+    return yield* new DirectorySignInRejected({
+      reason: directoryRejectionReasons.invalidUsername,
+    });
+  }
   const identity = yield* directory.authenticator.authenticate(username, password);
   const access = yield* InstallationAccessService;
   const issued = yield* access.loginWithDirectoryIdentity(identity, directory.unknownUsers);
