@@ -51,9 +51,9 @@ export function ReadableBar({
   readonly navigatedAway: boolean;
   readonly onFullScreen: () => void;
   readonly onHide: () => void;
-  /** The URL the tab opened, which loads the named page again. */
+  /** The URL the tab opened, which loads the named artifact again. */
   readonly openedUrl: string;
-  /** The same URL with `?raw=1`: the page alone, with no bar. */
+  /** The opened URL with `?raw=1`: the named artifact's page alone, with no bar. */
   readonly rawUrl: string;
 }) {
   const reviewUrl = navigatedAway ? null : artifact.reviewUrl;
@@ -67,7 +67,7 @@ export function ReadableBar({
         </h1>
         {navigatedAway ? (
           <ButtonLink className="min-w-0 max-w-56" href={openedUrl} size="xs" variant="outline">
-            <span className="truncate">Back to {artifact.name ?? "the artifact"}</span>
+            <span className="truncate">Open this page</span>
           </ButtonLink>
         ) : (
           <ArtifactInfoPopover
@@ -88,17 +88,15 @@ export function ReadableBar({
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuGroup>
               {navigatedAway ? null : (
-                <>
-                  <DropdownMenuItem onClick={() => void copyLink()}>
-                    <IconLink />
-                    Copy link
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => window.location.assign(rawUrl)}>
-                    <IconExternalLink />
-                    Open raw
-                  </DropdownMenuItem>
-                </>
+                <DropdownMenuItem onClick={() => void copyLink()}>
+                  <IconLink />
+                  Copy link
+                </DropdownMenuItem>
               )}
+              <DropdownMenuItem onClick={() => window.location.assign(rawUrl)}>
+                <IconExternalLink />
+                Open raw
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={onFullScreen}>
                 <IconMaximize />
                 Full screen
