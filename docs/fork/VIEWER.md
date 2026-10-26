@@ -82,3 +82,29 @@ Before this change, any direct human member could change any artifact's access, 
 - `canManage` is `canManageArtifact` for the reader. The popover offers the visibility control only when it is true, and Share's access screen turns read-only when it is false.
 
 The viewer reads the info when the artifact opens, and again whenever the artifact's access, tags, or current version change, whether the change came from the popover, from Share, or from a new version.
+
+## Viewer logo
+
+The bar shows the installation's logo when an operator configures one, and the product mark otherwise. Three environment variables set it, for both compact and external-storage servers:
+
+| Variable | Meaning |
+| --- | --- |
+| `ARTIFACT_SERVER_LOGO` | An `https://` URL without credentials, or an absolute path to a `.svg`, `.png`, `.webp`, `.jpg`, or `.jpeg` file of at most 256 KiB. |
+| `ARTIFACT_SERVER_LOGO_ALT` | The image's alternative text, 1 to 100 characters. Required when `ARTIFACT_SERVER_LOGO` is set. |
+| `ARTIFACT_SERVER_LOGO_LINK` | Optional. An `https://` URL, or a path that starts with exactly one `/`. Without it, the logo is not a link. |
+
+`src/lifecycle/runtime-configuration.ts` parses them at startup and reads a logo file once into memory. Every refusal stops startup with `RuntimeConfigurationError`:
+
+- `invalid_value` for an `http://` or credentialed URL, a relative path, an unsupported extension, a file over 256 KiB, an alt over 100 characters, or a link such as `//host`, `/\host`, or `javascript:`.
+- `path_unavailable` for a file that does not exist or is not a regular file.
+- `missing_value` for a logo without alt text.
+- `incomplete_configuration` for an alt or a link without a logo.
+
+`config check` reports `logo` as `{source, location, alt, link}`, where `source` is `url` or `file` and `location` is the URL or the path, or `null` when no logo is set.
+
+Two anonymous routes under `/api/v1/public/` serve it, so no reserved path root changes:
+
+- `GET /api/v1/public/branding` answers `{"logo": {"src", "alt", "href"}}`, or `{"logo": null}`, with `Cache-Control: no-cache`. `src` is the configured URL, or `/api/v1/public/logo` for a file. Review fetches it once per page load.
+- `GET` and `HEAD /api/v1/public/logo` serve a logo file with its extension's media type, `X-Content-Type-Options: nosniff`, an ETag that answers 304, and `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`. Someone who opens an SVG logo at this URL gets a document on the application origin, and the sandbox stops its scripts. Without a logo file, the route answers 404 `NOT_FOUND`.
+
+A URL logo loads from another origin, so the application pages' policy adds that URL's exact origin to `img-src`, as in `img-src 'self' data: https://cdn.example.com`. No other directive changes, and the content sandbox and the review frame's policy stay as they were.

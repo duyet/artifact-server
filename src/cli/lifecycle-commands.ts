@@ -383,6 +383,7 @@ function configureExternalStorageStart(
         databaseUrl: parsed.databaseUrl,
         hostname: parsed.hostname,
         installationId: parsed.installationId,
+        logo: parsed.logo,
         objectStorage: parsed.objectStorage,
         port: parsed.port,
         postgresMaxConnections: parsed.postgresMaxConnections,
@@ -419,6 +420,7 @@ async function startCompactServer(
     dataDirectory: configuration.dataDirectory,
     hostname: configuration.hostname,
     installationId: configuration.installation.installationId,
+    logo: configuration.logo,
     port: configuration.port,
     readinessWithdrawalMilliseconds:
       configuration.readinessWithdrawalMilliseconds,
