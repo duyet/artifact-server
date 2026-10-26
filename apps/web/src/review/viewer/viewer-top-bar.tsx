@@ -16,11 +16,11 @@ import {
   IconShare,
   IconTrash,
 } from "@tabler/icons-react";
-import {toast} from "sonner";
 
 import type {ArtifactOwner, ArtifactVersion} from "@/api/client";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
+import {copyText} from "@/lib/copy-text";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -114,12 +114,7 @@ export function ViewerTopBar({
   const narrow = useSyncExternalStore(subscribeNarrowViewport, isNarrowViewport);
   const copyLink = async (): Promise<void> => {
     if (selectedVersion === null) return;
-    try {
-      await navigator.clipboard.writeText(selectedVersion.links.review);
-      toast.success("Review link copied");
-    } catch {
-      toast.error("The link could not be copied.");
-    }
+    await copyText(selectedVersion.links.review, "Review link copied");
   };
 
   return (

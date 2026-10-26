@@ -39,7 +39,6 @@ const publicCatalogSchema = z.object({
   artifacts: z.array(publicArtifactSchema),
   collapsedFolders: z.array(z.string().min(1).max(200)),
   generatedAt: z.iso.datetime(),
-  loginKind: z.enum(["local_owner", "none", "oidc", "workos"]),
   truncated: z.boolean(),
   viewer: z.object({name: z.string()}).nullable(),
   windowDays: z.number().int().positive(),
@@ -51,7 +50,6 @@ export interface PublicCatalog {
   /** Folder paths that start collapsed. Every other folder starts expanded. */
   readonly collapsedFolders: readonly string[];
   readonly generatedAt: string;
-  readonly loginKind: z.infer<typeof publicCatalogSchema>["loginKind"];
   readonly truncated: boolean;
   /** The signed-in member, or null for an anonymous reader. */
   readonly viewer: {readonly name: string} | null;
@@ -91,7 +89,6 @@ export async function readPublicCatalog(
     })),
     collapsedFolders: catalog.collapsedFolders,
     generatedAt: catalog.generatedAt,
-    loginKind: catalog.loginKind,
     truncated: catalog.truncated,
     viewer: catalog.viewer,
     windowDays: catalog.windowDays,

@@ -119,15 +119,6 @@ function segmentFolder(
   return folder;
 }
 
-/** The inclusive day list a window covers, newest last. */
-export function windowDays(untilDay: string, count: number): readonly string[] {
-  const days: string[] = [];
-  for (let offset = count - 1; offset >= 0; offset -= 1) {
-    days.push(shiftDay(untilDay, -offset));
-  }
-  return days;
-}
-
 /**
  * Expand a sparse ascending series into one count per day of the window, so a
  * chart can place a bar at a day instead of inferring where days went missing.
@@ -218,13 +209,6 @@ export function busiestDay(
     if (count > 0 && count >= (busiest?.count ?? 0)) busiest = {count, day};
   }
   return busiest;
-}
-
-/** One calendar day, `days` after or before `day`, as `YYYY-MM-DD`. */
-function shiftDay(day: string, days: number): string {
-  const instant = new Date(`${day}T00:00:00.000Z`);
-  instant.setUTCDate(instant.getUTCDate() + days);
-  return instant.toISOString().slice(0, 10);
 }
 
 /**

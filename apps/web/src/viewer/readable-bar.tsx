@@ -7,8 +7,6 @@ import {
   IconLogin,
   IconMaximize,
 } from "@tabler/icons-react";
-import {toast} from "sonner";
-
 import {AccountMenu, AccountMenuItems} from "@/account/account-menu";
 import {type SignInContext, signInHref} from "@/account/sign-in-context";
 import {Button, ButtonLink} from "@/components/ui/button";
@@ -21,19 +19,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {useIsMobile} from "@/hooks/use-mobile";
+import {copyText} from "@/lib/copy-text";
 import {IconButton} from "@/review/review-primitives";
 import {ArtifactInfoPopover} from "@/review/viewer/artifact-info-popover";
 import {ViewerLogo} from "@/review/viewer/viewer-logo";
 import type {ReadableArtifact} from "./use-readable-artifact.js";
 
-async function copyLink(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(window.location.href);
-    toast.success("Link copied");
-  } catch {
-    toast.error("The link could not be copied.");
-  }
-}
+const copyLink = (): Promise<void> => copyText(window.location.href, "Link copied");
 
 /**
  * The 40px bar above a page opened at its readable URL. It is application

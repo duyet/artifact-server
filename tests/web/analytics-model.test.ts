@@ -11,11 +11,10 @@ import {
   levelFor,
   localDateToDay,
   recentDaily,
-  shiftDay,
   sumMetric,
-  windowDays,
   type DailyActivity,
 } from "../../apps/web/src/analytics/analytics-model.js";
+import {shiftDay, windowDays} from "../../apps/web/src/lib/utc-days.js";
 
 // 2026-10-18 is a Sunday, which makes the week columns easy to count by hand.
 const today = "2026-10-18";

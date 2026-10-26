@@ -25,6 +25,7 @@ import {Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVal
 import {Skeleton} from "@/components/ui/skeleton";
 import {Tabs, TabsList, TabsTrigger} from "@/components/ui/tabs";
 import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
+import {copyText} from "@/lib/copy-text";
 import {cn} from "@/lib/utils";
 import {AccessBadge} from "../access-badge.tsx";
 import {OwnerAvatar} from "../owner-avatar.tsx";
@@ -112,12 +113,10 @@ export function ArtifactsPage({
       return;
     }
     if (action === "copy-link") {
-      try {
-        await navigator.clipboard.writeText(new URL(artifactHref(projectId, item), window.location.origin).toString());
-        toast.success("Review link copied");
-      } catch {
-        toast.error("The link could not be copied.");
-      }
+      await copyText(
+        new URL(artifactHref(projectId, item), window.location.origin).toString(),
+        "Review link copied",
+      );
       return;
     }
     try {
