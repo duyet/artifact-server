@@ -167,7 +167,7 @@ function identityFromEntry(
   return Effect.succeed({
     displayName: displayName === undefined || displayName.length > 200 ? null : displayName,
     emails: [firstEmail, ...otherEmails],
-    username,
+    username: username.trim(),
   });
 }
 

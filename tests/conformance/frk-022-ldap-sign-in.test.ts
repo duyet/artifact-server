@@ -85,6 +85,10 @@ const entries = {
   [`uid=erin,${people}`]: {...directoryEntry("erin password", {
     mail: ["erin@example.com"],
   }), unreadable: true},
+  // A directory ignores the padding, so this entry stands for `frank` signed in with spaces.
+  [`uid=\\ frank\\ ,${people}`]: directoryEntry("frank password", {
+    mail: ["frank@example.com"],
+  }),
   [`uid=nomail,${people}`]: directoryEntry("nomail password", {displayName: ["No Mail"]}),
   // The RFC 4514 escaped form of the username `o,brien+x$&`.
   [`uid=o\\,brien\\+x$&,${people}`]: directoryEntry("obrien password", {
@@ -474,6 +478,42 @@ describe("LDAP browser sign-in", () => {
       method: "POST",
     });
     expect(apiKey.status).toBe(204);
+  });
+
+  test("a username's case, width, invisible characters, and spacing do not buy a directory user more guesses", async () => {
+    await server?.stop();
+    server = await startTestServer(installation, {
+      applicationOrigin: "https://example.test",
+      bootstrapAdministratorEmail,
+      browserAccess: privateTeamBrowserAccess(browserLoginKinds.none, {
+        authenticator: createLdapDirectoryAuthenticator(ldapConfiguration(directory)),
+        unknownUsers: unknownDirectoryUserPolicies.admit,
+      }),
+      contentDomain: null,
+    });
+    const from = (client: string) => ({
+      ...sameOriginHeaders(running()),
+      Origin: "https://example.test",
+      "X-Forwarded-For": client,
+      "X-Forwarded-Host": "example.test",
+      "X-Forwarded-Proto": "https",
+    });
+    const variants = ["carol", "CAROL", "\uFF43\uFF41\uFF52\uFF4F\uFF4C", "car\u00ADol", " carol\u200B "];
+    const guesses = await Promise.all(variants.map((username, index) =>
+      signIn(running(), username, "guess", from(`203.0.113.${index + 10}`))));
+    expect(guesses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401]);
+    expect((await signIn(running(), "carol", "carol password", from("203.0.113.99"))).status)
+      .toBe(429);
+  });
+
+  test("an admitted directory user with no display name is named by the username without its padding", async () => {
+    await start({unknownUsers: unknownDirectoryUserPolicies.admit});
+    const response = await signIn(running(), " frank ", "frank password");
+    expect(response.status).toBe(204);
+    expect(await sessionPrincipal(running(), browserCookies(response))).toMatchObject({
+      displayName: "frank",
+      kind: "human",
+    });
   });
 
   test("an unreachable or silent directory is 503 DIRECTORY_UNAVAILABLE within the timeout and is not counted as a failed sign-in", async () => {

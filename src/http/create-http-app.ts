@@ -470,6 +470,20 @@ const directorySignInSchema = z.object({
   password: z.string().min(1).max(1_024),
   username: z.string().min(1).max(200),
 }).strict();
+
+// Characters RFC 4518 section 2.2 maps to nothing before a directory compares names.
+const ignoredUsernameCharacters =
+  /[\u00AD\u200B-\u200D\u2060\uFEFF]|\u034F|[\u180B-\u180D]|[\uFE00-\uFE0F]/gu;
+
+/** One failed-sign-in key for every spelling a directory treats as the same username. */
+function directoryUsernameKey(username: string): string {
+  return username
+    .normalize("NFKC")
+    .replaceAll(ignoredUsernameCharacters, "")
+    .replaceAll(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -1061,7 +1075,7 @@ export function createHttpApp(
       [
         {key: clientAddress, limiter: failedDirectorySignIns, onSuccess: "refund"},
         {
-          key: body.username.trim().toLowerCase(),
+          key: directoryUsernameKey(body.username),
           limiter: failedDirectoryUsers,
           onSuccess: "clear",
         },
