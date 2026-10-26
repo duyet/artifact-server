@@ -162,6 +162,44 @@ export function entriesOnDay(
   );
 }
 
+/**
+ * How strongly one day's bar wears its measure's accent: a tint lighter than
+ * the accent, the accent itself, or a step stronger than it.
+ */
+export type DayTone = "accent" | "muted" | "strong";
+
+/**
+ * The tone of one day's bar. The selected day takes the strong step and the
+ * rest recede to the tint, with the day under the pointer or keyboard one
+ * step up at the accent. With no day selected every bar is the accent, and
+ * the day under the pointer previews the selected step.
+ */
+export function dayTone(
+  day: string,
+  selected: string | null,
+  active: string | null,
+): DayTone {
+  if (day === selected) return "strong";
+  if (selected === null) return day === active ? "strong" : "accent";
+  return day === active ? "accent" : "muted";
+}
+
+/**
+ * The day with the most counts in a dense window, or null when every day is
+ * zero. A tie goes to the latest day, the one a reader most likely means.
+ */
+export function busiestDay(
+  values: readonly number[],
+  days: readonly string[],
+): DailyCount | null {
+  let busiest: DailyCount | null = null;
+  for (const [index, day] of days.entries()) {
+    const count = values[index] ?? 0;
+    if (count > 0 && count >= (busiest?.count ?? 0)) busiest = {count, day};
+  }
+  return busiest;
+}
+
 /** One bar's place and height inside a fixed chart box. */
 export interface SparklineBar {
   readonly height: number;
