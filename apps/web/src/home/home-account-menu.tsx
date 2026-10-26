@@ -1,5 +1,6 @@
 import {IconFiles, IconHelp, IconLayoutDashboard, IconLogout} from "@tabler/icons-react";
 import {useEffect, useState} from "react";
+import {toast} from "sonner";
 
 import {api, type Session} from "@/api/client";
 import {Avatar, AvatarFallback} from "@/components/ui/avatar";
@@ -80,7 +81,13 @@ export function AccountMenu({
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => void api.logout().finally(() => window.location.assign("/"))}>
+          <DropdownMenuItem
+            onClick={() =>
+              void api.logout().then(
+                () => window.location.assign("/"),
+                () => toast.error("Sign out failed. You are still signed in."),
+              )}
+          >
             <IconLogout />
             Sign out
           </DropdownMenuItem>

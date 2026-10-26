@@ -1229,6 +1229,7 @@ export function createHttpApp(
       dependencies,
       InstallationAccessService.use((access) => access.ownAccount(principal)),
     );
+    context.header("Cache-Control", "private, no-store");
     return context.json({
       account,
       authenticationMethod: context.get("authenticationMethod"),

@@ -59,7 +59,7 @@ export interface PublicCatalog {
 }
 
 const signInContextSchema = z.object({
-  helpUrl: z.url().nullable(),
+  helpUrl: z.url({protocol: /^https$/u}).nullable(),
   login: z.object({oidc: z.boolean().optional()}),
 });
 
