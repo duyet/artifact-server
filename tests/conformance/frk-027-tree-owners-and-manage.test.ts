@@ -230,6 +230,19 @@ describe("artifact tree owners and manage handles", () => {
     return {administrator, alice, aliceMemberId: aliceKey.memberId, carol};
   }
 
+  /** Every artifact name a session can list, across every project. */
+  async function listedNames(cookies: BrowserCookies): Promise<readonly string[]> {
+    const read = (path: string) =>
+      fetch(`${running().baseUrl}${path}`, {headers: {Cookie: cookies.header}});
+    const projects = z.object({projects: z.array(z.object({id: z.string()}))})
+      .parse(await (await read("/api/v1/projects")).json()).projects;
+    const pages = await Promise.all(projects.map(async (project) =>
+      z.object({artifacts: z.array(z.object({artifact: z.object({name: z.string()})}))})
+        .parse(await (await read(`/api/v1/artifacts?projectId=${project.id}&limit=100`)).json())
+    ));
+    return pages.flatMap((page) => page.artifacts.map((item) => item.artifact.name)).toSorted();
+  }
+
   /** A key an administrator issues for one member, with the given scope. */
   async function issueMemberApiKey(
     administrator: BrowserCookies,
@@ -301,6 +314,11 @@ describe("artifact tree owners and manage handles", () => {
       {access: "account_required", mine: true, name: "Alice private", owner: "Alice Example @ laptop", visibility: "private"},
       {access: "public_link", mine: true, name: "Alice public", owner: "Alice Example @ laptop", visibility: "public"},
     ]);
+    // The tree shows a member nothing the authenticated listing would not:
+    // the same artifacts as every project's GET /api/v1/artifacts.
+    expect(member.artifacts.map((artifact) => artifact.name).toSorted())
+      .toEqual(await listedNames(cookies));
+
     // A member may change the visibility of what they own, so only their
     // own rows carry a handle.
     expect(manageHandle(member, "Alice public").tags).toEqual([]);
@@ -431,6 +449,8 @@ describe("artifact tree owners and manage handles", () => {
       await issueApiKey(running(), administrator, ["artifact:read"], "Reader"),
     );
     const readerTree = await readTree(running(), reader);
+    expect(readerTree.artifacts.map((artifact) => artifact.name).toSorted())
+      .toEqual(await listedNames(reader));
     expect(readerTree.viewer).toEqual({name: "Reader"});
     expect(readerTree.artifacts.map((artifact) => artifact.visibility))
       .toEqual(["unlisted", "public", "private", "public"]);

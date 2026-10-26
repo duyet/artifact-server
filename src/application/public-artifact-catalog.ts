@@ -225,7 +225,9 @@ function revealedFolders(
 
 /**
  * Every live artifact for a viewer who may list artifacts, and the public
- * ones for anyone else, an anonymous viewer included.
+ * ones for anyone else, an anonymous viewer included. The two checks are the
+ * ones `GET /api/v1/artifacts` makes before it lists a project, so the tree
+ * never shows a viewer an artifact that API would not list to them.
  */
 function catalogScopeFor(
   authorization: AuthorizationOperations,
@@ -233,6 +235,7 @@ function catalogScopeFor(
 ): Effect.Effect<CatalogScope> {
   if (viewer === null) return Effect.succeed(catalogScopes.public);
   return authorization.requireArtifactListing(viewer).pipe(
+    Effect.andThen(authorization.requireProjectAccess(viewer)),
     Effect.as(catalogScopes.all),
     Effect.catchTag("AuthorizationDenied", () =>
       Effect.succeed(catalogScopes.public)),
