@@ -263,14 +263,14 @@ interface ActiveDay {
 const dailyChartMargin = {bottom: 0, left: 0, right: 0, top: 8};
 
 /**
- * Each tone mixes the measure's accent into the card. The two tints were run
- * through the data-viz ordinal check: the lightest still clears 2:1 against
- * the card in both themes, and each step sits a visible lightness gap apart.
+ * Each tone mixes the measure's accent into the card. The two tints were
+ * checked against the card: the lightest still clears 3:1 (WCAG 1.4.11) in
+ * both themes, and each step sits a visible lightness gap apart.
  */
 const toneFill = {
   full: "var(--color-count)",
-  hover: "color-mix(in oklab, var(--color-count) 75%, var(--card))",
-  muted: "color-mix(in oklab, var(--color-count) 55%, var(--card))",
+  hover: "color-mix(in oklab, var(--color-count) 90%, var(--card))",
+  muted: "color-mix(in oklab, var(--color-count) 80%, var(--card))",
 } as const satisfies Record<DayTone, string>;
 
 /**
@@ -368,6 +368,9 @@ function DailyChart({
             onPointerUp={(event) => {
               const day = dayAt(event);
               if (day !== null && day === pressedDay.current) toggleDay(day);
+              pressedDay.current = null;
+            }}
+            onPointerCancel={() => {
               pressedDay.current = null;
             }}
             onPointerLeave={() => {
@@ -501,7 +504,8 @@ function DayTooltip({
   return (
     <div
       className="pointer-events-none absolute top-0 z-10 flex w-max flex-col rounded-md border bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground shadow-sm"
-      role="tooltip"
+      aria-hidden="true"
+      data-slot="chart-tooltip"
       style={leftHalf
         ? {left: `calc(${edge}% + 6px)`}
         : {left: `calc(${edge}% - 6px)`, transform: "translateX(-100%)"}}

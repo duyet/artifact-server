@@ -220,7 +220,7 @@ async function expectChartTones(
     const marks = page.locator("[data-slot=chart] .recharts-bar-rectangle path");
     const yesterdayBar = marks.first();
     const todayBar = marks.last();
-    const tooltip = page.getByRole("tooltip");
+    const tooltip = page.locator("[data-slot=chart-tooltip]");
     const views = await toneColours(page, "--chart-views");
 
     // The summary counts the window and names the busiest day; a tie
@@ -262,6 +262,11 @@ async function expectChartTones(
     expect(dot.x + dot.width / 2).toBeGreaterThan(column.x);
     expect(dot.x + dot.width / 2).toBeLessThan(column.x + column.width);
 
+    // Each bar sits inside its own day's button, so a y axis that changes
+    // width and shifts the bars is caught.
+    await expectColumnCovers(page.getByRole("button", {name: `${yesterdayLabel}: 2 views`}), yesterdayBar);
+    await expectColumnCovers(page.getByRole("button", {name: `${todayLabel}: 2 views`}), todayBar);
+
     const violations = await new AxeBuilder({page}).analyze();
     expect(violations.violations).toEqual([]);
     await page.locator("[data-slot=card]").filter({hasText: "Views per day"}).screenshot({
@@ -298,8 +303,8 @@ async function toneColours(page: Page, accent: "--chart-updates" | "--chart-view
       return colour;
     }), [
     `var(${accent})`,
-    `color-mix(in oklab, var(${accent}) 75%, var(--card))`,
-    `color-mix(in oklab, var(${accent}) 55%, var(--card))`,
+    `color-mix(in oklab, var(${accent}) 90%, var(--card))`,
+    `color-mix(in oklab, var(${accent}) 80%, var(--card))`,
   ]);
   return {full, hover, muted};
 }
