@@ -378,16 +378,15 @@ describe("complete-site publishing", () => {
     );
     expect(navigation.status).toBe(200);
     expect(await navigation.text()).toContain("SPA shell");
-    // Only a readable URL, which a content host never serves, frames a client
-    // route, so a frame's navigation here stays a miss.
+    // A frame's navigation to a client route reads the entry page too.
     const framed = await fetchVersion(
       server,
       new URL("/settings/profile", published.body.links.version).toString(),
       "GET",
       {Accept: "text/html", "Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate"},
     );
-    expect(framed.status).toBe(404);
-    await framed.arrayBuffer();
+    expect(framed.status).toBe(200);
+    expect(await framed.text()).toContain("SPA shell");
 
     const exactAsset = await fetchVersion(
       server,

@@ -183,7 +183,7 @@ describe("the viewer at readable artifact URLs", () => {
     expect(await totalViews(server, "Agent console")).toBe(before + 2);
   });
 
-  test("FRK-029-F: private, missing, and unknown readable URLs answer a tab exactly as before with no viewer, a frame's SPA client route falls back only at a readable URL, the viewer never counts a view, and a server without the viewer page serves a tab the page itself", async () => {
+  test("FRK-029-F: private, missing, and unknown readable URLs answer a tab exactly as before with no viewer, a frame's SPA client route reads the entry page at a readable URL, a version URL, and a preview lease, the viewer never counts a view, and a server without the viewer page serves a tab the page itself", async () => {
     await publishSite(server, installation, {
       accessSetting: "account_required",
       name: "Internal ledger",
@@ -214,7 +214,7 @@ describe("the viewer at readable artifact URLs", () => {
     expect(post.status).toBe(405);
     expect(post.headers.get("content-security-policy")).toBe(sandboxPolicy);
 
-    // Only a readable URL answers a frame's client route with the entry page.
+    // A frame's client route reads the entry page on every content form.
     const leaseResponse = await apiPost(
       installation,
       `${server.baseUrl}/api/v1/artifacts/${spa.artifact.id}/versions/${spa.version.id}/preview-leases?projectId=${spa.artifact.projectId}`,
@@ -223,13 +223,15 @@ describe("the viewer at readable artifact URLs", () => {
     const route = "settings/profile";
     expect(await get(`${spa.links.artifact}${route}?raw=1`, frameNavigation))
       .toEqual(page(spaShell));
-    const missing = {allowOrigin: "*", policy: sandboxPolicy, status: 404};
-    expect(await get(`${spa.links.version}${route}`, frameNavigation)).toMatchObject(missing);
-    expect(await get(new URL(route, lease.baseUrl).toString(), frameNavigation))
-      .toMatchObject(missing);
-    expect(await get(`${spa.links.version}${route}`, tabNavigation)).toEqual(page(spaShell, []));
-    expect((await get(new URL(route, lease.baseUrl).toString(), tabNavigation)).body)
-      .toBe(spaShell);
+    const versionEntry = page(spaShell, []);
+    expect(await get(`${spa.links.version}${route}`, frameNavigation)).toEqual(versionEntry);
+    expect(await get(`${spa.links.version}${route}`, tabNavigation)).toEqual(versionEntry);
+    const leased = await Promise.all([frameNavigation, tabNavigation].map((headers) =>
+      get(new URL(route, lease.baseUrl).toString(), headers)
+    ));
+    expect(leased).toMatchObject([frameNavigation, tabNavigation].map(() => (
+      {body: spaShell, policy: sandboxPolicy, status: 200}
+    )));
 
     const tabs = await Promise.all([1, 2, 3].map(() => get(pathUrl, tabNavigation)));
     expect(tabs.map((tab) => tab.body)).toEqual([viewerHtml, viewerHtml, viewerHtml]);
