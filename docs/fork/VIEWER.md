@@ -12,7 +12,17 @@ The bar is the existing top bar of Review's artifact viewer, `apps/web/src/revie
 
 Review shows artifact HTML in an opaque-origin `srcdoc` frame (CMT-014). The bar is application DOM outside that frame, so artifact code cannot read it, style it, or click it, and the bar never enters artifact content.
 
-The readable folder and path URLs serve the artifact document itself at the top level, under a CSP sandbox (FRK-002). A bar there would need markup injected into the artifact's HTML, which the sandbox design forbids, or a new framing route. Neither is in scope, so those URLs keep no bar.
+The readable folder and path URLs show the same logo, title, and info popover above the page. A tab's navigation there gets `apps/web/viewer.html`, which frames the page at the same path with `?raw=1`. Every other client still gets the page itself. Section 15 of `docs/fork/DESIGN.md` compares the options, lists the routing and headers, and covers views, private artifacts, and caching (FRK-029, FRK-030).
+
+At a readable URL the bar is `apps/web/src/viewer/readable-bar.tsx`:
+
+```
+[logo] Title (i)  ..............................  [hide] [⋯]
+```
+
+- The info popover is read-only for anonymous readers and for signed-in readers who may not manage the artifact. A reader for whom `canManageArtifact` holds gets the visibility control.
+- **⋯** holds Copy link, Open raw (`?raw=1`, the page alone), Full screen (the frame), and, for a signed-in reader, Open in Review.
+- **Hide bar** removes the bar and leaves a small **Show bar** button over the page's top right corner. The browser remembers the choice in `localStorage` under `artifact-server-viewer-bar`. Every read and write is wrapped, so blocked storage only means the bar shows on each load.
 
 The **⋯** menu holds the actions the old chevron menu held, plus the open-raw and download buttons that used to sit beside it:
 
@@ -83,6 +93,12 @@ Before this change, any direct human member could change any artifact's access, 
 
 The viewer reads the info when the artifact opens, and again whenever the artifact's access, tags, name, or current version change, whether the change came from the popover, from Share, a rename, or a new version. The visibility control reads the artifact record the viewer already holds, which each write updates at once, so it never shows the old value while the info reloads.
 
+## Public info
+
+`GET /api/v1/public/artifact-info?path=<pathname>` needs no credential. `path` is the page's own pathname, such as `/team/plans/some-page/docs/a.html` or a folder URL's path, at most 1024 characters and starting with `/`. The route classifies it with `parseSameHostContentRequest` and resolves it like the content router. `readPublicArtifactInfo` in `src/application/artifact-info.ts` answers.
+
+The body is the info shape above with `canManage: false`, plus `projectId`, which a signed-in reader's browser needs to read the artifact record. It carries the owner's display name and never an email or the owner's principal ID. `visibility` is `public` or `unlisted`. A private artifact, an unknown path, an application path such as `/api/...`, and every path on a server with a content domain answer 404 `ARTIFACT_NOT_FOUND` alike. A missing or malformed `path` is 422.
+
 ## Viewer logo
 
 The bar shows the installation's logo when an operator configures one, and the product mark otherwise. Three environment variables set it, for both compact and external-storage servers:
@@ -104,7 +120,7 @@ The bar shows the installation's logo when an operator configures one, and the p
 
 Two anonymous routes under `/api/v1/public/` serve it, so no reserved path root changes:
 
-- `GET /api/v1/public/branding` answers `{"logo": {"src", "alt", "href"}}`, or `{"logo": null}`, with `Cache-Control: no-cache`. `src` is the configured URL, or `/api/v1/public/logo` for a file. Review fetches it once per page load.
+- `GET /api/v1/public/branding` answers `{"logo": {"src", "alt", "href"}}`, or `{"logo": null}`, with `Cache-Control: no-cache`. `src` is the configured URL, or `/api/v1/public/logo` for a file. Review and the readable-URL viewer each fetch it once per page load.
 - `GET` and `HEAD /api/v1/public/logo` serve a logo file with its extension's media type, `X-Content-Type-Options: nosniff`, an ETag that answers 304, and `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`. Someone who opens an SVG logo at this URL gets a document on the application origin, and the sandbox stops its scripts. Without a logo file, the route answers 404 `NOT_FOUND`.
 
 A URL logo loads from another origin, so the application pages' policy adds that URL's exact origin to `img-src`, as in `img-src 'self' data: https://cdn.example.com`. No other directive changes, and the content sandbox and the review frame's policy stay as they were.

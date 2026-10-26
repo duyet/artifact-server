@@ -21,6 +21,12 @@ const navigation = {
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
 };
+/** A navigation of the viewer's frame, the way a browser loads a readable URL's page. */
+const frameNavigation = {
+  Accept: "text/html",
+  "Sec-Fetch-Dest": "iframe",
+  "Sec-Fetch-Mode": "navigate",
+};
 
 const viewCountsSchema = z.object({
   last7Days: z.number().int().nonnegative(),
@@ -162,8 +168,9 @@ describe("entry-document view counts", () => {
       {count: 4, day: today},
     ]);
 
-    // An SPA client route that misses every file is one browser navigation
-    // that answers the entry document, so the same one-view rule counts it.
+    // An SPA client route that misses every file is one navigation of the
+    // viewer's frame that answers the entry document, so the same one-view
+    // rule counts it.
     // Only the raw client sends a navigation's Sec-Fetch-Mode; undici's fetch
     // replaces it with `cors`, which answers no fallback at all.
     const spa = await publishSite(server, installation, {
@@ -177,15 +184,25 @@ describe("entry-document view counts", () => {
       server,
       `${spa.links.artifact}settings/profile`,
       "GET",
-      navigation,
+      frameNavigation,
     );
     expect(clientRoute.status).toBe(200);
     expect(await clientRoute.text()).toBe(spaShell);
+    // A tab's navigation to the same client route at the version URL answers
+    // the entry document too, and counts the same way.
+    const versionRoute = await fetchVersion(
+      server,
+      `${spa.links.version}settings/profile`,
+      "GET",
+      navigation,
+    );
+    expect(versionRoute.status).toBe(200);
+    expect(await versionRoute.text()).toBe(spaShell);
     await server.flushArtifactViews();
     expect(treeEntry(await readTree(server), "Agent console SPA").views)
-      .toEqual({last7Days: 1, last30Days: 1, total: 1});
+      .toEqual({last7Days: 2, last30Days: 2, total: 2});
     expect(storedViewRows(installation, spa.artifact.id)).toEqual([
-      {count: 1, day: today},
+      {count: 2, day: today},
     ]);
   }, 60_000);
 

@@ -139,6 +139,8 @@ describe("per-artifact asset store", () => {
     expect(served.headers.get("access-control-allow-origin")).toBe("*");
     const policy = served.headers.get("content-security-policy") ?? "";
     expect(policy).toContain(sandboxPolicy);
+    // Only a readable URL's page, framed by the viewer, may navigate the tab.
+    expect(policy).not.toContain("allow-top-navigation");
     expect(policy).toContain("default-src 'none'");
 
     const head = await fetch(committed.asset.url, {method: "HEAD"});

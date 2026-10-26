@@ -16,15 +16,16 @@ import {
   type AuthorizationDenied,
 } from "../core/errors.js";
 import type {Principal} from "../core/identity.js";
-import type {
-  ArtifactRecord,
-  ArtifactViewCounts,
-  ArtifactViewDay,
-  ArtifactViewTotal,
-  DayCount,
-  ProjectActivityDays,
-  ProjectActivityTotals,
-  ViewedArtifact,
+import {
+  accessSettings,
+  type ArtifactRecord,
+  type ArtifactViewCounts,
+  type ArtifactViewDay,
+  type ArtifactViewTotal,
+  type DayCount,
+  type ProjectActivityDays,
+  type ProjectActivityTotals,
+  type ViewedArtifact,
 } from "../core/model.js";
 import type {
   ArtifactViewRepository,
@@ -130,6 +131,16 @@ interface ProjectAnalyticsOperations {
   readonly readProjectActivity: (
     command: ReadProjectActivityCommand,
   ) => Effect.Effect<ProjectActivityReport, ProjectAnalyticsFailure>;
+  /**
+   * One public-link artifact's views, for a reader with no credential. Any
+   * other artifact is not found, so the read never confirms that one exists.
+   */
+  readonly readPublicArtifactActivity: (
+    artifact: ArtifactRecord,
+  ) => Effect.Effect<
+    ArtifactActivityReport,
+    ArtifactNotFound | ArtifactRepositoryFailure
+  >;
 }
 
 /**
@@ -215,28 +226,47 @@ function makeProjectAnalyticsService(
       return yield* new ArtifactNotFound({message: "The artifact does not exist."});
     }
     yield* authorization.requireArtifactRead(command.principal);
-    const now = yield* dependencies.clock.now;
-    const today = dayOf(now);
-    const [days, totals] = yield* Effect.all([
-      read("readArtifactViewDays", () =>
-        dependencies.repository.readArtifactViewDays({
-          artifactIds: [artifact.id],
-          sinceDay: daysBefore(now, artifactActivityWindowDays),
-          untilDay: today,
-        })),
-      read("readArtifactViewTotals", () =>
-        dependencies.repository.readArtifactViewTotals([artifact.id])),
-    ], {concurrency: 2});
-    return buildArtifactActivityReport({
-      artifactId: artifact.id,
-      days,
-      today,
-      totals,
-      recentSinceDay: daysBefore(now, artifactRecentDays),
-    });
+    return yield* readViews(artifact.id);
   });
 
-  return ProjectAnalyticsService.of({readArtifactActivity, readProjectActivity});
+  const readPublicArtifactActivity = Effect.fn(
+    "ProjectAnalyticsService.readPublicArtifactActivity",
+  )(function*(artifact: ArtifactRecord) {
+    if (artifact.accessSetting !== accessSettings.publicLink) {
+      return yield* new ArtifactNotFound({message: "The artifact does not exist."});
+    }
+    return yield* readViews(artifact.id);
+  });
+
+  const readViews = Effect.fn("ProjectAnalyticsService.readViews")(
+    function*(artifactId: string) {
+      const now = yield* dependencies.clock.now;
+      const today = dayOf(now);
+      const [days, totals] = yield* Effect.all([
+        read("readArtifactViewDays", () =>
+          dependencies.repository.readArtifactViewDays({
+            artifactIds: [artifactId],
+            sinceDay: daysBefore(now, artifactActivityWindowDays),
+            untilDay: today,
+          })),
+        read("readArtifactViewTotals", () =>
+          dependencies.repository.readArtifactViewTotals([artifactId])),
+      ], {concurrency: 2});
+      return buildArtifactActivityReport({
+        artifactId,
+        days,
+        today,
+        totals,
+        recentSinceDay: daysBefore(now, artifactRecentDays),
+      });
+    },
+  );
+
+  return ProjectAnalyticsService.of({
+    readArtifactActivity,
+    readProjectActivity,
+    readPublicArtifactActivity,
+  });
 }
 
 function read<Result>(

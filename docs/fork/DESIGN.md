@@ -176,6 +176,7 @@ Without `allow-same-origin`, the browser gives the artifact document an opaque o
 
 - `allow-popups-to-escape-sandbox` opens `target=_blank` links as normal pages. Without it, external sites open sandboxed and lose their own storage and cookies. An escaped popup is a normal cross-origin page with no access to the application.
 - `allow-modals` makes `window.print()`, `alert()`, and `confirm()` work. Reports often have a print button.
+- The folder and path forms add `allow-top-navigation-by-user-activation`. Their pages load in the viewer's frame (section 15), and the flag lets a `target=_top` link that a person clicks leave it, as it could when the page was the top-level document. Script cannot navigate the tab without that click. `/v/<token>/` and `/_blob/<id>` keep the list above.
 
 `Access-Control-Allow-Origin: *` is required because module scripts, `fetch`, and web fonts are CORS requests, even from an opaque document to its own folder. Upstream sends the same header on Review lease responses for the same reason (`src/http/create-http-app.ts:3514`). It never comes with `Access-Control-Allow-Credentials`, so no cookie-bearing response becomes readable.
 
@@ -532,6 +533,104 @@ From this commit on, the fork owns migration numbers. Upstream's next migrations
 ## 14. Viewer bar
 
 `docs/fork/VIEWER.md` describes the bar above an artifact in Review's viewer: where it lives and why artifact code cannot reach it, the info endpoint, the visibility model, who may change visibility, and the logo variables. It follows issue 37 and covers FRK-026 and FRK-028.
+
+## 15. The bar at readable URLs
+
+Most people open an artifact at its readable URL, such as `https://artifacts.example.com/team/plans/some-page/`, not in Review. Before this section, that URL answered with the artifact's page itself at the top level, under the content sandbox of section 4, so it had no bar. This section puts the bar of section 14 above the page at that URL. It covers FRK-029 and FRK-030.
+
+### Constraints
+
+- The bar is application markup. The page stays as isolated as before: an opaque origin, no `allow-same-origin`, no reach into application cookies, storage, or DOM. Nothing is injected into artifact bytes.
+- Relative assets, multi-file artifacts, in-page anchors, and both routing modes (`static`, `spa`) keep working.
+- Agents, MCP fetches, `curl`, and link previews that send no Fetch Metadata keep reading the page's own bytes at the same URL.
+- A private artifact answers exactly as before.
+- One person opening the page is one view.
+
+### Options
+
+| | A. Fetch Metadata at the same URL | B. A raw path for the frame | C. A separate viewer route | D. Inject the bar |
+| --- | --- | --- | --- | --- |
+| Shape | A tab's navigation (`Sec-Fetch-Dest: document`, `Sec-Fetch-Mode: navigate`) gets the viewer. It frames the same URL with `?raw=1`. Everything else gets the page. | The readable URL always answers the viewer for HTML. The frame loads a second prefix, such as `/raw/<path>/` or `/v/<token>/`. | The readable URL redirects a browser to `/view/<path>/`, which frames the readable URL. | The server writes the bar into the artifact's HTML. |
+| URL the page sees | Its readable URL plus `raw=1` in the query. | `/raw/<path>/` or `/v/<token>/`. Root-absolute links and SPA base paths written for the readable URL break. A `/v/` frame also pins one version. | Its readable URL. | Its readable URL. |
+| Non-browser clients | Unchanged. They send no `Sec-Fetch-Dest: document`. A previewer that drives a real browser tab gets the viewer, titled by script. | A client that fetches HTML gets the viewer unless it learns the raw prefix. | A client that follows redirects lands on the viewer page. | Every client gets changed bytes. |
+| Address bar | The readable URL. | The readable URL. | `/view/...`, which is a new URL to share. | The readable URL. |
+| Isolation | Unchanged for the page. The viewer is a normal application page. | Unchanged. | Unchanged. | Broken. The bar would run inside the sandboxed document, so artifact code could restyle or fake it. |
+| New surface | One branch in the content router and one query parameter. | A new reserved root and a second content form. | A new reserved root and a redirect. | An HTML rewriter. |
+
+**Decision: A.** It is the only option that keeps the URL a person shares, the URL the page sees, and the bytes an agent reads all unchanged. B changes what the page sees and needs a new reserved root. C changes the shared URL. D breaks the isolation rule.
+
+The frame cannot load the same URL as the viewer. The HTML Standard skips an iframe whose URL, ignoring the fragment, equals the URL of its document or an ancestor's ("shared attribute processing steps for iframe and frame elements"). `?raw=1` makes the frame's URL different. It also gives a person a way to open the page alone, which the menu calls **Open raw**.
+
+### Routing
+
+`readableDelivery` in `src/http/same-host-content.ts` is the one pure decision. It runs only for the folder and path forms, after the router has resolved the artifact and the file, so an unknown path, a missing file, and a private artifact answer exactly as they did.
+
+| Request at a readable URL | Answer |
+| --- | --- |
+| GET, `Sec-Fetch-Dest: document`, `Sec-Fetch-Mode: navigate`, an HTML file, no `raw=1` | The viewer (`viewer.html`). |
+| The same with `raw=1` | The page. |
+| `Sec-Fetch-Dest: iframe` (the viewer's frame, or any other site's frame) | The page. |
+| No Fetch Metadata (`curl`, agents, MCP fetches, link previews, browsers that predate Fetch Metadata) | The page. |
+| `fetch()`, scripts, images, styles, HEAD | The page or file, as before. |
+| A file that is not HTML, opened in a tab | The file, as before. |
+| A private artifact | 401 `CONTENT_NOT_PUBLIC`, as before. |
+| An unknown path or a missing file | 404, as before. |
+| `/v/<token>/` | The page. The exact version URL never shows a viewer. |
+| A server without `viewer.html` in its web bundle | The page. |
+
+The SPA fallback (`permitsSpaEntryFallback`) used to accept only `Sec-Fetch-Dest: document`. A client route opened in the viewer is a frame navigation, so it now also accepts `iframe` and `frame`. The change is deliberate for every content form, `/v/<token>/`, content-domain hosts, and Review leases included. A client that sends no Fetch Metadata already got the entry page on all of them, and an SPA route that a frame opens inside a Review lease now loads instead of answering 404. Any site that frames an SPA artifact's client route gets its entry page, and that load counts as a view.
+
+### Headers
+
+| Response | `Content-Security-Policy` | `Access-Control-Allow-Origin` | `Vary` | `Cache-Control` |
+| --- | --- | --- | --- | --- |
+| Viewer | The application pages' policy, including `frame-ancestors 'none'` and `script-src 'self'`. No `sandbox`. | none | `Sec-Fetch-Dest, Sec-Fetch-Mode` | `private, no-cache, must-revalidate` |
+| HTML page at a readable URL | The content sandbox, unchanged | `*` | `Sec-Fetch-Dest, Sec-Fetch-Mode` | Unchanged |
+| Any other content | Unchanged | Unchanged | Unchanged | Unchanged |
+
+The viewer also sends `X-Robots-Tag: noindex, nofollow` and `Link: </same/path/?raw=1>; rel="alternate"`. The Link target is the request's path and query with `raw=1` set, serialized by the URL parser, so it is always percent-encoded. `private` keeps a shared cache from storing the viewer at all. The isolation wrapper still adds the sandbox to every content response. It skips only a response that the viewer branch marked, and only that branch sets the mark. A test that removes the skip fails, and so does a test that widens it to other readable responses.
+
+### Agents that drive a browser
+
+A headless browser (Playwright, Puppeteer, and agent tools built on them) sends `Sec-Fetch-Dest: document` and `Sec-Fetch-Mode: navigate`, so it gets the viewer. Its page text is the bar, and the artifact sits in a frame. Such an agent should open the URL with `?raw=1`, or follow the viewer's `Link` header, to read the page alone. Clients that send plain HTTP requests need nothing.
+
+### Caching
+
+`Vary` matters because one URL now has two bodies. Without it, a shared cache could hand the viewer to a frame, which would nest the bar, or hand the page to a tab, which would drop it. The two bodies also carry different ETags, so a tab that revalidates a page it cached before this change gets the viewer with a 200, and a frame that sends the viewer's ETag gets the page.
+
+### The frame
+
+The viewer frames the same path, query, and fragment with `raw=1` set in the query. The frame keeps the readable path, so relative URLs, root-absolute URLs written for the readable path, in-page anchors, and SPA routes resolve as they do at the top level. The frame element repeats the content policy's flags in its `sandbox` attribute, so the page stays sandboxed even if a response arrived without the header. A browser applies both lists, so `allow-top-navigation-by-user-activation` must be in both for a clicked `target=_top` link to reach the tab. It grants `allow="fullscreen; clipboard-write"`, which a top-level page already had.
+
+The viewer adds no `message` listener. The page can post messages to it, and nothing reads them.
+
+### After the frame navigates
+
+The frame's first `load` is the artifact the bar names. Any later `load` means the page left that document: a followed link, a form, or a reload. The viewer cannot read an opaque frame's URL, so it cannot say where the frame went. The bar then drops the name, the info popover, Copy link, Open raw, and Open in Review, all of which describe the first artifact, and shows **Navigated away** with a **Back to** link to the URL the tab opened. Full screen and Hide bar stay. In-page anchors and an SPA's `history.pushState` fire no `load`, so they keep the bar as it was.
+
+### Views
+
+The viewer branch returns before `artifactViews.record`, so the viewer's own response counts nothing. The frame's request is an entry-document GET and counts once, through the existing rule of FRK-008. A person who opens the page therefore adds one view, whether they use the viewer, `?raw=1`, or `curl`.
+
+### Info for anonymous readers
+
+The bar needs the artifact's name and info without a credential. `GET /api/v1/public/artifact-info?path=<pathname>` takes the page's own path and runs the same classifier and resolver as the content router (FRK-030). It answers with the info shape of section 14, `canManage: false`, and the artifact's `projectId`. A private artifact, an unknown path, an application path, and any path on a content-domain server answer the same 404 `ARTIFACT_NOT_FOUND`, so this route never says whether a private artifact exists. The content route at the same path still answers 401 for a private artifact and 404 for a missing one, as it did before. `ProjectAnalyticsService.readPublicArtifactActivity` reads the views and refuses any artifact that is not `public_link`.
+
+A browser that holds a session (its CSRF cookie is readable) also reads `/api/v1/session` and `GET /api/v1/artifacts/:id?projectId=...`. With that record the popover shows the visibility control of section 14 when `canManageArtifact` holds, and the menu adds **Open in Review**. Until that record arrives, the popover shows the public info. If either read fails, the reader sees what an anonymous reader sees. An anonymous browser never makes those calls.
+
+### What changes for artifacts
+
+| Change | Why | Escape |
+| --- | --- | --- |
+| `location.search` carries `raw=1` | The frame's URL must differ from the viewer's. The viewer sets the parameter, so an existing `raw` value is replaced. | None needed for most pages. |
+| The address bar keeps the first URL while the page navigates inside the frame, and the bar says **Navigated away** | The viewer cannot read an opaque frame's location. | **Back to** the first artifact, or a `target=_top` link in the page. |
+| A page that checks `window.top === window` sees a frame | It is one. | **Open raw**. |
+
+### Residual risk
+
+The viewer is an application page with the person's session cookies, and it embeds untrusted HTML. Before, that HTML ran at the top level with no application page around it. The opaque origin keeps the page out of the viewer's DOM, cookies, and storage. FRK-029-B proves in Chromium that `window.parent.document` throws. A browser bug that let a sandboxed frame reach its parent would now reach an application page. Section 4 already accepts the same bug class for the top-level page.
+
+A `target=_top` link that a person clicks can replace the viewer with any URL. The page could already navigate its own tab anywhere when it was the top-level document, so this restores that power and adds none.
 
 ## Decisions
 
