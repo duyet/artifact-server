@@ -65,11 +65,6 @@ export function errorMessage(error: Error): string {
   return error.message;
 }
 
-/** Converts an access-setting value into the product's visible term. */
-export function accessSettingLabel(value: "account_required" | "public_link"): string {
-  return value === "account_required" ? "Account required" : "Public link";
-}
-
 /** Converts one action kind into compact action-history text. */
 export function actionLabel(value: ArtifactAction["action"]): string {
   switch (value) {

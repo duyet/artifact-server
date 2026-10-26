@@ -43,9 +43,6 @@ export const errorCodes = {
   versionNotFound: "VERSION_NOT_FOUND",
 } as const;
 
-/** One stable error code exposed by an Artifact Server protocol. */
-export type ErrorCode = (typeof errorCodes)[keyof typeof errorCodes];
-
 const messageField = {message: Schema.String};
 
 /** The requested artifact does not exist in the installation. */

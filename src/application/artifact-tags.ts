@@ -93,20 +93,6 @@ export function parseArtifactTags(
   return Effect.succeed([...normalized].toSorted());
 }
 
-/** Normalize one exact tag filter with the same rules as stored metadata. */
-export function parseArtifactTag(
-  candidate: string,
-): Effect.Effect<string, InvalidArtifactTags> {
-  return parseArtifactTags([candidate]).pipe(
-    Effect.flatMap((tags) => {
-      const tag = tags.at(0);
-      return tag === undefined
-        ? new InvalidArtifactTags({message: "A tag filter cannot be empty."})
-        : Effect.succeed(tag);
-    }),
-  );
-}
-
 /** Normalize one tag-shaped search value without enforcing tag limits. */
 export function normalizeArtifactTag(candidate: string): string {
   return normalizeArtifactSearchText(candidate);

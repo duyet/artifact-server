@@ -67,7 +67,6 @@ export interface ExternalStorageRuntimeConfig {
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
   readonly installationId: string;
-  readonly localBootstrapCredential?: Redacted.Redacted;
   /** The account menu's Help link; absent or null shows no Help item. */
   readonly helpUrl?: string | null;
   /** The viewer bar's logo; absent or null shows the product mark. */
@@ -141,7 +140,7 @@ export async function createExternalStorageRuntime(
       ids: new SystemIdGenerator(),
       identityRepository,
       installationId: config.installationId,
-      localBootstrapCredential: config.localBootstrapCredential ?? null,
+      localBootstrapCredential: null,
       protectBootstrapAdministrator: false,
       repository,
       staging,
