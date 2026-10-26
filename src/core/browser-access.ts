@@ -1,3 +1,4 @@
+import type {DirectorySignIn} from "./directory-sign-in.js";
 import {type AccessSetting, accessSettings} from "./model.js";
 
 /** Browser access modes selected by an Artifact Server deployment entrypoint. */
@@ -24,6 +25,8 @@ export type BrowserAccess =
     readonly mode: typeof browserAccessModes.localOwner;
   }
   | {
+    /** LDAP username and password sign-in next to API-key sign-in, or null. */
+    readonly directory: DirectorySignIn | null;
     readonly loginKind: typeof browserLoginKinds.none;
     readonly mode: typeof browserAccessModes.privateTeam;
   };
@@ -37,8 +40,16 @@ export const localOwnerBrowserAccess: BrowserAccess = {
 /** Create the browser access policy for a remotely deployed private team. */
 export function privateTeamBrowserAccess(
   loginKind: typeof browserLoginKinds.none,
+  directory: DirectorySignIn | null = null,
 ): Extract<BrowserAccess, {readonly mode: "private_team"}> {
-  return {loginKind, mode: browserAccessModes.privateTeam};
+  return {directory, loginKind, mode: browserAccessModes.privateTeam};
+}
+
+/** The directory sign-in a browser may use, or null when it has none. */
+export function directorySignIn(browserAccess: BrowserAccess): DirectorySignIn | null {
+  return browserAccess.mode === browserAccessModes.privateTeam
+    ? browserAccess.directory
+    : null;
 }
 
 /** The access setting a new artifact gets when its publisher names none. */

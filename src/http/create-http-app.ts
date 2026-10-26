@@ -64,10 +64,12 @@ import {
   VersionNotFound,
 } from "../core/errors.js";
 import type { IssuedApplicationSession } from "../core/installation-identity.js";
+import { signInWithDirectory } from "../application/directory-sign-in.js";
 import {
   browserAccessModes,
   browserLoginKinds,
   defaultAccessSetting,
+  directorySignIn,
   type BrowserAccess,
 } from "../core/browser-access.js";
 import {
@@ -463,6 +465,10 @@ const issueApiKeySchema = z.object({
 });
 const apiKeySignInSchema = z.object({
   apiKey: z.string().min(1).max(1_024),
+}).strict();
+const directorySignInSchema = z.object({
+  password: z.string().min(1).max(1_024),
+  username: z.string().min(1).max(200),
 }).strict();
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
@@ -941,7 +947,12 @@ export function createHttpApp(
     context.header("Cache-Control", "private, no-store");
     return context.json({
       accessMode: dependencies.browserAccess.mode,
-      login: {kind: dependencies.browserAccess.loginKind},
+      login: dependencies.browserAccess.mode === browserAccessModes.privateTeam
+        ? {
+          directory: dependencies.browserAccess.directory !== null,
+          kind: dependencies.browserAccess.loginKind,
+        }
+        : {kind: dependencies.browserAccess.loginKind},
     });
   });
 
@@ -973,10 +984,14 @@ export function createHttpApp(
     return context.body(null, 204);
   });
 
-  app.post("/auth/api-key", boundedSignInBody, async (context) => {
-    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
-      return context.notFound();
-    }
+  // Both sign-in forms share one failed-attempt budget per client address,
+  // so alternating between them buys no extra guesses.
+  const limitedSignIn = async <E>(
+    context: Context<HttpEnvironment>,
+    signIn: (clientAddress: string) => Promise<
+      Effect.Effect<IssuedApplicationSession, E, ApplicationServices>
+    >,
+  ): Promise<Response> => {
     requireApplicationOrigin(context, dependencies);
     const clientAddress = signInClientAddress(context, dependencies);
     const retryAfterSeconds = failedSignIns.retryAfterSeconds(clientAddress);
@@ -990,17 +1005,14 @@ export function createHttpApp(
         },
       }, 429);
     }
-    const body = apiKeySignInSchema.parse(await context.req.json());
     const issued = await runHttpApplicationEffect(
       context,
       dependencies,
-      InstallationAccessService.use((access) =>
-        access.loginWithApiKey(
-          Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
-        )
-      ).pipe(
-        Effect.tapErrorTag("AuthenticationRequired", () =>
-          Effect.sync(() => failedSignIns.recordFailure(clientAddress))),
+      (await signIn(clientAddress)).pipe(
+        Effect.tapError((failure) =>
+          failure instanceof AuthenticationRequired
+            ? Effect.sync(() => failedSignIns.recordFailure(clientAddress))
+            : Effect.void),
       ),
     );
     failedSignIns.clear(clientAddress);
@@ -1008,6 +1020,33 @@ export function createHttpApp(
     context.header("Cache-Control", "private, no-store");
     context.header("Referrer-Policy", "no-referrer");
     return context.body(null, 204);
+  };
+
+  app.post("/auth/api-key", boundedSignInBody, async (context) => {
+    if (dependencies.browserAccess.loginKind !== browserLoginKinds.none) {
+      return context.notFound();
+    }
+    return limitedSignIn(context, async () => {
+      const body = apiKeySignInSchema.parse(await context.req.json());
+      return InstallationAccessService.use((access) =>
+        access.loginWithApiKey(
+          Redacted.make(body.apiKey, {label: "api-key-sign-in"}),
+        )
+      );
+    });
+  });
+
+  app.post("/auth/ldap", boundedSignInBody, async (context) => {
+    const directory = directorySignIn(dependencies.browserAccess);
+    if (directory === null) return context.notFound();
+    return limitedSignIn(context, async (clientAddress) => {
+      const body = directorySignInSchema.parse(await context.req.json());
+      return signInWithDirectory(
+        directory,
+        body.username,
+        Redacted.make(body.password, {label: "directory-password"}),
+      ).pipe(Effect.annotateLogs({client_address: clientAddress}));
+    });
   });
 
   app.post("/auth/local", async (context) => {
