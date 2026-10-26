@@ -49,7 +49,8 @@ async function settled(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const finite = document.getAnimations()
       .filter((animation) => animation.effect?.getTiming().iterations !== Infinity);
-    await Promise.all(finite.map(async (animation) => animation.finished));
+    // A transition that a newer one replaces is cancelled, and its finished promise rejects.
+    await Promise.allSettled(finite.map(async (animation) => animation.finished));
   });
 }
 
