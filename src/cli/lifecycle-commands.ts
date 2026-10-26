@@ -23,7 +23,7 @@ import {
   summarizeRuntimeConfiguration,
   type CompactRuntimeConfiguration,
   type ExternalStorageRuntimeConfiguration,
-  type LdapSignInConfiguration,
+  type OidcSignInConfiguration,
 } from "../lifecycle/runtime-configuration.js";
 import {inspectRuntimeConfiguration} from
   "../lifecycle/runtime-inspection.js";
@@ -39,9 +39,8 @@ import {
   startLocalServer,
 } from "../local/start-local-server.js";
 import {membershipRoles, type MembershipRole} from "../core/identity.js";
-import type {DirectorySignIn} from "../core/directory-sign-in.js";
-import {createLdapDirectoryAuthenticator} from
-  "../directory/ldap-directory-authenticator.js";
+import type {OidcSignIn} from "../core/oidc-sign-in.js";
+import {createOidcProvider} from "../identity/oidc-provider.js";
 import {PostgresDatabase} from "../storage/postgres-database.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
@@ -376,7 +375,7 @@ function configureExternalStorageStart(
         bootstrapAdministratorEmail: parsed.bootstrapAdministratorEmail,
         browserAccess: privateTeamBrowserAccess(
           browserLoginKinds.none,
-          ldapDirectorySignIn(parsed.ldapSignIn),
+          oidcSignIn(parsed.oidcSignIn),
         ),
         completedRequestLogSampleRate: parsed.completedRequestLogSampleRate,
         contentDomain: parsed.contentDomain,
@@ -412,7 +411,7 @@ async function startCompactServer(
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
     browserAccess: privateTeamBrowserAccess(
       browserLoginKinds.none,
-      ldapDirectorySignIn(configuration.ldapSignIn),
+      oidcSignIn(configuration.oidcSignIn),
     ),
     completedRequestLogSampleRate: configuration.completedRequestLogSampleRate,
     contentDomain: configuration.contentDomain,
@@ -428,11 +427,15 @@ async function startCompactServer(
   });
 }
 
-function ldapDirectorySignIn(
-  configuration: LdapSignInConfiguration | null,
-): DirectorySignIn | null {
+function oidcSignIn(configuration: OidcSignInConfiguration | null): OidcSignIn | null {
   return configuration === null ? null : {
-    authenticator: createLdapDirectoryAuthenticator(configuration.directory),
+    provider: createOidcProvider({
+      clientId: configuration.clientId,
+      clientSecret: configuration.clientSecret.value,
+      issuer: configuration.issuer,
+      redirectUri: configuration.redirectUri,
+      scopes: configuration.scopes,
+    }),
     unknownUsers: configuration.unknownUsers,
   };
 }

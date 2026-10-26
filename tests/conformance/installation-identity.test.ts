@@ -423,7 +423,7 @@ describe("installation identity and access", () => {
     const contextResponse = await fetch(`${server.baseUrl}/auth/context`);
     await expect(contextResponse.json()).resolves.toEqual({
       accessMode: "private_team",
-      login: {directory: false, kind: "none"},
+      login: {kind: "none", oidc: false},
     });
     const boundaryHeaders = {
       Origin: server.baseUrl,

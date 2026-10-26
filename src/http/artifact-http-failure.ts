@@ -97,8 +97,6 @@ export function artifactServerFailureResponse(failure: ArtifactServerFailure) {
         message: failure.message,
         status: 501,
       };
-    case "DirectoryUnavailable":
-      return {code: errorCodes.directoryUnavailable, message: failure.message, status: 503};
     case "ArtifactRepositoryFailure":
     case "IdentityRepositoryFailure":
     case "BlobStorageFailure":
