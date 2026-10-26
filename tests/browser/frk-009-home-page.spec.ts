@@ -81,6 +81,7 @@ test.describe("public home page", () => {
       await server.flushArtifactViews();
 
       const page = await context.newPage();
+      await page.clock.setFixedTime(today);
       await page.goto(server.baseUrl);
       await expect(page.getByText("Views per day")).toBeVisible();
       const todayLabel = dayLabel(today);
