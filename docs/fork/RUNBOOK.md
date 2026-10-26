@@ -177,6 +177,47 @@ kubectl --context <cluster> -n artifact-server exec deploy/artifact-server -c ar
 - Running the command again with the same email and key name revokes that key and prints a new one. The member's other keys keep working. The running server may accept the old key for up to 30 seconds.
 - The output adds `apiKey.name` and `member.role`. Put the `token` in the person's CLI profile or MCP bearer setting and delete the file.
 
+## Sign in with LDAP
+
+People can sign in to Review with their directory username and password instead of an API key. The browser session acts as the member whose email the directory entry holds, so it sees and edits that member's artifacts. Agents and the CLI keep using keys. The feature is off until `ARTIFACT_SERVER_LDAP_URL` is set.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ARTIFACT_SERVER_LDAP_URL` | unset (off) | `ldaps://host:636`. `ldap://` is refused unless `ARTIFACT_SERVER_LDAP_ALLOW_INSECURE=true`, which sends passwords in clear text. Use it only for a test directory. |
+| `ARTIFACT_SERVER_LDAP_USER_DN` | required | Bind DN with `{username}` as one whole attribute value. |
+| `ARTIFACT_SERVER_LDAP_CA_FILE` | system trust store | PEM bundle that replaces the trust store for this connection. |
+| `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP` | unset | Group DN that must appear in the entry's `memberOf`, compared without case. |
+| `ARTIFACT_SERVER_LDAP_EMAIL_ATTRIBUTE` | `mail` | Attribute matched, without case, to a member's email. |
+| `ARTIFACT_SERVER_LDAP_NAME_ATTRIBUTE` | `displayName` | Display name for members that `admit` creates. |
+| `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS` | `reject` | `reject` a directory user with no active member, or `admit` them as role `member`. |
+| `ARTIFACT_SERVER_LDAP_TIMEOUT_MS` | `5000` | Connect and operation timeout. |
+
+A FreeIPA example, with members already issued by `admin issue-key`:
+
+```yaml
+env:
+  - name: ARTIFACT_SERVER_LDAP_URL
+    value: ldaps://ipa.example.com:636
+  - name: ARTIFACT_SERVER_LDAP_USER_DN
+    value: uid={username},cn=users,cn=accounts,dc=example,dc=com
+  - name: ARTIFACT_SERVER_LDAP_CA_FILE
+    value: /etc/artifact-server/ldap/ca.crt # IPA serves its CA at http://ipa.example.com/ipa/config/ca.crt
+  - name: ARTIFACT_SERVER_LDAP_UNKNOWN_USERS
+    value: reject
+```
+
+To admit only one group, add `ARTIFACT_SERVER_LDAP_REQUIRED_GROUP=cn=artifact-users,cn=groups,cn=accounts,dc=example,dc=com`.
+
+No secret is needed. The server binds as the person signing in and never stores the password. Check the result with `artifactserver config check`, which reports `ldapSignIn` without credentials.
+
+Before you turn it on:
+
+- **Emails must match.** A person whose directory `mail` differs from their member's email is refused. Compare them first, or set `ARTIFACT_SERVER_LDAP_UNKNOWN_USERS=admit` and accept new members.
+- **The email attribute is the trust boundary.** A directory user who can change their own `mail` can sign in as any member, including an administrator. FreeIPA's default `User Self service` rule leaves `mail` out; confirm with `ipa selfservice-show "User Self service"`. On other directories, check the access rules or require a group.
+- **Watch the logs.** Each attempt logs `auth.directory_sign_in.succeeded`, `.rejected` with a reason (`invalid_credentials`, `no_member`, `missing_email`, `not_in_required_group`), or `.unavailable` with the connection error. A `.unavailable` with a certificate error means the CA file does not cover the directory's chain.
+
+Failed LDAP and API-key sign-ins share one limit, five per client address per minute. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+
 ## Publishing
 
 Publish with the CLI from a fork checkout. Pass the key as a file, never on the command line.
