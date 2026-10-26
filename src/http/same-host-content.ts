@@ -205,6 +205,19 @@ export function canonicalFolderLocation(
 
 const sandboxPolicy =
   "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+const readableSandboxPolicy = `${sandboxPolicy} allow-top-navigation-by-user-activation`;
+
+/**
+ * The sandbox each content form gets. A readable URL's page loads in the
+ * viewer's frame, where a `target=_top` link a person clicks must still reach
+ * the tab, as it did when the page was the top-level document.
+ */
+const sandboxPolicies = {
+  blob: sandboxPolicy,
+  folder: readableSandboxPolicy,
+  path: readableSandboxPolicy,
+  version: sandboxPolicy,
+} as const satisfies Record<SameHostContentRequest["kind"], string>;
 
 /**
  * Copy a content response with the isolation headers. The sandbox gives the
@@ -212,17 +225,68 @@ const sandboxPolicy =
  * cross-origin, so they need `Access-Control-Allow-Origin`. The copy is
  * needed because fetch and redirect responses have immutable headers.
  */
-export function isolateSameHostResponse(response: Response): Response {
+export function isolateSameHostResponse(
+  response: Response,
+  kind: SameHostContentRequest["kind"],
+): Response {
   const headers = new Headers(response.headers);
   // Appended, not set: a branch may send a stricter policy of its own, and a
   // browser enforces every policy a response carries.
-  headers.append("Content-Security-Policy", sandboxPolicy);
+  headers.append("Content-Security-Policy", sandboxPolicies[kind]);
   headers.set("Access-Control-Allow-Origin", "*");
   return new Response(response.body, {
     headers,
     status: response.status,
     statusText: response.statusText,
   });
+}
+
+/** The query parameter that asks a readable URL for the artifact document itself. */
+export const rawDocumentParameter = "raw";
+
+/**
+ * The same path and query with `raw=1` set: the URL the viewer frames, and the
+ * one an agent that drives a browser tab reads for the page itself.
+ */
+export function rawDocumentPath(url: URL): string {
+  const raw = new URL(url);
+  raw.searchParams.set(rawDocumentParameter, "1");
+  return `${raw.pathname}${raw.search}`;
+}
+
+/**
+ * The request headers an HTML answer at a readable URL depends on. Every such
+ * answer names them, so no cache hands the viewer to a frame or the document
+ * to a tab.
+ */
+export const readableDeliveryVary = "Sec-Fetch-Dest, Sec-Fetch-Mode";
+
+/** What a readable URL answers for one HTML page of a public artifact. */
+export type ReadableDelivery = "document" | "viewer";
+
+/**
+ * A tab's own navigation gets the viewer, which frames the page below the
+ * bar. A frame, a fetch, a client that sends no Fetch Metadata, and a request
+ * with `?raw=1` get the page itself, so agents and link previews read the
+ * bytes they always read.
+ */
+export function readableDelivery(
+  request: {readonly headers: Headers; readonly method: string; readonly url: URL},
+  mediaType: string,
+): ReadableDelivery {
+  const isTabNavigation = request.method === "GET" &&
+    request.headers.get("sec-fetch-dest") === "document" &&
+    request.headers.get("sec-fetch-mode") === "navigate";
+  return isTabNavigation &&
+      isHtmlMediaType(mediaType) &&
+      request.url.searchParams.get(rawDocumentParameter) !== "1"
+    ? "viewer"
+    : "document";
+}
+
+/** Whether a stored media type is an HTML page, the only kind the viewer frames. */
+export function isHtmlMediaType(mediaType: string): boolean {
+  return mediaType.split(";", 1)[0]?.trim().toLowerCase() === "text/html";
 }
 
 /** The one CSP source that covers every `/v/` response of an application origin. */

@@ -15,12 +15,21 @@ import {
   spaShell,
 } from "../support/same-host-site.js";
 
+/** The sandbox of `/v/<token>/`, which Review leases share. */
 const sandboxPolicy =
   "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+/** The folder and path forms load in the viewer's frame, so a click may navigate the tab. */
+const readablePolicy = `${sandboxPolicy} allow-top-navigation-by-user-activation`;
 const previewLeaseSchema = z.object({baseUrl: z.url()});
 const navigation = {
   Accept: "text/html",
   "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+};
+/** A navigation of the viewer's frame, the way a browser loads a readable URL's page. */
+const frameNavigation = {
+  Accept: "text/html",
+  "Sec-Fetch-Dest": "iframe",
   "Sec-Fetch-Mode": "navigate",
 };
 
@@ -28,6 +37,8 @@ interface ContentRequest {
   readonly headers?: Record<string, string>;
   readonly method?: string;
   readonly name: string;
+  /** A folder or path URL, which the viewer frames. */
+  readonly readable?: true;
   readonly status: number;
   readonly url: string;
 }
@@ -60,6 +71,11 @@ describe("same-host content sandbox", () => {
     const priv = await publishSite(server, installation, {
       accessSetting: "account_required",
       name: "Sandbox private",
+    });
+    const pathSite = await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Sandbox path",
+      path: "2026/10/sandbox-path",
     });
     const leaseResponse = await apiPost(
       installation,
@@ -119,33 +135,45 @@ describe("same-host content sandbox", () => {
       },
       {name: "404 malformed token", status: 404, url: `${server.baseUrl}/v/short/`},
       {name: "200 Review lease", status: 200, url: lease.baseUrl},
-      {name: "200 folder entry", status: 200, url: pub.links.artifact},
+      {name: "200 folder entry", readable: true, status: 200, url: pub.links.artifact},
       {
         name: "308 folder stale name",
+        readable: true,
         status: 308,
         url: `${server.baseUrl}/stale-name-${pub.artifact.id.slice("art_".length)}/`,
       },
       {
         name: "308 folder missing slash",
+        readable: true,
         status: 308,
         url: pub.links.artifact.slice(0, -1),
       },
-      {name: "401 private folder", status: 401, url: priv.links.artifact},
+      {name: "401 private folder", readable: true, status: 401, url: priv.links.artifact},
       {
         name: "404 folder missing file",
+        readable: true,
         status: 404,
         url: `${pub.links.artifact}missing.html`,
       },
       {
         name: "404 unknown folder artifact",
+        readable: true,
         status: 404,
         url: `${server.baseUrl}/folder-3fa85f64-5717-4562-b3fc-2c963f66afa6/`,
       },
       {
-        headers: navigation,
+        headers: frameNavigation,
         name: "200 folder SPA fallback",
+        readable: true,
         status: 200,
         url: `${spa.links.artifact}settings/profile`,
+      },
+      {name: "200 path entry", readable: true, status: 200, url: pathSite.links.artifact},
+      {
+        name: "404 path missing file",
+        readable: true,
+        status: 404,
+        url: `${pathSite.links.artifact}missing.html`,
       },
     ];
     const observed = await Promise.all(requests.map(async (request) => {
@@ -167,7 +195,7 @@ describe("same-host content sandbox", () => {
       credentials: null,
       name: request.name,
       origin: "*",
-      policy: sandboxPolicy,
+      policy: request.readable ? readablePolicy : sandboxPolicy,
       status: request.status,
     })));
 
