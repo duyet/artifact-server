@@ -584,11 +584,17 @@ The SPA fallback (`permitsSpaEntryFallback`) used to accept only `Sec-Fetch-Dest
 
 | Response | `Content-Security-Policy` | `Access-Control-Allow-Origin` | `Vary` | `Cache-Control` |
 | --- | --- | --- | --- | --- |
-| Viewer | The application pages' policy, including `frame-ancestors 'none'` and `script-src 'self'`. No `sandbox`. | none | `Sec-Fetch-Dest, Sec-Fetch-Mode` | `no-cache, must-revalidate` |
+| Viewer | The application pages' policy, including `frame-ancestors 'none'` and `script-src 'self'`. No `sandbox`. | none | `Sec-Fetch-Dest, Sec-Fetch-Mode` | `private, no-cache, must-revalidate` |
 | HTML page at a readable URL | The content sandbox, unchanged | `*` | `Sec-Fetch-Dest, Sec-Fetch-Mode` | Unchanged |
 | Any other content | Unchanged | Unchanged | Unchanged | Unchanged |
 
-The viewer also sends `X-Robots-Tag: noindex, nofollow`. The isolation wrapper still adds the sandbox to every content response. It skips only a response that the viewer branch marked, and only that branch sets the mark. A test that removes the skip fails, and so does a test that widens it to other readable responses.
+The viewer also sends `X-Robots-Tag: noindex, nofollow` and `Link: </same/path/?raw=1>; rel="alternate"`. The Link target is the request's path and query with `raw=1` set, serialized by the URL parser, so it is always percent-encoded. `private` keeps a shared cache from storing the viewer at all. The isolation wrapper still adds the sandbox to every content response. It skips only a response that the viewer branch marked, and only that branch sets the mark. A test that removes the skip fails, and so does a test that widens it to other readable responses.
+
+### Agents that drive a browser
+
+A headless browser (Playwright, Puppeteer, and agent tools built on them) sends `Sec-Fetch-Dest: document` and `Sec-Fetch-Mode: navigate`, so it gets the viewer. Its page text is the bar, and the artifact sits in a frame. Such an agent should open the URL with `?raw=1`, or follow the viewer's `Link` header, to read the page alone. Clients that send plain HTTP requests need nothing.
+
+### Caching
 
 `Vary` matters because one URL now has two bodies. Without it, a shared cache could hand the viewer to a frame, which would nest the bar, or hand the page to a tab, which would drop it. The two bodies also carry different ETags, so a tab that revalidates a page it cached before this change gets the viewer with a 200, and a frame that sends the viewer's ETag gets the page.
 

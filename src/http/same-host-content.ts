@@ -229,6 +229,16 @@ export function isolateSameHostResponse(response: Response): Response {
 export const rawDocumentParameter = "raw";
 
 /**
+ * The same path and query with `raw=1` set: the URL the viewer frames, and the
+ * one an agent that drives a browser tab reads for the page itself.
+ */
+export function rawDocumentPath(url: URL): string {
+  const raw = new URL(url);
+  raw.searchParams.set(rawDocumentParameter, "1");
+  return `${raw.pathname}${raw.search}`;
+}
+
+/**
  * The request headers an HTML answer at a readable URL depends on. Every such
  * answer names them, so no cache hands the viewer to a frame or the document
  * to a tab.

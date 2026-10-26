@@ -129,7 +129,21 @@ describe("the viewer at readable artifact URLs", () => {
     expect(await get(`${spa.links.artifact}settings/profile`, tabNavigation)).toEqual(viewer);
     const shell = await fetchVersion(server, pathUrl, "GET", tabNavigation);
     expect(shell.headers.get("x-robots-tag")).toBe("noindex, nofollow");
-    expect(shell.headers.get("cache-control")).toBe("no-cache, must-revalidate");
+    expect(shell.headers.get("cache-control")).toBe("private, no-cache, must-revalidate");
+    // An agent that drives a browser tab gets the viewer too, and Link names
+    // the URL that answers it with the page, query kept and encoded.
+    expect(shell.headers.get("link")).toBe('</2026/10/agent-console/?raw=1>; rel="alternate"');
+    const queried = await fetchVersion(
+      server,
+      `${pathUrl}docs/nested/page.html?q=<a>,"b";c&raw=0`,
+      "GET",
+      tabNavigation,
+    );
+    expect(await queried.text()).toBe(viewerHtml);
+    const alternate = /^<(?<target>[^>]+)>; rel="alternate"$/u
+      .exec(queried.headers.get("link") ?? "")?.groups?.["target"];
+    expect(alternate).toBe("/2026/10/agent-console/docs/nested/page.html?q=%3Ca%3E%2C%22b%22%3Bc&raw=1");
+    expect(await get(`${server.baseUrl}${alternate}`, tabNavigation)).toEqual(page(nestedHtml));
     // A tab that revalidates the page it cached before the viewer existed, and
     // a frame that sends the viewer's validator, each get their own body.
     const viewerEtag = shell.headers.get("etag");

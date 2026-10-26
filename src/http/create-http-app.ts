@@ -155,6 +155,7 @@ import {
   isolateSameHostResponse,
   parseArtifactPath,
   parseSameHostContentRequest,
+  rawDocumentPath,
   readableDelivery,
   readableDeliveryVary,
   requestedArtifactPath,
@@ -3735,10 +3736,11 @@ async function serveVersionContent(
     return versionNotFoundResponse();
   }
   const readablePage = readableUrl && isHtmlMediaType(content.entry.mediaType);
+  const pageUrl = new URL(context.req.url);
   if (
     readablePage &&
     readableDelivery(
-      {headers: context.req.raw.headers, method, url: new URL(context.req.url)},
+      {headers: context.req.raw.headers, method, url: pageUrl},
       content.entry.mediaType,
     ) === "viewer"
   ) {
@@ -3750,6 +3752,10 @@ async function serveVersionContent(
       "application-shell",
     );
     if (viewer !== null) {
+      // A shared cache must not hand one reader's viewer to another, and an
+      // agent that drives a browser tab finds the page itself through Link.
+      viewer.headers.set("Cache-Control", "private, no-cache, must-revalidate");
+      viewer.headers.set("Link", `<${rawDocumentPath(pageUrl)}>; rel="alternate"`);
       viewer.headers.set("Vary", readableDeliveryVary);
       viewer.headers.set("X-Robots-Tag", "noindex, nofollow");
       context.set("deliveredViewer", true);
