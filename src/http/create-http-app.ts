@@ -58,6 +58,7 @@ import {
   AuthorizationDenied,
   type ArtifactServerFailure,
   ContentBootstrapRejected,
+  DirectoryUnavailable,
   errorCodes,
   InvalidPagination,
   isArtifactServerFailure,
@@ -1015,7 +1016,10 @@ export function createHttpApp(
   });
 
   // Each attempt is counted before it runs, so concurrent guesses cannot all
-  // pass the check, and refunded when it ends without a refused credential.
+  // pass the check. A refused credential keeps its charge, and so does an
+  // unavailable directory, which may have checked the password before its
+  // answer was lost; refunding that would let a client bind without limit.
+  // A success, or a failure of this server's own, returns the charge.
   const limitedSignIn = async <E>(
     context: Context<HttpEnvironment>,
     counters: readonly SignInCounter[],
@@ -1040,7 +1044,10 @@ export function createHttpApp(
     try {
       issued = await runHttpApplicationEffect(context, dependencies, signIn);
     } catch (failure) {
-      if (!(failure instanceof AuthenticationRequired)) {
+      if (
+        !(failure instanceof AuthenticationRequired) &&
+        !(failure instanceof DirectoryUnavailable)
+      ) {
         for (const counter of counters) counter.limiter.refund(counter.key);
       }
       throw failure;

@@ -1,6 +1,6 @@
 import type {ConnectionOptions} from "node:tls";
 
-import {Effect, Redacted} from "effect";
+import {Effect, Option, Redacted, Semaphore} from "effect";
 import {Client, type ClientOptions, type Entry, ResultCodeError} from "ldapts";
 
 import {
@@ -26,6 +26,10 @@ export interface LdapDirectoryConfiguration {
 
 const usernamePlaceholder = "{username}";
 
+/** Most binds one authenticator, so one server process, runs at once. Past it, a sign-in is unavailable, not queued. */
+const maximumConcurrentBinds = 16;
+const unavailableMessage = "The directory could not verify the sign-in. Try again later.";
+
 // Bind results that mean the directory refused these credentials, as opposed
 // to the directory being busy, unreachable, or misconfigured.
 const credentialRefusalCodes = new Set([
@@ -47,6 +51,7 @@ type EntryRead =
 export function createLdapDirectoryAuthenticator(
   configuration: LdapDirectoryConfiguration,
 ): DirectoryAuthenticator {
+  const binds = Semaphore.makeUnsafe(maximumConcurrentBinds);
   return {
     authenticate: (username, password) => {
       const secret = Redacted.value(password);
@@ -56,16 +61,22 @@ export function createLdapDirectoryAuthenticator(
         return Effect.fail(rejected(directoryRejectionReasons.invalidCredentials));
       }
       return Effect.tryPromise({
-        catch: (cause) => new DirectoryUnavailable({
-          cause,
-          message: "The directory could not verify the sign-in. Try again later.",
-        }),
+        catch: (cause) => new DirectoryUnavailable({cause, message: unavailableMessage}),
         try: () => bindAndRead(
           configuration,
           userDn(configuration.userDnTemplate, username),
           secret,
         ),
       }).pipe(
+        // A stalled directory must not let requests pile up open connections.
+        binds.withPermitsIfAvailable(1),
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.fail(new DirectoryUnavailable({
+            cause: new Error(`${maximumConcurrentBinds} directory sign-ins are already running.`),
+            message: unavailableMessage,
+          })),
+          onSome: Effect.succeed,
+        })),
         Effect.flatMap((read) =>
           read.kind === "read"
             ? identityFromEntry(configuration, username, read.entry)

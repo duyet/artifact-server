@@ -15,6 +15,8 @@ export interface FakeLdapEntry {
 export interface FakeLdapDirectory {
   /** Every DN a client tried to bind as, in order, including failed binds. */
   readonly binds: readonly string[];
+  /** Connections accepted so far, including ones a silent directory never answers. */
+  readonly connections: number;
   readonly url: string;
   stop(): Promise<void>;
 }
@@ -48,7 +50,9 @@ export async function startFakeLdapDirectory(options: {
 }): Promise<FakeLdapDirectory> {
   const binds: string[] = [];
   const sockets = new Set<Socket>();
+  let connections = 0;
   const onConnection = (socket: Socket): void => {
+    connections += 1;
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => socket.destroy());
@@ -118,6 +122,9 @@ export async function startFakeLdapDirectory(options: {
   const address = z.object({port: z.number().int().positive()}).parse(server.address());
   return {
     binds,
+    get connections() {
+      return connections;
+    },
     url: `${options.tls === undefined ? "ldap" : "ldaps"}://${options.tls === undefined ? "127.0.0.1" : "localhost"}:${address.port}`,
     stop: () => new Promise((resolve) => {
       for (const socket of sockets) socket.destroy();

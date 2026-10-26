@@ -610,16 +610,16 @@ describe("LDAP browser sign-in", () => {
     });
   });
 
-  test("an unreachable or silent directory is 503 DIRECTORY_UNAVAILABLE within the timeout and is not counted as a failed sign-in", async () => {
+  test("an unreachable or silent directory is 503 DIRECTORY_UNAVAILABLE within the timeout and still counts as an attempt", async () => {
     const closedPort = await reserveLoopbackPort();
     await start({configuration: {url: `ldap://127.0.0.1:${closedPort}`}});
     const unavailable = await Promise.all(
       Array.from({length: 5}, () => signIn(running(), "alice", alicePassword)),
     );
     expect(unavailable.map((response) => response.status)).toEqual([503, 503, 503, 503, 503]);
-    const afterFive = await signIn(running(), "alice", alicePassword);
-    expect(afterFive.status).toBe(503);
-    expect(errorSchema.parse(await afterFive.json()).error.code).toBe("DIRECTORY_UNAVAILABLE");
+    expect(errorSchema.parse(await unavailable[0]?.json()).error.code).toBe("DIRECTORY_UNAVAILABLE");
+    // The directory may have checked each password before its answer was lost.
+    expect((await signIn(running(), "alice", alicePassword)).status).toBe(429);
     await server?.stop();
 
     const silent = await startFakeLdapDirectory({entries, silent: true});
@@ -631,6 +631,49 @@ describe("LDAP browser sign-in", () => {
       expect(performance.now() - startedAt).toBeLessThan(3_000);
     } finally {
       await silent.stop();
+    }
+  });
+
+  test("a stalled directory holds at most 16 sign-ins at once, and the next is 503 without contacting it", async () => {
+    const stalled = await startFakeLdapDirectory({entries, silent: true});
+    try {
+      server = await startTestServer(installation, {
+        applicationOrigin: "https://example.test",
+        bootstrapAdministratorEmail,
+        browserAccess: privateTeamBrowserAccess(browserLoginKinds.none, {
+          authenticator: createLdapDirectoryAuthenticator(ldapConfiguration(stalled, {
+            timeoutMilliseconds: 1_500,
+          })),
+          unknownUsers: unknownDirectoryUserPolicies.reject,
+        }),
+        contentDomain: null,
+      });
+      const from = (client: string) => ({
+        ...sameOriginHeaders(running()),
+        Origin: "https://example.test",
+        "X-Forwarded-For": client,
+        "X-Forwarded-Host": "example.test",
+        "X-Forwarded-Proto": "https",
+      });
+      const held = Array.from({length: 16}, (_, index) =>
+        signIn(running(), `user${index}`, "guess", from(`203.0.113.${index + 1}`)));
+      await vi.waitFor(() => expect(stalled.connections).toBe(16));
+
+      const startedAt = performance.now();
+      const excess = await signIn(running(), "user16", "guess", from("203.0.113.17"));
+      expect(excess.status).toBe(503);
+      expect(errorSchema.parse(await excess.json()).error.code).toBe("DIRECTORY_UNAVAILABLE");
+      expect(performance.now() - startedAt).toBeLessThan(1_000);
+      expect(stalled.connections).toBe(16);
+
+      // Each held sign-in frees its place when it times out.
+      expect((await Promise.all(held)).map((response) => response.status))
+        .toEqual(Array.from({length: 16}, () => 503));
+      const next = signIn(running(), "user17", "guess", from("203.0.113.18"));
+      await vi.waitFor(() => expect(stalled.connections).toBe(17));
+      expect((await next).status).toBe(503);
+    } finally {
+      await stalled.stop();
     }
   });
 
