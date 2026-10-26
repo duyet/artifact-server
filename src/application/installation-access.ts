@@ -20,6 +20,10 @@ import type {
 } from "../core/errors.js";
 import type {CreateApplicationSessionRecord} from "../core/identity-ports.js";
 import {
+  unknownOidcUserPolicies,
+  type UnknownOidcUserPolicy,
+} from "../core/oidc-sign-in.js";
+import {
   type ApplicationSession,
   type InstallationMember,
   type IssuedApplicationSession,
@@ -278,6 +282,20 @@ export interface InstallationAccessOperations {
   readonly loginAsLocalOwner: () => Effect.Effect<
     IssuedApplicationSession,
     IdentityConflict | IdentityRepositoryFailure
+  >;
+  /**
+   * Issue a member session for an email an identity provider has verified.
+   * Only an active member with that email matches. With none, `admit` creates
+   * one with role member and `reject` refuses. A deactivated member's email
+   * stays refused either way.
+   */
+  readonly loginWithVerifiedEmail: (
+    email: string,
+    displayName: string | null,
+    unknownUsers: UnknownOidcUserPolicy,
+  ) => Effect.Effect<
+    IssuedApplicationSession,
+    IdentityNotFound | IdentityRepositoryFailure
   >;
   /** Issue a browser session that acts as the presented managed API key. */
   readonly loginWithApiKey: (
@@ -539,6 +557,36 @@ function makeInstallationAccessService(
       now,
       new Date(expiresAt),
     );
+  });
+
+  const loginWithVerifiedEmail = Effect.fn(
+    "InstallationAccessService.loginWithVerifiedEmail",
+  )(function*(
+    rawEmail: string,
+    displayName: string | null,
+    unknownUsers: UnknownOidcUserPolicy,
+  ) {
+    const noMember = new IdentityNotFound({message: "No active member has this email."});
+    const email = yield* normalizeEmail(rawEmail).pipe(Effect.mapError(() => noMember));
+    const findMember = () =>
+      dependencies.repository.findActiveMemberByEmail(dependencies.installationId, email);
+    let member = yield* findMember();
+    if (member === null && unknownUsers === unknownOidcUserPolicies.admit) {
+      // A deactivated member's email conflicts, and so does a concurrent
+      // admission; the second lookup then finds only an active member.
+      member = yield* dependencies.repository.admitMember({
+        createdAt: dependencies.clock.now().toISOString(),
+        displayName: displayName ?? email,
+        email,
+        id: dependencies.ids.memberId(),
+        installationId: dependencies.installationId,
+        role: membershipRoles.member,
+      }).pipe(
+        Effect.catchTag("IdentityConflict", () => findMember()),
+      );
+    }
+    if (member === null) return yield* noMember;
+    return yield* issueMemberSession(member);
   });
 
   const admitMember = Effect.fn(
@@ -822,6 +870,7 @@ function makeInstallationAccessService(
     listApiKeys,
     listMembers,
     loginWithApiKey,
+    loginWithVerifiedEmail,
     loginWithLocalBrowserToken,
     revokeApiKey,
     revokeSession,

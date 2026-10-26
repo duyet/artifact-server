@@ -68,8 +68,19 @@ import {
   browserAccessModes,
   browserLoginKinds,
   defaultAccessSetting,
+  oidcSignIn,
   type BrowserAccess,
 } from "../core/browser-access.js";
+import {oidcFailureReports} from "../core/oidc-sign-in.js";
+import {
+  completeOidcSignIn,
+  type OidcCallback,
+  type PendingOidcSignIn,
+  pendingOidcSignInLifetimeMilliseconds,
+  safeReturnTo,
+  SpentOidcStates,
+  startOidcSignIn,
+} from "../application/oidc-sign-in.js";
 import {
   membershipRoles,
   principalCapabilities,
@@ -464,6 +475,19 @@ const issueApiKeySchema = z.object({
 const apiKeySignInSchema = z.object({
   apiKey: z.string().min(1).max(1_024),
 }).strict();
+const oidcCodeCallbackSchema = z.object({
+  code: z.string().min(1).max(4_096),
+  state: z.string().min(16).max(256),
+});
+// RFC 6749 error codes. Anything else is logged as unrecognized, never echoed.
+const oidcErrorCodePattern = /^[a-z_]{1,64}$/u;
+const pendingOidcSignInSchema = z.object({
+  codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/u),
+  expiresAt: z.number().int(),
+  nonce: z.string().min(16).max(256),
+  returnTo: z.string().max(1_024),
+  state: z.string().min(16).max(256),
+}).strict();
 const localLoginQuerySchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -474,6 +498,9 @@ const applicationSessionCookie = "artifact_session";
 const applicationCsrfCookie = "artifact_csrf";
 const secureApplicationSessionCookie = "__Host-artifact_session";
 const secureApplicationCsrfCookie = "__Host-artifact_csrf";
+const oidcPendingCookie = "artifact_oidc";
+// __Host- stops a sibling subdomain from planting its own pending sign-in.
+const secureOidcPendingCookie = "__Host-artifact_oidc";
 /** Upper bound on one held claim poll, per the dispatch transport contract. */
 const maximumClaimWaitSeconds = 25;
 /** Spacing of the bounded re-checks inside one held claim poll. */
@@ -586,6 +613,7 @@ export function createHttpApp(
       ),
   });
   const failedSignIns = new FailedSignInLimiter(dependencies.clock);
+  const spentOidcStates = new SpentOidcStates();
   const boundedUploadPlanBody = bodyLimit({
     maxSize: maximumUploadPlanRequestBytes,
     onError: (context) =>
@@ -942,8 +970,73 @@ export function createHttpApp(
     context.header("Cache-Control", "private, no-store");
     return context.json({
       accessMode: dependencies.browserAccess.mode,
-      login: {kind: dependencies.browserAccess.loginKind},
+      login: dependencies.browserAccess.mode === browserAccessModes.privateTeam
+        ? {
+          kind: dependencies.browserAccess.loginKind,
+          oidc: dependencies.browserAccess.oidc !== null,
+        }
+        : {kind: dependencies.browserAccess.loginKind},
     });
+  });
+
+  app.get("/auth/oidc/start", async (context) => {
+    const oidc = oidcSignIn(dependencies.browserAccess);
+    if (oidc === null) return context.notFound();
+    context.header("Cache-Control", "private, no-store");
+    const started = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      startOidcSignIn(
+        oidc,
+        safeReturnTo(context.req.query("returnTo")),
+        dependencies.clock.now(),
+      ).pipe(
+        Effect.map((value) => ({...value, kind: "started" as const})),
+        Effect.catchTag("OidcSignInFailed", (failed) =>
+          Effect.succeed({browser: oidcFailureReports[failed.reason].browser, kind: "refused" as const})),
+        Effect.annotateLogs({client_address: signInClientAddress(context, dependencies)}),
+      ),
+    );
+    if (started.kind === "refused") return context.redirect(`/review?sso=${started.browser}`, 303);
+    setCookie(context, oidcPendingCookieName(dependencies), encodePendingOidcSignIn(started.pending), {
+      httpOnly: true,
+      maxAge: pendingOidcSignInLifetimeMilliseconds / 1_000,
+      path: "/",
+      sameSite: "Lax",
+      secure: usesSecureApplicationCookies(dependencies),
+    });
+    return context.redirect(started.authorizationUrl, 302);
+  });
+
+  app.get("/auth/oidc/callback", async (context) => {
+    const oidc = oidcSignIn(dependencies.browserAccess);
+    if (oidc === null) return context.notFound();
+    const pending = readPendingOidcSignIn(context, dependencies);
+    deleteCookie(context, oidcPendingCookieName(dependencies), {
+      path: "/",
+      secure: usesSecureApplicationCookies(dependencies),
+    });
+    context.header("Cache-Control", "private, no-store");
+    context.header("Referrer-Policy", "no-referrer");
+    const completed = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      completeOidcSignIn(
+        oidc,
+        pending,
+        oidcCallback(context.req.query()),
+        spentOidcStates,
+        dependencies.clock.now(),
+      ).pipe(
+        Effect.map((value) => ({...value, kind: "signed_in" as const})),
+        Effect.catchTag("OidcSignInFailed", (failed) =>
+          Effect.succeed({browser: oidcFailureReports[failed.reason].browser, kind: "refused" as const})),
+        Effect.annotateLogs({client_address: signInClientAddress(context, dependencies)}),
+      ),
+    );
+    if (completed.kind === "refused") return context.redirect(`/review?sso=${completed.browser}`, 303);
+    setApplicationSessionCookies(context, dependencies, completed.issued);
+    return context.redirect(completed.returnTo, 303);
   });
 
   app.post("/auth/local-owner", async (context) => {
@@ -2677,6 +2770,39 @@ function setApplicationSessionCookies(
     sameSite: "Lax",
     secure,
   });
+}
+
+function oidcPendingCookieName(dependencies: HttpAppDependencies): string {
+  return usesSecureApplicationCookies(dependencies) ? secureOidcPendingCookie : oidcPendingCookie;
+}
+
+function encodePendingOidcSignIn(pending: PendingOidcSignIn): string {
+  return Buffer.from(JSON.stringify(pending)).toString("base64url");
+}
+
+function readPendingOidcSignIn(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+): PendingOidcSignIn | null {
+  const raw = getCookie(context, oidcPendingCookieName(dependencies));
+  if (raw === undefined) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  const parsed = pendingOidcSignInSchema.safeParse(decoded);
+  return parsed.success ? {...parsed.data, returnTo: safeReturnTo(parsed.data.returnTo)} : null;
+}
+
+function oidcCallback(query: Readonly<Record<string, string>>): OidcCallback {
+  const error = query["error"];
+  if (error !== undefined) {
+    return {error: oidcErrorCodePattern.test(error) ? error : "unrecognized", kind: "error"};
+  }
+  const parsed = oidcCodeCallbackSchema.safeParse(query);
+  return parsed.success ? {...parsed.data, kind: "code"} : {kind: "invalid"};
 }
 
 function clearApplicationSessionCookies(

@@ -7,6 +7,10 @@ import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
+import {
+  unknownOidcUserPolicies,
+  type UnknownOidcUserPolicy,
+} from "../core/oidc-sign-in.js";
 
 import type {
   ObjectStorageProviderFactory,
@@ -52,6 +56,13 @@ const urlStringSchema = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^\s]+$/u),
 );
 const systemErrorSchema = Schema.Struct({code: Schema.optional(Schema.String)});
+const oidcClientIdSchema = Schema.String.check(Schema.isPattern(/^[\x21-\x7E]{1,256}$/u));
+const oidcClientSecretSchema = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(1_024),
+);
+// Space-separated scope tokens (RFC 6749 section 3.3).
+const oidcScopesPattern = /^[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*$/u;
 
 /** Runtime mode selected by one lifecycle command. */
 export type DeploymentMode = "compact" | "external-storage";
@@ -63,6 +74,27 @@ export type CredentialSource =
   | "generated_file"
   | "provider_chain";
 type ConfiguredCredentialSource = "environment" | "file";
+
+/** OIDC browser sign-in, present only when `ARTIFACT_SERVER_OIDC_ISSUER` is set. */
+export interface OidcSignInConfiguration {
+  readonly clientId: string;
+  readonly clientSecret: LoadedSecret;
+  /** An https URL without a trailing slash. */
+  readonly issuer: string;
+  readonly redirectUri: string;
+  readonly scopes: string;
+  readonly unknownUsers: UnknownOidcUserPolicy;
+}
+
+/** What `config check` reports about OIDC sign-in. The secret appears only as its source. */
+export interface OidcSignInSummary {
+  readonly clientId: string;
+  readonly clientSecret: ConfiguredCredentialSource;
+  readonly issuer: string;
+  readonly redirectUri: string;
+  readonly scopes: string;
+  readonly unknownUsers: UnknownOidcUserPolicy;
+}
 
 /** Parsed compact configuration used by serving and lifecycle commands. */
 export interface CompactRuntimeConfiguration {
@@ -76,6 +108,7 @@ export interface CompactRuntimeConfiguration {
   readonly deploymentMode: "compact";
   readonly hostname: string;
   readonly installation: CompactInstallationMetadata;
+  readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -99,6 +132,7 @@ export interface ExternalStorageRuntimeConfiguration {
   readonly hostname: string;
   readonly installationId: string;
   readonly objectStorage: ObjectStorageProviderFactory;
+  readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
   readonly postgresMaxConnections: number;
   readonly readinessWithdrawalMilliseconds: number;
@@ -123,6 +157,7 @@ export interface RuntimeConfigurationSummary {
   readonly hostname: string;
   readonly installationId: string;
   readonly objectStorageProvider: "filesystem" | ObjectStorageProviderKind;
+  readonly oidcSignIn: OidcSignInSummary | null;
   readonly port: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -213,6 +248,7 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     deploymentMode: "compact",
     hostname: yield* parseHostname(input.hostname),
     installation,
+    oidcSignIn: yield* parseOidcSignIn(input.environment, applicationOrigin),
     port: yield* parsePort(input.port),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
       input.environment,
@@ -227,6 +263,76 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     stagingCleanupPolicy: yield* parseStagingCleanupPolicy(input.environment),
   };
 });
+
+const parseOidcSignIn = Effect.fn("parseOidcSignIn")(function*(
+  environment: NodeJS.ProcessEnv,
+  applicationOrigin: string,
+): Effect.fn.Return<OidcSignInConfiguration | null, RuntimeConfigurationError> {
+  const issuer = environment["ARTIFACT_SERVER_OIDC_ISSUER"];
+  if (issuer === undefined || issuer === "") return null;
+  const scopes = environment["ARTIFACT_SERVER_OIDC_SCOPES"] ?? "";
+  if (scopes !== "" && (!oidcScopesPattern.test(scopes) || !scopes.split(" ").includes("openid"))) {
+    return yield* invalidValue(
+      "ARTIFACT_SERVER_OIDC_SCOPES",
+      "ARTIFACT_SERVER_OIDC_SCOPES must be space-separated scopes that include openid.",
+    );
+  }
+  return {
+    clientId: yield* parseRequiredEnvironment(
+      "ARTIFACT_SERVER_OIDC_CLIENT_ID",
+      environment["ARTIFACT_SERVER_OIDC_CLIENT_ID"],
+      oidcClientIdSchema,
+    ),
+    clientSecret: yield* readSecret(
+      environment,
+      "ARTIFACT_SERVER_OIDC_CLIENT_SECRET",
+      oidcClientSecretSchema,
+    ),
+    issuer: yield* parseOidcIssuer(issuer),
+    redirectUri: new URL("/auth/oidc/callback", applicationOrigin).toString(),
+    scopes: scopes === "" ? "openid email profile" : scopes,
+    unknownUsers: yield* parseChoice(
+      environment,
+      "ARTIFACT_SERVER_OIDC_UNKNOWN_USERS",
+      [unknownOidcUserPolicies.reject, unknownOidcUserPolicies.admit],
+    ),
+  };
+});
+
+function parseOidcIssuer(value: string): Effect.Effect<string, RuntimeConfigurationError> {
+  const field = "ARTIFACT_SERVER_OIDC_ISSUER";
+  const refused = invalidValue(
+    field,
+    `${field} must be an https URL without credentials, query, or fragment.`,
+  );
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return refused;
+  }
+  if (
+    url.protocol !== "https:" || url.username !== "" || url.password !== "" ||
+    url.search !== "" || url.hash !== ""
+  ) {
+    return refused;
+  }
+  return Effect.succeed(url.toString().replace(/\/+$/u, ""));
+}
+
+/** The first allowed value is the default. */
+function parseChoice<const T extends string>(
+  environment: NodeJS.ProcessEnv,
+  field: string,
+  allowed: readonly [T, ...T[]],
+): Effect.Effect<T, RuntimeConfigurationError> {
+  const value = environment[field];
+  if (value === undefined || value === "") return Effect.succeed(allowed[0]);
+  const choice = allowed.find((candidate) => candidate === value);
+  return choice === undefined
+    ? invalidValue(field, `${field} must be one of ${allowed.join(", ")}.`)
+    : Effect.succeed(choice);
+}
 
 /** Parse external-storage configuration and secret files without connecting. */
 export const parseExternalStorageRuntimeConfiguration = Effect.fn(
@@ -285,6 +391,7 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
       installationIdSchema,
     ),
     objectStorage: configuredObjectStorage.factory,
+    oidcSignIn: yield* parseOidcSignIn(environment, applicationOrigin),
     port: yield* parsePort(input.port),
     postgresMaxConnections: yield* parsePostgresMaxConnections(environment),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
@@ -396,6 +503,19 @@ const parseS3ObjectStorage = Effect.fn("parseS3ObjectStorage")(
   },
 );
 
+function summarizeOidcSignIn(
+  configuration: OidcSignInConfiguration | null,
+): OidcSignInSummary | null {
+  return configuration === null ? null : {
+    clientId: configuration.clientId,
+    clientSecret: configuration.clientSecret.source,
+    issuer: configuration.issuer,
+    redirectUri: configuration.redirectUri,
+    scopes: configuration.scopes,
+    unknownUsers: configuration.unknownUsers,
+  };
+}
+
 /** Render the safe, stable subset of one parsed runtime configuration. */
 export function summarizeRuntimeConfiguration(
   configuration: CompactRuntimeConfiguration | ExternalStorageRuntimeConfiguration,
@@ -412,6 +532,7 @@ export function summarizeRuntimeConfiguration(
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
       objectStorageProvider: "filesystem",
+      oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
       port: configuration.port,
       readinessWithdrawalMilliseconds:
         configuration.readinessWithdrawalMilliseconds,
@@ -431,6 +552,7 @@ export function summarizeRuntimeConfiguration(
     hostname: configuration.hostname,
     installationId: configuration.installationId,
     objectStorageProvider: configuration.objectStorage.kind,
+    oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
     port: configuration.port,
     readinessWithdrawalMilliseconds:
       configuration.readinessWithdrawalMilliseconds,

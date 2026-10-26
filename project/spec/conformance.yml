@@ -4435,3 +4435,17 @@ requirements:
     proof_gap: Proved locally against SQLite over a real server, and the pure day filter and per-measure sums with no server and no browser. The Postgres read and the browser toggle, bar click, and keyboard path run only in CI, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
+
+  - id: FRK-024
+    kind: security
+    behavior: With ARTIFACT_SERVER_OIDC_ISSUER set, a no-login server also signs a browser in through an OpenID Connect provider with the authorization code flow, PKCE S256, state, and nonce as a confidential client; it verifies the ID token signature against the provider's JWKS and its iss, aud, exp, iat, and nonce, refuses alg none, and issues the session of the active member whose email equals the ID token's verified email claim, or admits a new member only when configured to; the pending state, nonce, verifier, and return path live in one short-lived HttpOnly cookie that works once, and codes, tokens, and the client secret never reach a log.
+    owner: authorization
+    source: {file: ../../docs/fork/RUNBOOK.md, anchor: sign-in-with-oidc}
+    acceptance:
+      behavior: {id: FRK-024-B, description: "Against an in-process OIDC provider with discovery, a JWKS, and a token endpoint that checks client_secret_basic and PKCE, press start, approve the authorization request, and land on the requested return path as the member whose email the ID token names, without case; admit a new verified email once and reuse its member; write one audit line per attempt; and parse the OIDC environment with its defaults and a secret file. In a browser, press Sign in with SSO on the Review gate next to the API-key form, see a refused attempt return to the gate with a generic message, and complete a second attempt into Review."}
+      failure: {id: FRK-024-F, description: "An unknown email under reject, a deactivated member under reject or admit, an email_verified of false, and a missing email get no session; a callback with no pending cookie, another browser's state, an edited or expired cookie, or a replayed cookie and code never redeem a new code; an ID token with another nonce, audience, issuer, or authorized party, an expired, stale, or future token, a stranger's signature, or alg none is refused; a provider error and a callback without a code are refused; a return path off the origin, in the query or an edited cookie, falls back to /review; an unreachable provider is SSO unavailable at start and at the callback; a server without OIDC has no OIDC routes; and an http issuer, a missing client, a missing or doubled secret, scopes without openid, and an unknown policy fail at startup."}
+    deployments: [local, single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against a compact SQLite installation and an in-process OIDC provider. No run against a real provider, and no Postgres run.
+    depends_on: [AUTH-029, FRK-014]
+    evidence: []

@@ -23,6 +23,7 @@ import {
   summarizeRuntimeConfiguration,
   type CompactRuntimeConfiguration,
   type ExternalStorageRuntimeConfiguration,
+  type OidcSignInConfiguration,
 } from "../lifecycle/runtime-configuration.js";
 import {inspectRuntimeConfiguration} from
   "../lifecycle/runtime-inspection.js";
@@ -38,6 +39,8 @@ import {
   startLocalServer,
 } from "../local/start-local-server.js";
 import {membershipRoles, type MembershipRole} from "../core/identity.js";
+import type {OidcSignIn} from "../core/oidc-sign-in.js";
+import {createOidcProvider} from "../identity/oidc-provider.js";
 import {PostgresDatabase} from "../storage/postgres-database.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
@@ -370,7 +373,10 @@ function configureExternalStorageStart(
         applicationOrigin: parsed.applicationOrigin,
         assetQuota: parsed.assetQuota,
         bootstrapAdministratorEmail: parsed.bootstrapAdministratorEmail,
-        browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+        browserAccess: privateTeamBrowserAccess(
+          browserLoginKinds.none,
+          oidcSignIn(parsed.oidcSignIn),
+        ),
         completedRequestLogSampleRate: parsed.completedRequestLogSampleRate,
         contentDomain: parsed.contentDomain,
         databaseUrl: parsed.databaseUrl,
@@ -403,7 +409,10 @@ async function startCompactServer(
     applicationOrigin: configuration.applicationOrigin,
     assetQuota: configuration.assetQuota,
     bootstrapAdministratorEmail: configuration.bootstrapAdministratorEmail,
-    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+    browserAccess: privateTeamBrowserAccess(
+      browserLoginKinds.none,
+      oidcSignIn(configuration.oidcSignIn),
+    ),
     completedRequestLogSampleRate: configuration.completedRequestLogSampleRate,
     contentDomain: configuration.contentDomain,
     dataDirectory: configuration.dataDirectory,
@@ -416,6 +425,19 @@ async function startCompactServer(
     shutdownDeadlineMilliseconds: configuration.shutdownDeadlineMilliseconds,
     stagingCleanupPolicy: configuration.stagingCleanupPolicy,
   });
+}
+
+function oidcSignIn(configuration: OidcSignInConfiguration | null): OidcSignIn | null {
+  return configuration === null ? null : {
+    provider: createOidcProvider({
+      clientId: configuration.clientId,
+      clientSecret: configuration.clientSecret.value,
+      issuer: configuration.issuer,
+      redirectUri: configuration.redirectUri,
+      scopes: configuration.scopes,
+    }),
+    unknownUsers: configuration.unknownUsers,
+  };
 }
 
 async function lifecycleConfiguration(
