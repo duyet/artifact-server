@@ -35,7 +35,7 @@ describe("content access lifecycle", () => {
     dataDirectory = await mkdtemp(path.join(tmpdir(), "artifact-content-access-"));
     clock = new ControlledClock(new Date("2026-08-13T00:00:00.000Z"));
     const databasePath = path.join(dataDirectory, "artifact-server.db");
-    repository = new SqliteArtifactRepository(databasePath);
+    repository = new SqliteArtifactRepository(databasePath, "test-installation");
     identityRepository = new SqliteIdentityRepository(databasePath);
     runtime = ManagedRuntime.make(createLocalApplicationLayer({
       apiToken: Redacted.make("test-api-token"),
@@ -218,6 +218,24 @@ describe("content access lifecycle", () => {
       ));
   });
 
+  test("a sign-in's return artifact resolves only for a principal that may open its content", async () => {
+    const published = await publishPrivateArtifact(runtime);
+    const resolved = await runtime.runPromise(resolve(testPrincipal, published.artifact.id));
+    expect(resolved.id).toBe(published.artifact.id);
+    await expectFailure("AuthorizationDenied", resolve({
+      ...testPrincipal,
+      capabilities: [principalCapabilities.createArtifact],
+    }, published.artifact.id));
+    await expectFailure("AuthorizationDenied", resolve({
+      ...testPrincipal,
+      installationId: "another-installation",
+    }, published.artifact.id));
+    await expectFailure("ArtifactNotFound", resolve(
+      testPrincipal,
+      "art_00000000-0000-4000-8000-000000000000",
+    ));
+  });
+
   async function expectFailure<A, E extends {_tag: string}>(
     expectedTag: E["_tag"],
     effect: Effect.Effect<A, E, ContentAccessService>,
@@ -229,6 +247,11 @@ describe("content access lifecycle", () => {
     })).toBe(expectedTag);
   }
 });
+
+function resolve(principal: Principal, artifactId: string) {
+  return ContentAccessService.use((contentAccess) =>
+    contentAccess.resolveReadableArtifact(principal, artifactId));
+}
 
 const testPrincipal: Principal = {
   authorizedByPrincipalId: null,

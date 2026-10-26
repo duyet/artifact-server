@@ -440,6 +440,11 @@ export function versionServedRoots(
   return root === null ? [exact] : [root, exact];
 }
 
+/** The value when it is exactly an artifact ID, `art_<uuid>`, else null. */
+export function parseArtifactId(value: string | null | undefined): string | null {
+  return value !== null && value !== undefined && artifactIdPattern.test(value) ? value : null;
+}
+
 /** Read an artifact ID out of a path segment shaped like an artifact folder. */
 export function parseArtifactFolder(
   segment: string,
