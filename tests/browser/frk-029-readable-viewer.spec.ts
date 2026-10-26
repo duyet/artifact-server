@@ -4,6 +4,7 @@ import {z} from "zod";
 
 import {publishSite} from "../support/same-host-site.js";
 import {
+  localLogin,
   startBrowserFixture,
   stopBrowserFixture,
   type BrowserFixture,
@@ -19,6 +20,9 @@ const entry = [
   '<body><main><h1>Readable page</h1><a href="#end">Jump to the end</a>',
   '<div style="height: 3000px"></div><p id="end">The end</p></main></body></html>',
 ].join("");
+const storedArtifactSchema = z.object({
+  artifact: z.object({tags: z.array(z.string())}).loose(),
+}).loose();
 const treeSchema = z.object({
   artifacts: z.array(z.object({
     name: z.string(),
@@ -70,6 +74,12 @@ test.describe("FRK-029 readable URL viewer", () => {
         path: readablePath,
       });
       const readableUrl = `${fixture.server.baseUrl}/${readablePath}/`;
+      const sessionReads: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname.startsWith("/api/v1/session")) {
+          sessionReads.push(request.url());
+        }
+      });
 
       await page.goto(readableUrl);
       const bar = viewerBar(page);
@@ -116,6 +126,7 @@ test.describe("FRK-029 readable URL viewer", () => {
       await expect(info.getByText("v1", {exact: true})).toBeVisible();
       await expect(info.getByRole("combobox", {name: "Visibility"})).toHaveCount(0);
       await expect(info.getByText("Public", {exact: true})).toBeVisible();
+      expect(sessionReads).toEqual([]);
       const accessibility = await new AxeBuilder({page})
         .exclude(`iframe[title="${artifactName}"]`)
         .withTags(["wcag2a", "wcag2aa"])
@@ -130,10 +141,15 @@ test.describe("FRK-029 readable URL viewer", () => {
       ));
       await expect(page.getByRole("menuitem", {name: "Open in Review"})).toHaveCount(0);
       await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toHaveCount(0);
 
       await page.emulateMedia({colorScheme: "dark"});
       await expect(page.locator("html")).toHaveClass(/\bdark\b/u);
+      await bar.getByRole("button", {name: "Artifact info"}).click();
+      await expect(info).toBeVisible();
       await page.screenshot({path: "test-results/browser/readable-viewer-dark.png"});
+      await page.keyboard.press("Escape");
+      await expect(info).toHaveCount(0);
       await page.emulateMedia({colorScheme: "light"});
 
       await page.setViewportSize({height: 844, width: 390});
@@ -158,6 +174,43 @@ test.describe("FRK-029 readable URL viewer", () => {
       await expect(page).toHaveURL(`${readableUrl}?raw=1`);
       await expect(page.getByRole("heading", {level: 1, name: "Readable page"})).toBeVisible();
       await expect(viewerBar(page)).toHaveCount(0);
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
+  test("FRK-029-B: a signed-in reader who may manage the artifact changes its visibility from the readable URL's bar and can open it in Review", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser, {contentDomain: null});
+    try {
+      const page = fixture.page;
+      const published = await publishSite(fixture.server, fixture.installation, {
+        accessSetting: "public_link",
+        entry,
+        name: artifactName,
+        path: readablePath,
+      });
+      await localLogin(fixture);
+      await page.goto(`${fixture.server.baseUrl}/${readablePath}/`);
+
+      const bar = viewerBar(page);
+      await bar.getByRole("button", {name: "Artifact info"}).click();
+      const info = page.getByRole("dialog", {name: "Artifact info"});
+      const visibility = info.getByRole("combobox", {name: "Visibility"});
+      await expect(visibility).toHaveText(/Public/u);
+      await visibility.click();
+      await page.getByRole("option", {name: "Unlisted"}).click();
+      await expect.poll(async () => {
+        const response = await fetch(
+          `${fixture.server.baseUrl}/api/v1/artifacts/${published.artifact.id}`,
+          {headers: {Authorization: `Bearer ${fixture.installation.apiToken}`}},
+        );
+        return storedArtifactSchema.parse(await response.json()).artifact.tags;
+      }).toEqual(["unlisted"]);
+      await page.keyboard.press("Escape");
+
+      await bar.getByRole("button", {name: "Artifact actions"}).click();
+      await page.getByRole("menuitem", {exact: true, name: "Open in Review"}).click();
+      await expect(page).toHaveURL(new RegExp(`/review\\?.*artifact=${published.artifact.id}`, "u"));
     } finally {
       await stopBrowserFixture(fixture);
     }

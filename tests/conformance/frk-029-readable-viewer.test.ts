@@ -130,6 +130,15 @@ describe("the viewer at readable artifact URLs", () => {
     const shell = await fetchVersion(server, pathUrl, "GET", tabNavigation);
     expect(shell.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     expect(shell.headers.get("cache-control")).toBe("no-cache, must-revalidate");
+    // A tab that revalidates the page it cached before the viewer existed, and
+    // a frame that sends the viewer's validator, each get their own body.
+    const viewerEtag = shell.headers.get("etag");
+    const pageEtag = (await fetchVersion(server, pathUrl, "GET", nonBrowser)).headers.get("etag");
+    if (viewerEtag === null || pageEtag === null) throw new Error("A body carries no ETag.");
+    expect(viewerEtag).not.toBe(pageEtag);
+    expect(await get(pathUrl, {...tabNavigation, "If-None-Match": pageEtag})).toEqual(viewer);
+    expect(await get(`${pathUrl}?raw=1`, {...frameNavigation, "If-None-Match": viewerEtag}))
+      .toEqual(page(indexHtml));
 
     expect(await get(`${pathUrl}?raw=1`, frameNavigation)).toEqual(page(indexHtml));
     expect(await get(`${pathUrl}docs/nested/page.html`, frameNavigation))
