@@ -113,6 +113,8 @@ export interface CompactRuntimeConfiguration {
   readonly contentDomain: string | null;
   readonly dataDirectory: string;
   readonly deploymentMode: "compact";
+  /** The account menu's Help link, or null for no Help item. */
+  readonly helpUrl: string | null;
   readonly hostname: string;
   readonly installation: CompactInstallationMetadata;
   readonly logo: ViewerLogo | null;
@@ -137,6 +139,8 @@ export interface ExternalStorageRuntimeConfiguration {
   >>;
   readonly databaseUrl: Redacted.Redacted;
   readonly deploymentMode: "external-storage";
+  /** The account menu's Help link, or null for no Help item. */
+  readonly helpUrl: string | null;
   readonly hostname: string;
   readonly installationId: string;
   readonly logo: ViewerLogo | null;
@@ -265,6 +269,7 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     contentDomain,
     dataDirectory: layout.dataDirectory,
     deploymentMode: "compact",
+    helpUrl: yield* parseHelpUrl(input.environment),
     hostname: yield* parseHostname(input.hostname),
     installation,
     logo: yield* parseViewerLogo(input.environment),
@@ -404,6 +409,7 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
     },
     databaseUrl: databaseUrl.value,
     deploymentMode: "external-storage",
+    helpUrl: yield* parseHelpUrl(environment),
     hostname: yield* parseHostname(input.hostname),
     installationId: yield* parseRequiredEnvironment(
       "ARTIFACT_SERVER_INSTALLATION_ID",
@@ -858,6 +864,16 @@ function parseViewerLogoLink(
     value,
     "ARTIFACT_SERVER_LOGO_LINK must be an https:// URL without credentials or a path that starts with one /.",
   );
+}
+
+function parseHelpUrl(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<string | null, RuntimeConfigurationError> {
+  const field = "ARTIFACT_SERVER_HELP_URL";
+  const value = environment[field]?.trim() ?? "";
+  return value === ""
+    ? Effect.succeed(null)
+    : parseHttpsUrl(field, value, `${field} must be an https:// URL without credentials.`);
 }
 
 function parseHttpsUrl(

@@ -69,6 +69,8 @@ export interface LocalRuntimeConfig {
   readonly externalApiBearerVerifier?: BearerCredentialVerifier;
   readonly externalMcpBearerVerifier?: BearerCredentialVerifier;
   readonly localBootstrapToken?: string;
+  /** The account menu's Help link; absent or null shows no Help item. */
+  readonly helpUrl?: string | null;
   /** The viewer bar's logo; absent or null shows the product mark. */
   readonly logo?: ViewerLogo | null;
   readonly observability?: boolean;
@@ -182,6 +184,7 @@ export async function createLocalRuntime(
         config.completedRequestLogSampleRate ??
           defaultCompletedRequestLogSampleRate,
       contentDomain: config.contentDomain,
+      helpUrl: config.helpUrl ?? null,
       logo: config.logo ?? null,
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),

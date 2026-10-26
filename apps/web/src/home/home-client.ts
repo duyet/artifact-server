@@ -58,6 +58,36 @@ export interface PublicCatalog {
   readonly windowDays: number;
 }
 
+const signInContextSchema = z.object({
+  helpUrl: z.url({protocol: /^https$/u}).nullable(),
+  login: z.object({oidc: z.boolean().optional()}),
+});
+
+/** What the header's account control needs before anyone signs in. */
+export interface SignInContext {
+  /** The operator's Help link, or null for no Help item. */
+  readonly helpUrl: string | null;
+  /** Where Sign in goes: SSO when it is configured, otherwise Review's gate. */
+  readonly signInHref: string;
+}
+
+/** Read the sign-in route and Help link without loading the API client. */
+export async function readSignInContext(
+  fetchImplementation: typeof fetch = fetch,
+): Promise<SignInContext> {
+  const response = await fetchImplementation("/auth/context", {
+    headers: {Accept: "application/json"},
+  });
+  if (!response.ok) {
+    throw new Error(`The sign-in context request returned HTTP ${response.status}.`);
+  }
+  const context = signInContextSchema.parse(await response.json());
+  return {
+    helpUrl: context.helpUrl,
+    signInHref: context.login.oidc === true ? "/auth/oidc/start?returnTo=%2F" : "/review",
+  };
+}
+
 /**
  * Read the catalog. The browser sends its session cookie, so a signed-in
  * member reads every artifact with what they may change; anyone else reads

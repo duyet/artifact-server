@@ -724,6 +724,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const context = await fetch(`${server.baseUrl}/auth/context`);
     expect(await context.json()).toEqual({
       accessMode: "private_team",
+      helpUrl: null,
       login: {kind: "none", oidc: false},
     });
     const content = "<h1>same-host external-storage proof</h1>";

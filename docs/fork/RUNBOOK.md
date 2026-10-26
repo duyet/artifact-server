@@ -305,6 +305,16 @@ kubectl --namespace artifact-server exec statefulset/artifact-server -- \
   'SELECT day, SUM(count) FROM artifact_views GROUP BY day ORDER BY day DESC LIMIT 30'
 ```
 
+### Help link in the account menu
+
+The home page header shows **Sign in** to a signed-out reader and an account menu to a signed-in one. To add a **Help** item to that menu, set one variable and restart the server:
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `ARTIFACT_SERVER_HELP_URL` | no | An `https://` URL without credentials, such as your team's runbook. Unset or empty shows no Help item. |
+
+Any other value, such as an `http://` URL or a relative path, stops startup with the variable's name, and `config check` refuses it the same way. The value is public: `/auth/context` reports it as `helpUrl` to every browser.
+
 ## Viewer logo
 
 Review's artifact viewer shows a 40px bar above each artifact with the installation's logo, the artifact name, an info button, and an actions menu. Without configuration, the bar shows the Artifact Server mark. To show your own logo, set these variables on the server and restart it:

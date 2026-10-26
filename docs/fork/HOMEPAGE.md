@@ -340,6 +340,24 @@ SQLite keeps schema version 17, as `artifact_views` and `assets` did. Postgres n
 
 The tree response gains `collapsedFolders`, sorted. It names a folder only when a listed artifact's path is that folder or sits inside it, so an anonymous viewer never learns a folder that holds only private or unlisted work. The page passes `defaultOpen={false}` to those folders. The page keeps no per-viewer folder state, so a viewer's clicks last until the next load, as they did before.
 
+## 7. Account menu
+
+The header's right side holds the account control and the theme menu. `FRK-031` owns it.
+
+- **Signed out.** A **Sign in** link. When `/auth/context` reports `login.oidc: true`, it goes to `/auth/oidc/start?returnTo=%2F`, so SSO lands back on the home page. Otherwise it goes to `/review`, whose gate offers this server's sign-in.
+- **Signed in.** An avatar button named `Account: <name>` shows the initials from `principalInitials`, the same helper Review's sidebar uses, so a person has the same initials in both places. It opens a menu with the name and email, **My artifacts** (`/?mine=1`), **Workbench** (`/review`), **Help** when the operator set one, and **Sign out**. Sign out calls `POST /api/v1/session/logout`, which revokes the session on the server, then loads `/`.
+
+The data comes from two existing endpoints:
+
+```ts
+// GET /api/v1/session gains:
+account: {displayName: string, email: string | null}
+// GET /auth/context gains:
+helpUrl: string | null // ARTIFACT_SERVER_HELP_URL, https only
+```
+
+`account` describes the caller and nobody else. Only a person's direct session reads an email. A key, including an operator key used as a bearer and a key an administrator issued on a member's principal, reads `email: null`, because a key can carry a member's principal ID without being that member. The menu, its session read, and the API client load as a separate chunk only for a signed-in reader, like the row menu. An anonymous reader reads only `/auth/context`.
+
 ## Open decisions
 
 1. **The anonymous prefix is `/api/v1/public/`, not a `/public` first segment.** A first-segment route would need an entry in `reservedPathRoots` (section 11), and the reserved list is deliberately short.

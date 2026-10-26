@@ -36,6 +36,7 @@ import {
   type StoredManagedApiKey,
 } from "../core/installation-identity.js";
 import {
+  isDirectHumanPrincipal,
   isHumanAdministrator,
   membershipRoles,
   principalCapabilities,
@@ -213,6 +214,13 @@ export interface IssuedLocalBrowserLogin {
   readonly token: Redacted.Redacted;
 }
 
+/** What a signed-in principal may read about itself. */
+export interface OwnAccount {
+  readonly displayName: string;
+  /** The member's email; null for a key or service principal. */
+  readonly email: string | null;
+}
+
 export interface InstallationAccessOperations {
   readonly admitMember: (
     command: AdmitMemberCommand,
@@ -254,6 +262,13 @@ export interface InstallationAccessOperations {
     readonly InstallationMember[],
     AuthorizationDenied | IdentityRepositoryFailure
   >;
+  /**
+   * The principal's own name and email. Only a person's direct session reads
+   * an email: a key can carry a member's principal ID, and must not learn it.
+   */
+  readonly ownAccount: (
+    principal: Principal,
+  ) => Effect.Effect<OwnAccount, IdentityRepositoryFailure>;
   /**
    * Create or reuse an active member with the requested role by email and
    * mint a key whose browser sign-in acts as that member. Re-issuing the same
@@ -615,6 +630,19 @@ function makeInstallationAccessService(
     return yield* dependencies.repository.listMembers(dependencies.installationId);
   });
 
+  const ownAccount = Effect.fn(
+    "InstallationAccessService.ownAccount",
+  )(function*(principal: Principal) {
+    const member = isDirectHumanPrincipal(principal) &&
+        principal.installationId === dependencies.installationId
+      ? yield* dependencies.repository.findMember(
+        dependencies.installationId,
+        principal.id,
+      )
+      : null;
+    return {displayName: principal.displayName, email: member?.email ?? null};
+  });
+
   const deactivateMember = Effect.fn(
     "InstallationAccessService.deactivateMember",
   )(function*(principal: Principal, memberId: string) {
@@ -875,6 +903,7 @@ function makeInstallationAccessService(
     loginWithApiKey,
     loginWithVerifiedEmail,
     loginWithLocalBrowserToken,
+    ownAccount,
     revokeApiKey,
     revokeSession,
     rotateApiKey,

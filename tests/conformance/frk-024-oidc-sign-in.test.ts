@@ -227,6 +227,7 @@ describe("OIDC browser sign-in", () => {
     const context = await fetch(`${running().baseUrl}/auth/context`);
     expect(await context.json()).toEqual({
       accessMode: "private_team",
+      helpUrl: null,
       login: {kind: "none", oidc: true},
     });
 
@@ -473,6 +474,7 @@ describe("OIDC browser sign-in", () => {
     });
     expect(await (await fetch(`${running().baseUrl}/auth/context`)).json()).toEqual({
       accessMode: "private_team",
+      helpUrl: null,
       login: {kind: "none", oidc: false},
     });
     const routes = ["/auth/oidc/start", "/auth/oidc/callback?code=x&state=yyyyyyyyyyyyyyyy"];

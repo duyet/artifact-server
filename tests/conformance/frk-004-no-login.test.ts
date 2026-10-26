@@ -55,6 +55,7 @@ describe("a server with no browser login provider", () => {
     const context = await fetch(`${server.baseUrl}/auth/context`);
     expect(await context.json()).toEqual({
       accessMode: "private_team",
+      helpUrl: null,
       login: {kind: "none", oidc: false},
     });
 
