@@ -177,6 +177,51 @@ kubectl --context <cluster> -n artifact-server exec deploy/artifact-server -c ar
 - Running the command again with the same email and key name revokes that key and prints a new one. The member's other keys keep working. The running server may accept the old key for up to 30 seconds.
 - The output adds `apiKey.name` and `member.role`. Put the `token` in the person's CLI profile or MCP bearer setting and delete the file.
 
+## Sign in with OIDC
+
+People can sign in to Review through your OpenID Connect provider instead of with an API key. The Review gate shows **Sign in with SSO** above the API-key form. The button sends the browser to the provider, and the provider sends it back signed in as the member whose email the ID token names. That session sees and edits the member's artifacts. Agents and the CLI keep using keys. The feature is off until `ARTIFACT_SERVER_OIDC_ISSUER` is set, and only a private-team server has it.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ARTIFACT_SERVER_OIDC_ISSUER` | unset (off) | The provider's issuer URL. It must be `https://`. The server reads the endpoints from `<issuer>/.well-known/openid-configuration`. |
+| `ARTIFACT_SERVER_OIDC_CLIENT_ID` | required | The client ID registered for this server. |
+| `ARTIFACT_SERVER_OIDC_CLIENT_SECRET` or `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE` | required | The client secret, or a file that holds it. Setting both fails at startup. |
+| `ARTIFACT_SERVER_OIDC_SCOPES` | `openid email profile` | Space-separated scopes. They must include `openid`. Most providers send the `email` claim only for the `email` scope. |
+| `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS` | `reject` | `reject` a verified email that names no active member, or `admit` it as a new member with role `member`. |
+
+Register the server with the provider as a confidential client that uses the authorization code flow. For a provider at `https://sso.example.com` and the server at `https://artifacts.example.com`:
+
+| Provider setting | Value |
+| --- | --- |
+| Client type | Confidential, authorization code, PKCE allowed |
+| Client ID | `artifact-server` |
+| Client secret | A long random secret, also stored in the file below |
+| Redirect URI | `https://artifacts.example.com/auth/oidc/callback` |
+| Token endpoint authentication | `client_secret_basic` |
+| Scopes | `openid email profile` |
+
+```yaml
+# Artifact Server environment
+env:
+  - name: ARTIFACT_SERVER_OIDC_ISSUER
+    value: https://sso.example.com
+  - name: ARTIFACT_SERVER_OIDC_CLIENT_ID
+    value: artifact-server
+  - name: ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE
+    value: /etc/artifact-server/oidc/client-secret
+```
+
+When the provider federates a directory, the `email` claim must come from the directory's mail attribute, and the provider must mark it verified. Check the result with `artifactserver config check`, which reports `oidcSignIn` with the redirect URI and only the source of the secret.
+
+Before you turn it on:
+
+- **Emails must match.** The server compares the ID token's `email` claim with member emails, without case. It never calls the userinfo endpoint. A person whose provider email differs from their member's email is refused. Compare them first, or set `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS=admit` and accept new members.
+- **The provider is the trust boundary.** Anyone the provider will issue an ID token for, with a given email, can sign in as that member, including an administrator. Allow only sign-in sources whose emails administrators control. A directory where users can edit their own `mail` attribute, or a social login that does not verify emails, lets a user claim any member's email. A token whose `email_verified` is present and not true is refused.
+- **Administrators sign in this way too.** An ID token that names an administrator's email gets an administrator session, which can admit members and issue keys. Protect those accounts at the provider.
+- **Watch the logs.** Each attempt logs `auth.oidc_sign_in.succeeded`, `.rejected` with a reason (`no_member`, `missing_email`, `email_unverified`), or `.failed` with a reason and a detail. Failure reasons are `provider_error`, `invalid_callback`, `invalid_state`, `expired_state`, `replayed_state`, `token_rejected`, `invalid_id_token`, `nonce_mismatch`, and `provider_unavailable`. No line holds a code, a token, or the client secret.
+
+A refused sign-in returns the person to the Review gate with a generic message. When the provider cannot be reached, answers with an error status, or serves a broken discovery document, the gate says single sign-on is unavailable, and the log line has the detail. A person must come back from the provider within 10 minutes of pressing the button. To turn the feature off, remove the variables and restart. Existing sessions stay valid until they expire or the person signs out.
+
 ## Publishing
 
 Publish with the CLI from a fork checkout. Pass the key as a file, never on the command line.
