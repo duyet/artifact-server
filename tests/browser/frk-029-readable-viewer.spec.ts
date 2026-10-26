@@ -179,6 +179,51 @@ test.describe("FRK-029 readable URL viewer", () => {
     }
   });
 
+  test("FRK-029-B: a target=_top link clicked in the framed page opens the linked readable URL in the tab, which shows the viewer for that artifact", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser, {contentDomain: null});
+    try {
+      const page = fixture.page;
+      const nextName = "Readable viewer next";
+      const nextPath = "2026/10/readable-viewer-next";
+      await publishSite(fixture.server, fixture.installation, {
+        accessSetting: "public_link",
+        entry: [
+          '<!doctype html><html lang="en"><head><title>Readable page</title></head>',
+          `<body><a href="/${nextPath}/" target="_top">Open the next page</a></body></html>`,
+        ].join(""),
+        name: artifactName,
+        path: readablePath,
+      });
+      await publishSite(fixture.server, fixture.installation, {
+        accessSetting: "public_link",
+        entry,
+        name: nextName,
+        path: nextPath,
+      });
+
+      await page.goto(`${fixture.server.baseUrl}/${readablePath}/`);
+      await expect(viewerBar(page).getByRole("heading", {level: 1, name: artifactName}))
+        .toBeVisible();
+      // The page may navigate the tab only on a person's click, as it could
+      // at the top level, and gains nothing else.
+      await expect(page.locator(`iframe[title="${artifactName}"]`)).toHaveAttribute(
+        "sandbox",
+        "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation",
+      );
+      const frame = await pageFrame(page);
+      await frame.getByRole("link", {name: "Open the next page"}).click();
+
+      await expect(page).toHaveURL(`${fixture.server.baseUrl}/${nextPath}/`);
+      await expect(viewerBar(page).getByRole("heading", {level: 1, name: nextName}))
+        .toBeVisible();
+      const nextFrame = await pageFrame(page);
+      expect(new URL(nextFrame.url()).pathname).toBe(`/${nextPath}/`);
+      await expect(nextFrame.getByRole("heading", {name: "Readable page"})).toBeVisible();
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
   test("FRK-029-B: a signed-in reader who may manage the artifact changes its visibility from the readable URL's bar and can open it in Review", async ({browser}) => {
     const fixture = await startBrowserFixture(browser, {contentDomain: null});
     try {

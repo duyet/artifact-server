@@ -166,7 +166,7 @@ The variable is optional rather than removed because Compose, Pulumi, the Cloudf
 Artifact HTML is untrusted agent output, and in path mode it shares the application's origin, cookies, and API. Every response from the content router carries two headers. That covers both path forms and every status, including 206, 304, 404, HEAD, and the SPA entry fallback:
 
 ```
-Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads
+Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation
 Access-Control-Allow-Origin: *
 ```
 
@@ -176,6 +176,7 @@ Without `allow-same-origin`, the browser gives the artifact document an opaque o
 
 - `allow-popups-to-escape-sandbox` opens `target=_blank` links as normal pages. Without it, external sites open sandboxed and lose their own storage and cookies. An escaped popup is a normal cross-origin page with no access to the application.
 - `allow-modals` makes `window.print()`, `alert()`, and `confirm()` work. Reports often have a print button.
+- `allow-top-navigation-by-user-activation` lets a `target=_top` link that a person clicks leave the viewer's frame (section 15), as it could when the page was the top-level document. Script cannot navigate the tab without that click. Review's frame sets its own `sandbox` attribute without the flag, so the flag widens nothing there.
 
 `Access-Control-Allow-Origin: *` is required because module scripts, `fetch`, and web fonts are CORS requests, even from an opaque document to its own folder. Upstream sends the same header on Review lease responses for the same reason (`src/http/create-http-app.ts:3514`). It never comes with `Access-Control-Allow-Credentials`, so no cookie-bearing response becomes readable.
 
@@ -593,7 +594,7 @@ The viewer also sends `X-Robots-Tag: noindex, nofollow`. The isolation wrapper s
 
 ### The frame
 
-The viewer frames the same path, query, and fragment with `raw=1` set in the query. The frame keeps the readable path, so relative URLs, root-absolute URLs written for the readable path, in-page anchors, and SPA routes resolve as they do at the top level. The frame element repeats the content policy's flags in its `sandbox` attribute, so the page stays sandboxed even if a response arrived without the header. It grants `allow="fullscreen; clipboard-write"`, which a top-level page already had.
+The viewer frames the same path, query, and fragment with `raw=1` set in the query. The frame keeps the readable path, so relative URLs, root-absolute URLs written for the readable path, in-page anchors, and SPA routes resolve as they do at the top level. The frame element repeats the content policy's flags in its `sandbox` attribute, so the page stays sandboxed even if a response arrived without the header. A browser applies both lists, so `allow-top-navigation-by-user-activation` must be in both for a clicked `target=_top` link to reach the tab. It grants `allow="fullscreen; clipboard-write"`, which a top-level page already had.
 
 The viewer adds no `message` listener. The page can post messages to it, and nothing reads them.
 
@@ -612,13 +613,14 @@ A browser that holds a session (its CSRF cookie is readable) also reads `/api/v1
 | Change | Why | Escape |
 | --- | --- | --- |
 | `location.search` carries `raw=1` | The frame's URL must differ from the viewer's. The viewer sets the parameter, so an existing `raw` value is replaced. | None needed for most pages. |
-| `target=_top` links do nothing in the viewer | The content policy grants no top navigation, and this section does not widen it. | **Open raw**. |
 | The address bar keeps the first URL while the page navigates inside the frame | The viewer cannot read an opaque frame's location. | **Open raw**, or copy the link inside the page. |
 | A page that checks `window.top === window` sees a frame | It is one. | **Open raw**. |
 
 ### Residual risk
 
 The viewer is an application page with the person's session cookies, and it embeds untrusted HTML. Before, that HTML ran at the top level with no application page around it. The opaque origin keeps the page out of the viewer's DOM, cookies, and storage. FRK-029-B proves in Chromium that `window.parent.document` throws. A browser bug that let a sandboxed frame reach its parent would now reach an application page. Section 4 already accepts the same bug class for the top-level page.
+
+A `target=_top` link that a person clicks can replace the viewer with any URL. The page could already navigate its own tab anywhere when it was the top-level document, so this restores that power and adds none.
 
 ## Decisions
 

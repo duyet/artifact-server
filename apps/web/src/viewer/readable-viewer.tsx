@@ -12,7 +12,7 @@ import {useReadableArtifact} from "./use-readable-artifact.js";
  * grants more even if a response arrived without that policy.
  */
 const frameSandbox =
-  "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+  "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
 const hiddenBarKey = "artifact-server-viewer-bar";
 
 /** This URL with `raw=1` set, which the server answers with the page itself. */

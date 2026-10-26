@@ -16,7 +16,7 @@ import {
 } from "../support/same-host-site.js";
 
 const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
 const previewLeaseSchema = z.object({baseUrl: z.url()});
 const navigation = {
   Accept: "text/html",

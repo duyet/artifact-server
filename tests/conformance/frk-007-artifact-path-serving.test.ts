@@ -27,7 +27,7 @@ import {
 
 const mcpProtocolVersion = "2026-07-28";
 const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
 /** A navigation of the viewer's frame, the way a browser loads a readable URL's page. */
 const frameNavigation = {
   Accept: "text/html",

@@ -30,7 +30,7 @@ import {
 } from "../support/assets.js";
 
 const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
 const errorSchema = z.object({error: z.object({code: z.string()})});
 
 const chart: TestAsset = {

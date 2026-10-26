@@ -204,7 +204,7 @@ export function canonicalFolderLocation(
 }
 
 const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
 
 /**
  * Copy a content response with the isolation headers. The sandbox gives the
