@@ -103,6 +103,9 @@ async function expectMemberRows(
     const page = await context.newPage();
     await page.goto(server.baseUrl);
     await expect(page.getByText("3 artifacts")).toBeVisible();
+    // The row menus load after the page; wait for them so no row moves
+    // under the pointer.
+    await expect(page.getByRole("button", {name: /^Actions for /u})).toHaveCount(3);
 
     // The row's numbers live in its sparkline's name and tooltip.
     const summary = "3 views in 7 days, 3 in 30 days, 3 in all";
@@ -170,6 +173,7 @@ async function captureMemberMenu(
     const page = await context.newPage();
     await page.goto(server.baseUrl);
     await expect(page.locator("html")).toHaveClass(new RegExp(String.raw`\b${theme}\b`, "u"));
+    await expect(page.getByRole("button", {name: /^Actions for /u})).toHaveCount(3);
     await page.getByRole("img", {name: /^Bob plan: /u}).hover();
     await expect(page.locator("[data-slot=tooltip-content]")).toBeVisible();
     await page.screenshot({fullPage: true, path: `test-results/browser/home-tree-member-${theme}.png`});

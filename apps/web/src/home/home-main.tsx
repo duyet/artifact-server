@@ -1,4 +1,4 @@
-import {StrictMode, useCallback, useEffect, useState} from "react";
+import {lazy, StrictMode, Suspense, useCallback, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 
 import {IconAlertCircle} from "@tabler/icons-react";
@@ -12,6 +12,11 @@ import {readPublicCatalog, type PublicCatalog} from "./home-client.js";
 import "../index.css";
 
 applyStoredTheme();
+
+// The toasts belong to the row menu, which loads only for a signed-in reader.
+const RowMenuToaster = lazy(async () => ({
+  default: (await import("./home-row-menu.js")).RowMenuToaster,
+}));
 
 function HomeShell() {
   const [catalog, setCatalog] = useState<PublicCatalog | null>(null);
@@ -74,7 +79,13 @@ function HomeShell() {
       </main>
     );
   }
-  return <HomePage catalog={catalog} onChanged={reload} />;
+  return (
+    <>
+      <HomePage catalog={catalog} onChanged={reload} />
+      {/* Beside `main`, so the toaster arriving late never shifts the page. */}
+      {catalog.viewer === null ? null : <Suspense><RowMenuToaster /></Suspense>}
+    </>
+  );
 }
 
 const rootElement = document.querySelector("#home-root");

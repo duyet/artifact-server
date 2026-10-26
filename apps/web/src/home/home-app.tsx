@@ -64,9 +64,6 @@ import type {PublicCatalog} from "./home-client.js";
 const ArtifactRowMenu = lazy(async () => ({
   default: (await import("./home-row-menu.js")).ArtifactRowMenu,
 }));
-const RowMenuToaster = lazy(async () => ({
-  default: (await import("./home-row-menu.js")).RowMenuToaster,
-}));
 
 /** The copy each chart measure brings to the card and the tree filter. */
 const dailyCharts = {
@@ -194,7 +191,6 @@ export function HomePage({
     // One `main` landmark, so a screen reader can jump past the heading and
     // straight to the catalog.
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
-      {signedIn ? <Suspense><RowMenuToaster /></Suspense> : null}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">
