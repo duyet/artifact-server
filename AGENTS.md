@@ -26,6 +26,7 @@ guide does not cover, search through the source code in `node_modules/effect/src
 
 ## Performance verification
 
+- `pnpm verify:changed` prints the gates your changed paths need (`pnpm verify:changed --run` runs them in order and stops at the first failure). Use it while iterating; it does not replace the end-of-iteration gate.
 - `pnpm verify:iteration` is the canonical end-of-iteration gate. It runs the complete correctness, conformance, build, coverage report, smoke, and bounded performance path.
 - Coverage is diagnostic. Do not add a test only to move a percentage, lower a threshold, or exercise an implementation detail. A test must prove an observable product behavior, security boundary, recovery path, or measured performance characteristic.
 - Run `pnpm smoke` after changing HTTP delivery, publication, SQLite, blob storage, restart behavior, or cleanup.

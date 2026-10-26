@@ -53,6 +53,7 @@
     "test:external-storage-runtime": "bash scripts/run-external-storage-runtime-integration.sh",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @artifact-server/web typecheck && pnpm --filter @plannotator/artifact-server-pi typecheck && pnpm --filter @plannotator/artifact-server-opencode typecheck && pnpm --filter @plannotator/artifact-server-claude-channel typecheck",
+    "verify:changed": "tsx scripts/select-verification.ts",
     "verify:iteration": "pnpm check && pnpm test:web && pnpm verify:object-storage && pnpm test:external-storage-runtime && pnpm test:coverage && pnpm perf:baseline && pnpm perf:capacity && pnpm verify:helm",
     "verify:external-storage-performance": "pnpm perf:external-storage-baseline",
     "verify:external-storage-runtime": "pnpm test:external-storage-runtime",
