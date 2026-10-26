@@ -4134,7 +4134,7 @@ requirements:
     owner: content-delivery
     source: {file: ../../docs/fork/DESIGN.md, anchor: isolation-on-one-origin}
     acceptance:
-      behavior: {id: FRK-002-B, description: "Every same-host content response, including 206, 304, 404, 401, HEAD, redirects, and the SPA fallback, carries the sandbox policy and Access-Control-Allow-Origin."}
+      behavior: {id: FRK-002-B, description: "Every same-host content response, including 206, 304, 404, 401, HEAD, redirects, and the SPA fallback, carries the sandbox policy and Access-Control-Allow-Origin; folder and path responses add allow-top-navigation-by-user-activation and /v/ responses do not."}
       failure: {id: FRK-002-F, description: "Hostile artifact JavaScript opened at top level cannot read cookies or storage, make a credentialed API read, submit a credentialed mutation, or register a service worker."}
     deployments: [single_server, kubernetes]
     status: implementing
@@ -4504,6 +4504,34 @@ requirements:
     status: implementing
     proof_gap: Proved against the configuration parsers, a real local server, and a spawned compact server. The external-storage server command passes the parsed logo the same way but runs only in CI with Postgres, the browser view of the logo runs only in CI, and no deployed run exists.
     depends_on: [FRK-009]
+    evidence: []
+
+  - id: FRK-029
+    kind: security
+    behavior: In path mode a browser tab's navigation to an HTML page at a readable artifact URL gets the viewer, an application page that shows the bar and frames the same path with raw=1 under the content sandbox; frames, raw=1 requests, and clients without Fetch Metadata get the page itself at the same URL; every HTML answer there varies on Sec-Fetch-Dest and Sec-Fetch-Mode; the viewer is private to one browser's cache and names the raw URL in a Link header; only the folder and path forms add top navigation on a click to the content sandbox, so the framed page may navigate the tab only on a click; a frame's SPA client route reads the entry page on every content form; after the frame navigates away the bar stops naming the artifact; private, missing, and unknown paths answer as before; and the viewer itself never counts a view.
+    owner: content-delivery
+    source: {file: ../../docs/fork/DESIGN.md, anchor: 15-the-bar-at-readable-urls}
+    acceptance:
+      behavior: {id: FRK-029-B, description: "A tab navigation to a path URL, a folder URL, a nested page, and an SPA client route reads the viewer with the application policy, no sandbox, no CORS header, Vary on Sec-Fetch-Dest and Sec-Fetch-Mode, noindex, private no-cache, and a Link rel=alternate to the same path and percent-encoded query with raw=1, which reads the page; the same URLs with raw=1, a frame navigation, and a request without Fetch Metadata read the page under the sandbox with Vary; a stylesheet opened in a tab, HEAD, and /v/<token>/ read content with no viewer; a tab that revalidates with the page's ETag reads the viewer and a frame that sends the viewer's ETag reads the page; one viewer load plus its frame adds exactly one view. In Chromium the bar is at most 44px above the frame, the frame's relative stylesheet applies, an in-page anchor moves the frame, the frame cannot read its parent, the info popover is read-only for an anonymous reader, who makes no session request, the page counts one view, the hide control is remembered across a reload and undone by Show bar, the phone width has no horizontal scroll, Open raw opens the page with no bar, and light, dark, and phone screenshots are kept; the frame's sandbox attribute is exactly the readable content policy's flags, and a target=_top link clicked in the frame opens the linked readable URL in the tab with that artifact's viewer; for a signed-in manager, an ordinary link that moves the frame leaves the bar reading Navigated away with no artifact name, no info popover, no visibility control, and only Open raw and Full screen in the menu; its Open this page link reloads the first artifact's viewer, and Open raw opens the first artifact's page alone; a signed-in reader who may manage the artifact changes it to unlisted from the bar, reads it back over the API, and opens it in Review."}
+      failure: {id: FRK-029-F, description: "A private artifact's tab navigation is 401 CONTENT_NOT_PUBLIC under the sandbox with no Vary, a missing file and an unknown path are 404 under the sandbox, POST is 405, three viewer loads add no view, and a server whose web bundle has no viewer.html serves a tab the page, a nested page, and an SPA client route itself and counts it. A frame's navigation and a tab's navigation to an SPA client route both read the entry at the readable URL with raw=1, at /v/<token>/, and through a preview lease, and the last two carry the /v/ sandbox without top navigation; CNT-007's test proves the framed entry on a content-domain host."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against SQLite over a real server with a stub viewer page. The browser cases run only in CI and only in Chromium. A signed-in reader whose session cannot read the artifact falls back to the anonymous view by code reading only, and no deployed run or shared-cache run exists.
+    depends_on: [FRK-002, FRK-007, FRK-008, FRK-026]
+    evidence: []
+
+  - id: FRK-030
+    kind: security
+    behavior: GET /api/v1/public/artifact-info?path= answers with no credential for the public-link artifact a readable path or folder serves, with its name, owner display name, current version, update time, visibility, exact views, canManage false, and project ID; it never carries an email or principal ID, and a private artifact reads exactly like a missing one.
+    owner: content-delivery
+    source: {file: ../../docs/fork/VIEWER.md, anchor: public-info}
+    acceptance:
+      behavior: {id: FRK-030-B, description: "Two views of a public path artifact read back from a nested page path with no credential as version 1, public, the version's creation time, the owner's display name, the project ID, two views today, and canManage false; the folder path reads the same body; tagging it unlisted reads unlisted."}
+      failure: {id: FRK-030-F, description: "A private path, a private folder, an unknown path, the root, an /api path, and a /v/ path all answer the same 404 ARTIFACT_NOT_FOUND; a missing path, a relative path, and a path over 1024 characters are 422; a content-domain server answers 404; and the public answer holds no @ and not the owner's principal ID."}
+    deployments: [single_server, kubernetes]
+    status: implementing
+    proof_gap: Proved against SQLite over a real server. The Postgres reads are the ones FRK-026 already uses and run only in CI, and no deployed run exists.
+    depends_on: [FRK-007, FRK-008, FRK-026]
     evidence: []
 
   - id: FRK-031

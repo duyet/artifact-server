@@ -37,6 +37,7 @@ import {
 import {
   type ArtifactInfo,
   readArtifactInfo,
+  readPublicArtifactInfo,
 } from "../application/artifact-info.js";
 import {
   type MakePublicLinkPrivateResult,
@@ -59,6 +60,7 @@ import {
   isPreviewLeaseToken,
 } from "../application/content-access.js";
 import {
+  ArtifactNotFound,
   AuthenticationRequired,
   AuthorizationDenied,
   type ArtifactServerFailure,
@@ -150,9 +152,13 @@ import {
   assertCookieSessionsAvailable,
   assetProjection,
   canonicalFolderLocation,
+  isHtmlMediaType,
   isolateSameHostResponse,
   parseArtifactPath,
   parseSameHostContentRequest,
+  rawDocumentPath,
+  readableDelivery,
+  readableDeliveryVary,
   requestedArtifactPath,
   sameHostContentSource,
   type SameHostBlobRequest,
@@ -195,6 +201,7 @@ const accessSettingSchema = z.enum([
 const artifactTagsSchema = z.array(z.string()).default([]);
 const projectIdSchema = z.string().trim().min(1).max(200);
 const artifactIdSchema = z.string().min(1).max(200);
+const readablePathnameSchema = z.string().startsWith("/").max(1_024);
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
 }).strict();
@@ -517,6 +524,8 @@ const claimRecheckIntervalMilliseconds = 1_000;
 interface HttpEnvironment {
   readonly Variables: {
     readonly authenticationMethod: "bearer" | "session";
+    /** Set only by the branch that answers a readable URL with the viewer. */
+    readonly deliveredViewer: boolean;
     readonly principal: Principal;
     readonly requestId: string;
     readonly requestSpan: Tracer.Span;
@@ -709,11 +718,13 @@ export function createHttpApp(
   if (dependencies.contentDomain === null) {
     // One outer wrapper, so no content branch or error path can skip the headers.
     app.use("*", async (context, next) => {
-      if (parseSameHostContentRequest(new URL(context.req.url)) === null) {
-        return next();
-      }
+      const request = parseSameHostContentRequest(new URL(context.req.url));
+      if (request === null) return next();
       await next();
-      const isolated = isolateSameHostResponse(context.res);
+      // The viewer is application markup that frames the sandboxed document,
+      // so it keeps the application pages' policy instead.
+      if (context.get("deliveredViewer")) return;
+      const isolated = isolateSameHostResponse(context.res, request.kind);
       // Hono copies the old response's headers over a replacement, which
       // would put the branch's own policy back in place of both. Clearing
       // the slot first keeps the isolated headers exactly as built.
@@ -784,6 +795,7 @@ export function createHttpApp(
         contentToken,
         context.req.header("cookie"),
         dependencies,
+        false,
       );
     }
     return next();
@@ -1006,6 +1018,34 @@ export function createHttpApp(
 
   app.on(["GET", "HEAD"], viewerLogoPath, (context) =>
     serveViewerLogo(context, dependencies.logo));
+
+  // The readable-URL viewer names the page it frames; the answer is the same
+  // info Review shows, for the public-link artifact served there, and never
+  // says whether a private artifact holds the path.
+  app.get("/api/v1/public/artifact-info", async (context) => {
+    context.header("Cache-Control", "no-cache");
+    const pathname = readablePathnameSchema.parse(context.req.query("path"));
+    const request = dependencies.contentDomain === null
+      ? parseSameHostContentRequest(new URL(`http://readable.invalid${pathname}`))
+      : null;
+    const target = request?.kind === "folder"
+      ? {artifactId: request.artifactId, kind: "folder" as const}
+      : request?.kind === "path"
+      ? {candidates: request.candidates, kind: "path" as const}
+      : null;
+    const info = target === null ? null : await runHttpApplicationEffect(
+      context,
+      dependencies,
+      readPublicArtifactInfo(target),
+    );
+    if (info === null) {
+      throw new ArtifactNotFound({message: "No public artifact is served at this path."});
+    }
+    return context.json({
+      ...artifactInfoResponse(info),
+      projectId: info.artifact.projectId,
+    });
+  });
 
   app.get("/auth/context", (context) => {
     context.header("Cache-Control", "private, no-store");
@@ -3725,6 +3765,7 @@ async function serveVersionContent(
   contentToken: string,
   cookieHeader: string | undefined,
   dependencies: HttpAppDependencies,
+  readableUrl: boolean,
 ): Promise<Response> {
   const method = context.req.method;
   if (method !== "GET" && method !== "HEAD") {
@@ -3755,6 +3796,33 @@ async function serveVersionContent(
   if (content === null) {
     return versionNotFoundResponse();
   }
+  const readablePage = readableUrl && isHtmlMediaType(content.entry.mediaType);
+  const pageUrl = new URL(context.req.url);
+  if (
+    readablePage &&
+    readableDelivery(
+      {headers: context.req.raw.headers, method, url: pageUrl},
+      content.entry.mediaType,
+    ) === "viewer"
+  ) {
+    // The frame's own request is the view, so the viewer records none.
+    const viewer = await webAssetResponse(
+      context,
+      dependencies,
+      "/viewer.html",
+      "application-shell",
+    );
+    if (viewer !== null) {
+      // A shared cache must not hand one reader's viewer to another, and an
+      // agent that drives a browser tab finds the page itself through Link.
+      viewer.headers.set("Cache-Control", "private, no-cache, must-revalidate");
+      viewer.headers.set("Link", `<${rawDocumentPath(pageUrl)}>; rel="alternate"`);
+      viewer.headers.set("Vary", readableDeliveryVary);
+      viewer.headers.set("X-Robots-Tag", "noindex, nofollow");
+      context.set("deliveredViewer", true);
+      return viewer;
+    }
+  }
   if (
     dependencies.artifactViews !== undefined &&
     context.req.method === "GET" &&
@@ -3769,13 +3837,15 @@ async function serveVersionContent(
   }
   const publiclyCacheable = content.accessSetting === accessSettings.publicLink &&
     content.isCurrent;
-  return serveStoredVersionContent(
+  const served = await serveStoredVersionContent(
     context,
     content,
     publiclyCacheable,
     false,
     dependencies,
   );
+  if (readablePage) served.headers.append("Vary", readableDeliveryVary);
+  return served;
 }
 
 // The asset store holds images, data, and scripts a page loads, never a page,
@@ -3854,6 +3924,7 @@ async function serveArtifactFolder(
     current.version.contentToken,
     cookieHeader,
     dependencies,
+    true,
   );
 }
 
@@ -3882,6 +3953,7 @@ async function serveArtifactPath(
     resolved.current.version.contentToken,
     cookieHeader,
     dependencies,
+    true,
   );
 }
 
@@ -4467,10 +4539,21 @@ async function serveWebAsset(
   assetPath: string,
   kind: WebAssetKind,
 ): Promise<Response> {
-  if (dependencies.webAssets === undefined) return context.notFound();
+  return await webAssetResponse(context, dependencies, assetPath, kind) ??
+    context.notFound();
+}
+
+/** One compiled web asset, or null when this server carries no such file. */
+async function webAssetResponse(
+  context: Context<HttpEnvironment>,
+  dependencies: HttpAppDependencies,
+  assetPath: string,
+  kind: WebAssetKind,
+): Promise<Response | null> {
+  if (dependencies.webAssets === undefined) return null;
   const method = context.req.method === "HEAD" ? "HEAD" : "GET";
   const asset = await dependencies.webAssets.fetch(assetPath, method);
-  if (asset === null || !asset.ok) return context.notFound();
+  if (asset === null || !asset.ok) return null;
   const headers = new Headers({
     "Cache-Control": kind === "static-asset"
       ? "public, max-age=31536000, immutable"

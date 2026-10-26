@@ -237,6 +237,8 @@ pnpm artifactserver publish ./report \
 
 `links.artifact` is the link to share, for example `https://artifacts.example.internal/q3-cost-report-<uuid>/`, or `https://artifacts.example.internal/<path>/` when the artifact was published with `--path`. It always serves the current version, and a new version keeps the same link. Anyone who can reach the host and has the link can read it. Agents that call `/mcp` send the same key as a bearer token.
 
+A browser tab that opens `links.artifact` gets a viewer: a thin bar with the page in a frame below it. `curl`, MCP fetches, and other plain HTTP clients still get the page itself. An agent that drives a real browser, such as Playwright or Puppeteer, gets the viewer too, so it should open the link with `?raw=1` to read the page alone. The viewer's `Link` response header names that URL.
+
 Artifact pages run in a CSP sandbox on the application host. Tell publishers three things.
 
 - Build with relative URLs, for example `vite build --base ./`. A root-absolute URL such as `/assets/app.js` hits the application, not the artifact.
