@@ -149,7 +149,10 @@ async function expectMemberRows(
     await page.screenshot({fullPage: true, path: "test-results/browser/home-tree-member-light.png"});
 
     // Giving a private artifact a link again asks first, and Cancel keeps it
-    // private.
+    // private. The toast sits over the last rows until it times out, and a
+    // pointer resting on it would hold it open.
+    await page.mouse.move(0, 0);
+    await expect(page.getByText("Alice report is now private.")).toHaveCount(0);
     await page.getByRole("button", {name: "Actions for Alice report"}).click();
     await page.getByRole("menuitemradio", {name: "Public"}).click();
     const confirm = page.getByRole("alertdialog", {name: "Share Alice report by link?"});
