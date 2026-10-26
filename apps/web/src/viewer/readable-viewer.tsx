@@ -47,13 +47,18 @@ function writeBarHidden(hidden: boolean): void {
  */
 export function ReadableViewer() {
   const [rawUrl] = useState(() => rawPageUrl(window.location));
+  const [openedUrl] = useState(() => `${window.location.pathname}${window.location.search}`);
   const artifact = useReadableArtifact(window.location.pathname);
   const [barHidden, setBarHidden] = useState(readBarHidden);
+  // The first load is the page the bar names; any later one left it.
+  const [frameLoads, setFrameLoads] = useState(0);
+  const navigatedAway = frameLoads > 1;
   const frame = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
-    if (artifact.name !== null) document.title = artifact.name;
-  }, [artifact.name]);
+    if (navigatedAway) document.title = "Navigated away";
+    else if (artifact.name !== null) document.title = artifact.name;
+  }, [artifact.name, navigatedAway]);
 
   const changeBarHidden = (hidden: boolean): void => {
     setBarHidden(hidden);
@@ -65,8 +70,10 @@ export function ReadableViewer() {
       {barHidden ? null : (
         <ReadableBar
           artifact={artifact}
+          navigatedAway={navigatedAway}
           onFullScreen={() => void frame.current?.requestFullscreen()}
           onHide={() => changeBarHidden(true)}
+          openedUrl={openedUrl}
           rawUrl={rawUrl}
         />
       )}
@@ -74,10 +81,11 @@ export function ReadableViewer() {
         <iframe
           allow="fullscreen; clipboard-write"
           className="absolute inset-0 size-full border-0 bg-white [color-scheme:light]"
+          onLoad={() => setFrameLoads((loads) => loads + 1)}
           ref={frame}
           sandbox={frameSandbox}
           src={rawUrl}
-          title={artifact.name ?? "Artifact"}
+          title={navigatedAway ? "Page" : artifact.name ?? "Artifact"}
         />
         {barHidden ? (
           <Button

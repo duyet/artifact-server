@@ -224,6 +224,52 @@ test.describe("FRK-029 readable URL viewer", () => {
     }
   });
 
+  test("FRK-029-B: after an ordinary link moves the frame to another page, the bar stops naming the first artifact and links back to it", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser, {contentDomain: null});
+    try {
+      const page = fixture.page;
+      const nextPath = "2026/10/readable-viewer-next";
+      await publishSite(fixture.server, fixture.installation, {
+        accessSetting: "public_link",
+        entry: [
+          '<!doctype html><html lang="en"><head><title>Readable page</title></head>',
+          `<body><a href="/${nextPath}/">Open the next page</a></body></html>`,
+        ].join(""),
+        name: artifactName,
+        path: readablePath,
+      });
+      await publishSite(fixture.server, fixture.installation, {
+        accessSetting: "public_link",
+        entry,
+        name: "Readable viewer next",
+        path: nextPath,
+      });
+      const readableUrl = `${fixture.server.baseUrl}/${readablePath}/`;
+
+      await page.goto(readableUrl);
+      const bar = viewerBar(page);
+      await expect(bar.getByRole("heading", {level: 1, name: artifactName})).toBeVisible();
+      const frame = await pageFrame(page);
+      await frame.getByRole("link", {name: "Open the next page"}).click();
+
+      await expect(bar.getByRole("heading", {level: 1, name: "Navigated away"})).toBeVisible();
+      await expect(page).toHaveURL(readableUrl);
+      await expect(page).toHaveTitle("Navigated away");
+      await expect(bar.getByRole("button", {name: "Artifact info"})).toHaveCount(0);
+      await bar.getByRole("button", {name: "Artifact actions"}).click();
+      await expect(page.getByRole("menuitem")).toHaveText(["Full screen"]);
+      await page.keyboard.press("Escape");
+
+      await bar.getByRole("link", {name: `Back to ${artifactName}`}).click();
+      await expect(bar.getByRole("heading", {level: 1, name: artifactName})).toBeVisible();
+      await expect(bar.getByRole("button", {name: "Artifact info"})).toBeVisible();
+      const reloaded = await pageFrame(page);
+      await expect(reloaded.getByRole("link", {name: "Open the next page"})).toBeVisible();
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
   test("FRK-029-B: a signed-in reader who may manage the artifact changes its visibility from the readable URL's bar and can open it in Review", async ({browser}) => {
     const fixture = await startBrowserFixture(browser, {contentDomain: null});
     try {

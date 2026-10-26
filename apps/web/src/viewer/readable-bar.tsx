@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import {toast} from "sonner";
 
-import {Button} from "@/components/ui/button";
+import {Button, ButtonLink} from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,28 +37,45 @@ async function copyLink(): Promise<void> {
  */
 export function ReadableBar({
   artifact,
+  navigatedAway,
   onFullScreen,
   onHide,
+  openedUrl,
   rawUrl,
 }: {
   readonly artifact: ReadableArtifact;
+  /**
+   * The frame has left the page the bar names, to a URL the viewer cannot
+   * read, so nothing that describes that page is shown.
+   */
+  readonly navigatedAway: boolean;
   readonly onFullScreen: () => void;
   readonly onHide: () => void;
+  /** The URL the tab opened, which loads the named page again. */
+  readonly openedUrl: string;
   /** The same URL with `?raw=1`: the page alone, with no bar. */
   readonly rawUrl: string;
 }) {
-  const reviewUrl = artifact.reviewUrl;
+  const reviewUrl = navigatedAway ? null : artifact.reviewUrl;
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2" aria-label="Artifact viewer">
       <div className="flex min-w-0 items-center gap-1.5">
         <ViewerLogo />
-        <h1 className="truncate text-sm font-medium">{artifact.name ?? "Artifact"}</h1>
-        <ArtifactInfoPopover
-          owner={artifact.owner}
-          state={artifact.info}
-          viewerPrincipalId={artifact.viewerPrincipalId}
-        />
+        <h1 className="truncate text-sm font-medium">
+          {navigatedAway ? "Navigated away" : artifact.name ?? "Artifact"}
+        </h1>
+        {navigatedAway ? (
+          <ButtonLink className="min-w-0 max-w-56" href={openedUrl} size="xs" variant="outline">
+            <span className="truncate">Back to {artifact.name ?? "the artifact"}</span>
+          </ButtonLink>
+        ) : (
+          <ArtifactInfoPopover
+            owner={artifact.owner}
+            state={artifact.info}
+            viewerPrincipalId={artifact.viewerPrincipalId}
+          />
+        )}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <IconButton label="Hide bar" onClick={onHide}>
@@ -70,14 +87,18 @@ export function ReadableBar({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => void copyLink()}>
-                <IconLink />
-                Copy link
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.location.assign(rawUrl)}>
-                <IconExternalLink />
-                Open raw
-              </DropdownMenuItem>
+              {navigatedAway ? null : (
+                <>
+                  <DropdownMenuItem onClick={() => void copyLink()}>
+                    <IconLink />
+                    Copy link
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.location.assign(rawUrl)}>
+                    <IconExternalLink />
+                    Open raw
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuItem onClick={onFullScreen}>
                 <IconMaximize />
                 Full screen
