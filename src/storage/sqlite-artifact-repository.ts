@@ -100,6 +100,7 @@ import type {
   ArtifactAssetRepository,
   CommitArtifactVersion,
   CommitAsset,
+  StagedUploadClaim,
   CommitNewArtifact,
   CommittedAsset,
   ContentSessionRepository,
@@ -1063,7 +1064,7 @@ export class SqliteArtifactRepository implements
           throw new ArtifactNotFound({message: "The artifact does not exist."});
         }
         if (command.upload !== null) {
-          this.#consumeStagedUpload(asset.projectId, command.upload);
+          this.#endStagedUpload(asset.projectId, command.upload, asset.createdAt);
         }
         const refused = assetQuotaFailure(
           asset.size,
@@ -1176,28 +1177,19 @@ export class SqliteArtifactRepository implements
     return Promise.resolve().then(() => this.#assetUsage(artifactId));
   }
 
-  #consumeStagedUpload(
+  #endStagedUpload(
     projectId: string,
-    upload: {readonly id: string; readonly principalId: string},
+    upload: StagedUploadClaim,
+    endedAt: string,
   ): void {
-    this.#database
+    const ended = this.#database
       .prepare(
-        `DELETE FROM staged_upload_files
-         WHERE upload_id = ? AND EXISTS (
-           SELECT 1 FROM staged_uploads upload
-           WHERE upload.id = staged_upload_files.upload_id
-             AND upload.project_id = ? AND upload.principal_id = ?
-             AND upload.status = 'open'
-         )`,
+        `UPDATE staged_uploads SET expires_at = ?
+         WHERE project_id = ? AND id = ? AND principal_id = ? AND status = 'open'
+           AND expires_at = ? AND expires_at > ?`,
       )
-      .run(upload.id, projectId, upload.principalId);
-    const deleted = this.#database
-      .prepare(
-        `DELETE FROM staged_uploads
-         WHERE project_id = ? AND id = ? AND principal_id = ? AND status = 'open'`,
-      )
-      .run(projectId, upload.id, upload.principalId);
-    if (deleted.changes !== 1) {
+      .run(endedAt, projectId, upload.id, upload.principalId, upload.expiresAt, endedAt);
+    if (ended.changes !== 1) {
       throw new UploadClosed({message: "The staged upload is already committed."});
     }
   }

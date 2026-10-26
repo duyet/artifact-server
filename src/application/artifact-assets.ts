@@ -326,7 +326,7 @@ function makeArtifactAssetService(
         quota: dependencies.quota,
         upload: upload === null
           ? null
-          : {id: upload.id, principalId: upload.principalId},
+          : {expiresAt: upload.expiresAt, id: upload.id, principalId: upload.principalId},
       });
     },
   );
@@ -411,7 +411,7 @@ function makeArtifactAssetService(
         sha256: file.entry.sha256,
         size: file.entry.size,
       });
-      const committed = yield* commit(
+      return yield* commit(
         artifact,
         command.principal,
         idempotencyKey,
@@ -424,15 +424,6 @@ function makeArtifactAssetService(
         },
         upload,
       );
-      // The commit deleted the upload row, so expiry cleanup can no longer
-      // find these bytes; a failure here only leaves staging bytes behind.
-      yield* dependencies.staging.remove(upload.id, file.storageToken).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("asset.staging_cleanup.failed").pipe(
-            Effect.annotateLogs({cause: error._tag, upload_id: upload.id}),
-          )),
-      );
-      return committed;
     },
   );
 

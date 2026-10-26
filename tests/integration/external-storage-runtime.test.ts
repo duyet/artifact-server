@@ -791,11 +791,11 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     ]);
     const winner = raced.findIndex((response) => response.status === 201);
     expect(winner).not.toBe(-1);
-    // The losing commit either read the upload before the winner removed it
-    // and was refused inside the transaction, or found it already gone.
+    // The losing commit either read the upload before the winner ended it
+    // and was refused inside the transaction, or read it already ended.
     const loser = raced[1 - winner];
-    expect([404, 409]).toContain(loser?.status);
-    expect(["UPLOAD_CLOSED", "UPLOAD_NOT_FOUND"]).toContain(
+    expect([409, 410]).toContain(loser?.status);
+    expect(["UPLOAD_CLOSED", "UPLOAD_EXPIRED"]).toContain(
       z.object({error: z.object({code: z.string()})}).parse(await loser?.json()).error.code,
     );
     const committed = committedAssetSchema.parse(await raced[winner]?.json());

@@ -1,6 +1,3 @@
-import {readdir} from "node:fs/promises";
-import path from "node:path";
-
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {z} from "zod";
 
@@ -316,16 +313,16 @@ describe("per-artifact asset store", () => {
     ]);
     const winner = raced.findIndex((response) => response.status === 201);
     expect(winner).not.toBe(-1);
-    // The losing commit either read the upload before the winner removed it
-    // and was refused inside the transaction, or found it already gone.
+    // The losing commit either read the upload before the winner ended it
+    // and was refused inside the transaction, or read it already ended.
     const loser = raced[1 - winner] ?? new Response();
-    expect([[409, "UPLOAD_CLOSED"], [404, "UPLOAD_NOT_FOUND"]])
+    expect([[409, "UPLOAD_CLOSED"], [410, "UPLOAD_EXPIRED"]])
       .toContainEqual([loser.status, await errorCode(loser)]);
     const winnerKey = winner === 0 ? "frk-019-single-use-a" : "frk-019-single-use-b";
 
     const again = await commitAsset(planned, publisher, "frk-019-single-use-c");
-    expect(again.status).toBe(404);
-    expect(await errorCode(again)).toBe("UPLOAD_NOT_FOUND");
+    expect(again.status).toBe(410);
+    expect(await errorCode(again)).toBe("UPLOAD_EXPIRED");
     const replay = await commitAsset(planned, publisher, winnerKey);
     expect(replay.status).toBe(200);
     expect(committedAssetSchema.parse(await replay.json()).replayed).toBe(true);
@@ -333,12 +330,6 @@ describe("per-artifact asset store", () => {
     const listing = await listAssets(server, publisher, singleUse.artifact.id);
     expect(listing.assets).toHaveLength(1);
     expect(listing.usage).toEqual({assetCount: 1, byteCount: chart.bytes.byteLength});
-    const uploadId = new URL(planned.file.uploadUrl).pathname.split("/")[4] ?? "";
-    expect(uploadId).toMatch(/^upl_/u);
-    const staged = await readdir(
-      path.join(installation.dataDirectory, "staging", uploadId),
-    ).catch(() => []);
-    expect(staged).toEqual([]);
     expect(new Uint8Array(await (await fetch(listing.assets[0]?.url ?? "")).arrayBuffer()))
       .toEqual(chart.bytes);
   }, 60_000);
