@@ -10,11 +10,13 @@ export default defineConfig({
       // Review is the only trusted application. The isolated frame remains a
       // separate entry so untrusted artifact rendering never carries the
       // application's API client. The public home page is a third entry so an
-      // anonymous viewer on the VPN never downloads Review's bundle.
+      // anonymous viewer on the VPN never downloads Review's bundle. The
+      // viewer is the bar a readable artifact URL shows above its framed page.
       input: {
         index: new URL("./index.html", import.meta.url).pathname,
         "review-frame": new URL("./review-frame.html", import.meta.url).pathname,
         review: new URL("./review.html", import.meta.url).pathname,
+        viewer: new URL("./viewer.html", import.meta.url).pathname,
       },
     },
   },

@@ -368,6 +368,8 @@ const artifactInfoSchema = z.object({
   windowDays: z.number().int().positive(),
 }).strict();
 
+const publicArtifactInfoSchema = artifactInfoSchema.extend({projectId: z.string()});
+
 const brandingSchema = z.object({
   logo: z.object({
     alt: z.string(),
@@ -382,6 +384,8 @@ export type ProjectAnalytics = z.infer<typeof projectAnalyticsSchema>;
 export type ArtifactAnalytics = z.infer<typeof artifactAnalyticsSchema>;
 /** What the viewer's info popover shows about one artifact. */
 export type ArtifactInfo = z.infer<typeof artifactInfoSchema>;
+/** The info of the public artifact a readable URL serves, read with no credential. */
+export type PublicArtifactInfo = z.infer<typeof publicArtifactInfoSchema>;
 /** The installation's logo for the viewer bar, or null for the product mark. */
 export type Branding = z.infer<typeof brandingSchema>;
 
@@ -734,7 +738,22 @@ export type ApiKeySignIn =
   | {readonly kind: "rejected"; readonly message: string}
   | {readonly kind: "rate_limited"; readonly retryAfterSeconds: number};
 
+/** Whether this browser holds an application session; its CSRF cookie is readable. */
+export function hasBrowserSession(): boolean {
+  return csrfCookieValue() !== null;
+}
+
 function readCsrfToken(): string {
+  const token = csrfCookieValue();
+  if (token !== null) return token;
+  throw new ApiError(
+    "CSRF_TOKEN_MISSING",
+    "Your browser session cannot authorize changes. Sign in again.",
+    403,
+  );
+}
+
+function csrfCookieValue(): string | null {
   for (const candidate of document.cookie.split(";")) {
     const [rawName, ...rawValue] = candidate.trim().split("=");
     if (
@@ -744,11 +763,7 @@ function readCsrfToken(): string {
       return decodeURIComponent(rawValue.join("="));
     }
   }
-  throw new ApiError(
-    "CSRF_TOKEN_MISSING",
-    "Your browser session cannot authorize changes. Sign in again.",
-    403,
-  );
+  return null;
 }
 
 async function parseFailure(response: Response): Promise<ApiError> {
@@ -1061,6 +1076,10 @@ export const api = {
     `/api/v1/artifacts/${encodeURIComponent(artifactId)}/info?${projectQuery(projectId)}`,
   ),
   branding: () => request(brandingSchema, "/api/v1/public/branding"),
+  publicArtifactInfo: (pathname: string) => request(
+    publicArtifactInfoSchema,
+    `/api/v1/public/artifact-info?${new URLSearchParams({path: pathname})}`,
+  ),
   /** Change the display name; no version is saved and links stay the same. */
   rename: (
     projectId: string,
