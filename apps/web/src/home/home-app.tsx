@@ -253,6 +253,12 @@ function TotalCard({label, value}: {readonly label: string; readonly value: numb
   );
 }
 
+/** The day the tooltip names, and whether the pointer or the keyboard chose it. */
+interface ActiveDay {
+  readonly day: string;
+  readonly source: "focus" | "pointer";
+}
+
 /** No inset, so each day's band spans exactly 1/n of the chart's width. */
 const dailyChartMargin = {bottom: 0, left: 0, right: 0, top: 8};
 
@@ -286,9 +292,13 @@ function DailyChart({
 }) {
   const chart = dailyCharts[filter.metric];
   const data = days.map((day, index) => ({count: values[index] ?? 0, day}));
-  const [pointerDay, setPointerDay] = useState<string | null>(null);
-  const [focusDay, setFocusDay] = useState<string | null>(null);
-  const activeDay = pointerDay ?? focusDay;
+  // The latest input wins, so a mouse resting on the chart never hides the
+  // day a keyboard reader just moved to.
+  const [active, setActive] = useState<ActiveDay | null>(null);
+  const activeDay = active?.day ?? null;
+  const release = (source: ActiveDay["source"]) => {
+    setActive((current) => (current?.source === source ? null : current));
+  };
   const activeIndex = data.findIndex((row) => row.day === activeDay);
   const today = days.at(-1);
   const total = values.reduce((sum, value) => sum + value, 0);
@@ -344,7 +354,9 @@ function DailyChart({
         </p>
         <div className="relative" ref={ref}>
           <ChartContainer
-            className="aspect-auto h-32 w-full cursor-pointer"
+            // The mirrored tick labels sit over the first columns, so they
+            // must not take the pointer from the bars.
+            className="aspect-auto h-32 w-full cursor-pointer [&_.recharts-yAxis]:pointer-events-none"
             config={config}
             // Recharts' own click state lags a fast click by a frame, so the
             // column is read from the pointer position instead.
@@ -353,10 +365,11 @@ function DailyChart({
               if (day !== null) toggleDay(day);
             }}
             onPointerLeave={() => {
-              setPointerDay(null);
+              release("pointer");
             }}
             onPointerMove={(event) => {
-              setPointerDay(dayAt(event));
+              const day = dayAt(event);
+              if (day !== null && day !== activeDay) setActive({day, source: "pointer"});
             }}
           >
             <BarChart data={data} margin={dailyChartMargin}>
@@ -371,6 +384,11 @@ function DailyChart({
                 tickCount={3}
                 tickLine={false}
               />
+              {/*
+                One Cell per day carries its tone. Recharts 3 deprecates Cell
+                for a custom bar renderer, but that prop's name trips the
+                repository's anti-slop symbol rule.
+              */}
               <Bar dataKey="count" isAnimationActive={false} radius={2}>
                 {data.map((row) => (
                   <Cell
@@ -402,13 +420,18 @@ function DailyChart({
                   data-day={row.day}
                   key={row.day}
                   onBlur={() => {
-                    setFocusDay(null);
+                    release("focus");
                   }}
                   onClick={() => {
                     toggleDay(row.day);
                   }}
-                  onFocus={() => {
-                    setFocusDay(row.day);
+                  onFocus={(event) => {
+                    // Only a keyboard focus shows the tooltip. The chip hands
+                    // focus back to its day after a mouse click too, and that
+                    // reader already sees the bar under the pointer.
+                    if (event.currentTarget.matches(":focus-visible")) {
+                      setActive({day: row.day, source: "focus"});
+                    }
                   }}
                   onKeyDown={moveBetweenDays}
                   tabIndex={row.day === tabStop ? 0 : -1}

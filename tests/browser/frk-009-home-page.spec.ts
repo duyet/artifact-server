@@ -245,9 +245,13 @@ async function expectChartTones(
     await expect.poll(() => fillOf(yesterdayBar)).toBe(views.muted);
     expect(await fillOf(todayBar)).toBe(views.full);
 
-    // Keyboard focus shows the same tooltip as hover.
-    const yesterdayButton = page.getByRole("button", {name: `${yesterdayLabel}: 2 views`});
-    await yesterdayButton.focus();
+    // Keyboard focus shows the same tooltip as hover, and wins over a
+    // pointer resting on another day.
+    await todayBar.hover();
+    await expect(tooltip).toHaveText(`Today, ${todayLabel}2 views`);
+    await page.getByRole("button", {name: `${todayLabel}: 2 views`}).focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.getByRole("button", {name: `${yesterdayLabel}: 2 views`})).toBeFocused();
     await expect(tooltip).toHaveText(`${yesterdayLabel}2 views`);
     expect(await fillOf(yesterdayBar)).toBe(views.hover);
 
