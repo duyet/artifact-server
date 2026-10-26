@@ -198,6 +198,8 @@ describe("OIDC browser sign-in", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(`/review?sso=${outcome}`);
     expect(sessionCookies(response)).toBeNull();
+    // Every callback outcome spends the pending cookie in this browser.
+    expect(cookiePair(response, pendingCookie)).toBe(`${pendingCookie}=`);
   }
 
   beforeEach(async () => {
