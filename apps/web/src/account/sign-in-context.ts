@@ -6,14 +6,14 @@ const signInContextSchema = z.object({
     // The server's rule: one leading slash, then no backslash, whitespace, or
     // control code, any of which a browser could read as another host.
     z.string().regex(/^\/(?![/\\])[^\s\\\p{Cc}]*$/u),
-  ]),
+  ]).nullable(),
   login: z.object({oidc: z.boolean().optional()}),
 });
 
 /** What an account control needs before anyone signs in. */
 export interface SignInContext {
-  /** The operator's Help page: an https URL or a path on this origin. */
-  readonly helpUrl: string;
+  /** The operator's Help page, an https URL or a path on this origin, or null for no Help item. */
+  readonly helpUrl: string | null;
   /** Sign in can start SSO, which comes back to the page it left. */
   readonly oidc: boolean;
 }

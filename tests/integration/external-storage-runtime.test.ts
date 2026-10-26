@@ -23,7 +23,6 @@ import {
   PROTOCOL_VERSION_META_KEY,
 } from "@modelcontextprotocol/server";
 
-import {defaultHelpUrl} from "../../src/core/help-link.js";
 import {startExternalStorageServer} from "../../src/external-storage/start-external-storage-server.js";
 import {checkExternalStorageIntegrity} from
   "../../src/lifecycle/integrity-check.js";
@@ -725,7 +724,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const context = await fetch(`${server.baseUrl}/auth/context`);
     expect(await context.json()).toEqual({
       accessMode: "private_team",
-      helpUrl: defaultHelpUrl,
+      helpUrl: null,
       login: {kind: "none", oidc: false},
     });
     const content = "<h1>same-host external-storage proof</h1>";

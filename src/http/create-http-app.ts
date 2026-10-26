@@ -551,8 +551,8 @@ export interface HttpAppDependencies {
   readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
-  /** Where the account menu sends Help: an https URL or a path on this origin. */
-  readonly helpUrl: string;
+  /** Where the account menu sends Help, an https URL or a path on this origin, or null for no Help item. */
+  readonly helpUrl: string | null;
   /** The viewer bar's logo, or null to show the product mark. */
   readonly logo: ViewerLogo | null;
   readonly readiness?: ReadinessProbe;

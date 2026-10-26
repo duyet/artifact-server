@@ -8,7 +8,6 @@ import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
-import {defaultHelpUrl} from "../core/help-link.js";
 import {
   type ViewerLogo,
   viewerLogoMaximumBytes,
@@ -114,8 +113,8 @@ export interface CompactRuntimeConfiguration {
   readonly contentDomain: string | null;
   readonly dataDirectory: string;
   readonly deploymentMode: "compact";
-  /** The account menu's Help link. */
-  readonly helpUrl: string;
+  /** The account menu's Help link, or null for no Help item. */
+  readonly helpUrl: string | null;
   readonly hostname: string;
   readonly installation: CompactInstallationMetadata;
   readonly logo: ViewerLogo | null;
@@ -140,8 +139,8 @@ export interface ExternalStorageRuntimeConfiguration {
   >>;
   readonly databaseUrl: Redacted.Redacted;
   readonly deploymentMode: "external-storage";
-  /** The account menu's Help link. */
-  readonly helpUrl: string;
+  /** The account menu's Help link, or null for no Help item. */
+  readonly helpUrl: string | null;
   readonly hostname: string;
   readonly installationId: string;
   readonly logo: ViewerLogo | null;
@@ -177,7 +176,7 @@ export interface RuntimeConfigurationSummary {
   readonly credentialSources: Readonly<Record<string, CredentialSource>>;
   readonly dataDirectory: string | null;
   readonly deploymentMode: DeploymentMode;
-  readonly helpUrl: string;
+  readonly helpUrl: string | null;
   readonly hostname: string;
   readonly installationId: string;
   readonly logo: ViewerLogoSummary | null;
@@ -872,10 +871,10 @@ function parseViewerLogoLink(
 
 function parseHelpUrl(
   environment: NodeJS.ProcessEnv,
-): Effect.Effect<string, RuntimeConfigurationError> {
+): Effect.Effect<string | null, RuntimeConfigurationError> {
   const field = "ARTIFACT_SERVER_HELP_URL";
   const value = environment[field]?.trim() ?? "";
-  if (value === "") return Effect.succeed(defaultHelpUrl);
+  if (value === "") return Effect.succeed(null);
   if (rootRelativePathPattern.test(value)) return Effect.succeed(value);
   return parseHttpsUrl(
     field,

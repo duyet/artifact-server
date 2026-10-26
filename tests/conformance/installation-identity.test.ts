@@ -5,7 +5,6 @@ import {DatabaseSync} from "node:sqlite";
 import {Effect, Redacted} from "effect";
 import {z} from "zod";
 
-import {defaultHelpUrl} from "../../src/core/help-link.js";
 import type {BearerCredentialVerifier} from "../../src/application/authentication.js";
 import {AuthenticationRequired} from "../../src/core/errors.js";
 import type {Clock} from "../../src/core/ports.js";
@@ -307,7 +306,7 @@ describe("installation identity and access", () => {
     expect(contextResponse.headers.get("cache-control")).toBe("private, no-store");
     await expect(contextResponse.json()).resolves.toEqual({
       accessMode: "local_owner",
-      helpUrl: defaultHelpUrl,
+      helpUrl: null,
       login: {kind: "local_owner"},
     });
 
@@ -425,7 +424,7 @@ describe("installation identity and access", () => {
     const contextResponse = await fetch(`${server.baseUrl}/auth/context`);
     await expect(contextResponse.json()).resolves.toEqual({
       accessMode: "private_team",
-      helpUrl: defaultHelpUrl,
+      helpUrl: null,
       login: {kind: "none", oidc: false},
     });
     const boundaryHeaders = {

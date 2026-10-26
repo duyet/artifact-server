@@ -309,13 +309,13 @@ kubectl --namespace artifact-server exec statefulset/artifact-server -- \
 
 ### Help link in the account menu
 
-The home page header and the bar above a page at its readable URL show **Sign in** to a signed-out reader and an account menu to a signed-in one. The menu's **Help** item opens this runbook unless you point it somewhere else. Set one variable and restart the server:
+The home page header and the bar above a page at its readable URL show **Sign in** to a signed-out reader and an account menu to a signed-in one. To add a **Help** item to that menu, set one variable and restart the server:
 
-| Variable | Default | Meaning |
+| Variable | Required | Meaning |
 | --- | --- | --- |
-| `ARTIFACT_SERVER_HELP_URL` | this runbook on GitHub | An `https://` URL without credentials, such as your team's own guide, or a path on this server that starts with one `/`, such as `/team/help/`. Unset or empty keeps the default. |
+| `ARTIFACT_SERVER_HELP_URL` | no | An `https://` URL without credentials, such as your team's runbook, or a path on this server that starts with one `/`, such as `/team/help/`. Unset or empty shows no Help item. |
 
-Any other value, such as an `http://` URL, `//host`, or a relative path, stops startup with the variable's name, and `config check` refuses it the same way. `config check` reports the value in use as `helpUrl`. The value is public: `/auth/context` reports it as `helpUrl` to every browser.
+Any other value, such as an `http://` URL, `//host`, or a relative path, stops startup with the variable's name, and `config check` refuses it the same way. `config check` reports the value as `helpUrl`. The value is public: `/auth/context` reports it as `helpUrl` to every browser.
 
 ## Viewer logo
 

@@ -5,7 +5,6 @@ import {
   browserLoginKinds,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
-import {defaultHelpUrl} from "../../src/core/help-link.js";
 import {unknownOidcUserPolicies} from "../../src/core/oidc-sign-in.js";
 import {createOidcProvider} from "../../src/identity/oidc-provider.js";
 import {type FakeOidcProvider, startFakeOidcProvider} from "../support/fake-oidc-provider.js";
@@ -106,8 +105,8 @@ test.describe("FRK-032 sign-in returns to the page it started from", () => {
       await page.keyboard.press("Enter");
       const menu = page.getByRole("menu");
       await expect(menu.getByText("carol@example.com")).toBeVisible();
-      await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Workbench", "Help", "Sign out"]);
-      await expect(menu.getByRole("menuitem", {name: "Help"})).toHaveAttribute("href", defaultHelpUrl);
+      // No ARTIFACT_SERVER_HELP_URL, so no Help item.
+      await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Workbench", "Sign out"]);
       await settled(page);
       await page.screenshot({path: "test-results/browser/screenshots/frk-032-bar-account-light.png"});
       await page.keyboard.press("Escape");

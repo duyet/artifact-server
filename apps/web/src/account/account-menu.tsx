@@ -22,7 +22,7 @@ interface AccountMenuProps {
   readonly account: Account;
   /** Where Sign out lands once the server has revoked the session. */
   readonly afterSignOut: string;
-  /** The operator's Help page, or null until the sign-in context answers. */
+  /** The operator's Help page, or null when there is none or the context has not answered. */
   readonly helpUrl: string | null;
 }
 

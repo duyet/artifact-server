@@ -11,7 +11,6 @@ import {
   localOwnerBrowserAccess,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
-import {defaultHelpUrl} from "../../src/core/help-link.js";
 import {initializeCompactInstallation} from "../../src/lifecycle/compact-installation.js";
 import {
   parseCompactRuntimeConfiguration,
@@ -44,7 +43,7 @@ const externalEnvironment: NodeJS.ProcessEnv = {
 const accountSchema = z.object({
   account: z.object({displayName: z.string(), email: z.string().nullable()}).strict(),
 }).loose();
-const contextSchema = z.object({helpUrl: z.string()}).loose();
+const contextSchema = z.object({helpUrl: z.string().nullable()}).loose();
 
 function sameOriginHeaders(server: RunningTestServer) {
   return {
@@ -169,9 +168,8 @@ describe("account menu session and help link", () => {
     expect(configured.helpUrl).toBe(helpUrl);
     expect(summarizeRuntimeConfiguration(configured).helpUrl).toBe(helpUrl);
     expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: "/team/help/"})).helpUrl).toBe("/team/help/");
-    // Without one, Help opens the runbook.
-    expect((await parseExternal({})).helpUrl).toBe(defaultHelpUrl);
-    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: ""})).helpUrl).toBe(defaultHelpUrl);
+    expect((await parseExternal({})).helpUrl).toBeNull();
+    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: ""})).helpUrl).toBeNull();
     const compactRoot = await mkdtemp(path.join(tmpdir(), "frk-031-compact-"));
     const compactData = path.join(compactRoot, "data");
     try {
@@ -195,7 +193,7 @@ describe("account menu session and help link", () => {
     }
   });
 
-  test("FRK-031-F: a key, even one carrying a member's principal, reads no email; no help URL reads the default help page; an unsafe help URL stops startup", async () => {
+  test("FRK-031-F: a key, even one carrying a member's principal, reads no email; no help URL reads null; an unsafe help URL stops startup", async () => {
     const alice = await issueMemberKey("Alice Example", "alice@example.com");
     const administrator = await issueMemberKey("Admin Example", "admin@example.com", "administrator");
     server = await startTestServer(installation, {
@@ -205,7 +203,7 @@ describe("account menu session and help link", () => {
     });
 
     const context = await fetch(`${running().baseUrl}/auth/context`);
-    expect(contextSchema.parse(await context.json()).helpUrl).toBe(defaultHelpUrl);
+    expect(contextSchema.parse(await context.json()).helpUrl).toBeNull();
 
     // Bearer use of an operator key stays delegated, so it is a key acting
     // on Alice's principal, not Alice, and must not learn her email.

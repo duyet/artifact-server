@@ -345,7 +345,7 @@ The tree response gains `collapsedFolders`, sorted. It names a folder only when 
 The header's right side holds the account control and the theme menu. `FRK-031` owns it. The bar above a page at its readable URL shows the same control (`docs/fork/VIEWER.md`).
 
 - **Signed out.** A **Sign in** link. When `/auth/context` reports `login.oidc: true`, it goes to `/auth/oidc/start?returnTo=%2F`, so SSO lands back on the home page (`FRK-032`). Otherwise it goes to `/review`, whose gate offers this server's sign-in.
-- **Signed in.** An avatar button named `Account: <name>` shows the initials from `principalInitials`, the same helper Review's sidebar uses, so a person has the same initials in both places. It opens a menu with the name and email, **My artifacts** (`/?mine=1`), **Workbench** (`/review`), **Help**, and **Sign out**. Help opens `ARTIFACT_SERVER_HELP_URL`, which defaults to the fork runbook. Sign out calls `POST /api/v1/session/logout`, which revokes the session on the server, then loads `/`. It does not end the provider's session (`docs/fork/RUNBOOK.md`).
+- **Signed in.** An avatar button named `Account: <name>` shows the initials from `principalInitials`, the same helper Review's sidebar uses, so a person has the same initials in both places. It opens a menu with the name and email, **My artifacts** (`/?mine=1`), **Workbench** (`/review`), **Help** when the operator set `ARTIFACT_SERVER_HELP_URL`, and **Sign out**. Sign out calls `POST /api/v1/session/logout`, which revokes the session on the server, then loads `/`. It does not end the provider's session (`docs/fork/RUNBOOK.md`).
 
 The data comes from two existing endpoints:
 
@@ -353,7 +353,7 @@ The data comes from two existing endpoints:
 // GET /api/v1/session gains:
 account: {displayName: string, email: string | null}
 // GET /auth/context gains:
-helpUrl: string // ARTIFACT_SERVER_HELP_URL: https, or a path on this origin
+helpUrl: string | null // ARTIFACT_SERVER_HELP_URL: https, or a path on this origin
 ```
 
 `account` describes the caller and nobody else. Only a person's direct session reads an email. A key, including an operator key used as a bearer and a key an administrator issued on a member's principal, reads `email: null`, because a key can carry a member's principal ID without being that member. The menu, its session read, and the API client load as a separate chunk only for a signed-in reader, like the row menu. An anonymous reader reads only `/auth/context`.

@@ -8,7 +8,7 @@ import {
 /** The /auth/context body as a server sends it. */
 interface AuthContextAnswer {
   readonly accessMode: "local_owner" | "private_team";
-  readonly helpUrl: string;
+  readonly helpUrl: string | null;
   readonly login: {readonly kind: string; readonly oidc?: boolean};
 }
 
@@ -38,12 +38,14 @@ describe("account control sign-in context", () => {
     }));
     expect(gate).toEqual({helpUrl: "/team/help/", oidc: false});
     expect(signInHref(gate, {artifactId, kind: "artifact"})).toBe("/review");
-    // A local-owner server names no OIDC flag at all.
+    // A local-owner server names no OIDC flag at all,
+    // and an unset Help link reads null, which hides the Help item.
     const localOwner = await readSignInContext(answering({
       accessMode: "local_owner",
-      helpUrl,
+      helpUrl: null,
       login: {kind: "local_owner"},
     }));
+    expect(localOwner.helpUrl).toBeNull();
     expect(signInHref(localOwner, {kind: "home"})).toBe("/review");
     // Before the context answers, Sign in goes to the gate.
     expect(signInHref(null, {artifactId, kind: "artifact"})).toBe("/review");
