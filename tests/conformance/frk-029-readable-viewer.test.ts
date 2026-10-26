@@ -23,8 +23,11 @@ import {
 } from "../support/same-host-site.js";
 
 const viewerHtml = "<!doctype html><title>Viewer stub</title>";
-const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
+/** The sandbox of `/v/<token>/` and `/_blob/<id>`. */
+const versionPolicy =
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+/** A readable URL's page may also navigate the tab on a person's click. */
+const sandboxPolicy = `${versionPolicy} allow-top-navigation-by-user-activation`;
 const shellPolicy =
   "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'";
 const readableVary = ["sec-fetch-dest", "sec-fetch-mode"];
@@ -74,8 +77,8 @@ const viewer = {
   vary: readableVary,
 };
 
-function page(body: string, vary: readonly string[] = readableVary) {
-  return {allowOrigin: "*", body, policy: sandboxPolicy, status: 200, vary};
+function page(body: string, vary: readonly string[] = readableVary, policy = sandboxPolicy) {
+  return {allowOrigin: "*", body, policy, status: 200, vary};
 }
 
 async function totalViews(server: RunningTestServer, name: string): Promise<number> {
@@ -171,7 +174,8 @@ describe("the viewer at readable artifact URLs", () => {
     expect(probe.status).toBe(200);
     expect(probe.headers.get("content-security-policy")).toBe(sandboxPolicy);
     // The exact version URL is raw immutable content, never a viewer.
-    expect(await get(site.links.version, tabNavigation)).toEqual(page(indexHtml, []));
+    expect(await get(site.links.version, tabNavigation))
+      .toEqual(page(indexHtml, [], versionPolicy));
 
     // The viewer's own answer counted nothing above; each page answer did.
     // Reset the baseline, then load the page once the way a person does.
@@ -223,14 +227,14 @@ describe("the viewer at readable artifact URLs", () => {
     const route = "settings/profile";
     expect(await get(`${spa.links.artifact}${route}?raw=1`, frameNavigation))
       .toEqual(page(spaShell));
-    const versionEntry = page(spaShell, []);
+    const versionEntry = page(spaShell, [], versionPolicy);
     expect(await get(`${spa.links.version}${route}`, frameNavigation)).toEqual(versionEntry);
     expect(await get(`${spa.links.version}${route}`, tabNavigation)).toEqual(versionEntry);
     const leased = await Promise.all([frameNavigation, tabNavigation].map((headers) =>
       get(new URL(route, lease.baseUrl).toString(), headers)
     ));
     expect(leased).toMatchObject([frameNavigation, tabNavigation].map(() => (
-      {body: spaShell, policy: sandboxPolicy, status: 200}
+      {body: spaShell, policy: versionPolicy, status: 200}
     )));
 
     const tabs = await Promise.all([1, 2, 3].map(() => get(pathUrl, tabNavigation)));

@@ -30,7 +30,7 @@ import {
 } from "../support/assets.js";
 
 const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
 const errorSchema = z.object({error: z.object({code: z.string()})});
 
 const chart: TestAsset = {
@@ -139,6 +139,8 @@ describe("per-artifact asset store", () => {
     expect(served.headers.get("access-control-allow-origin")).toBe("*");
     const policy = served.headers.get("content-security-policy") ?? "";
     expect(policy).toContain(sandboxPolicy);
+    // Only a readable URL's page, framed by the viewer, may navigate the tab.
+    expect(policy).not.toContain("allow-top-navigation");
     expect(policy).toContain("default-src 'none'");
 
     const head = await fetch(committed.asset.url, {method: "HEAD"});

@@ -204,7 +204,20 @@ export function canonicalFolderLocation(
 }
 
 const sandboxPolicy =
-  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation";
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+const readableSandboxPolicy = `${sandboxPolicy} allow-top-navigation-by-user-activation`;
+
+/**
+ * The sandbox each content form gets. A readable URL's page loads in the
+ * viewer's frame, where a `target=_top` link a person clicks must still reach
+ * the tab, as it did when the page was the top-level document.
+ */
+const sandboxPolicies = {
+  blob: sandboxPolicy,
+  folder: readableSandboxPolicy,
+  path: readableSandboxPolicy,
+  version: sandboxPolicy,
+} as const satisfies Record<SameHostContentRequest["kind"], string>;
 
 /**
  * Copy a content response with the isolation headers. The sandbox gives the
@@ -212,11 +225,14 @@ const sandboxPolicy =
  * cross-origin, so they need `Access-Control-Allow-Origin`. The copy is
  * needed because fetch and redirect responses have immutable headers.
  */
-export function isolateSameHostResponse(response: Response): Response {
+export function isolateSameHostResponse(
+  response: Response,
+  kind: SameHostContentRequest["kind"],
+): Response {
   const headers = new Headers(response.headers);
   // Appended, not set: a branch may send a stricter policy of its own, and a
   // browser enforces every policy a response carries.
-  headers.append("Content-Security-Policy", sandboxPolicy);
+  headers.append("Content-Security-Policy", sandboxPolicies[kind]);
   headers.set("Access-Control-Allow-Origin", "*");
   return new Response(response.body, {
     headers,

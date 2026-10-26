@@ -715,14 +715,13 @@ export function createHttpApp(
   if (dependencies.contentDomain === null) {
     // One outer wrapper, so no content branch or error path can skip the headers.
     app.use("*", async (context, next) => {
-      if (parseSameHostContentRequest(new URL(context.req.url)) === null) {
-        return next();
-      }
+      const request = parseSameHostContentRequest(new URL(context.req.url));
+      if (request === null) return next();
       await next();
       // The viewer is application markup that frames the sandboxed document,
       // so it keeps the application pages' policy instead.
       if (context.get("deliveredViewer")) return;
-      const isolated = isolateSameHostResponse(context.res);
+      const isolated = isolateSameHostResponse(context.res, request.kind);
       // Hono copies the old response's headers over a replacement, which
       // would put the branch's own policy back in place of both. Clearing
       // the slot first keeps the isolated headers exactly as built.

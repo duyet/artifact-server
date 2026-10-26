@@ -166,7 +166,7 @@ The variable is optional rather than removed because Compose, Pulumi, the Cloudf
 Artifact HTML is untrusted agent output, and in path mode it shares the application's origin, cookies, and API. Every response from the content router carries two headers. That covers both path forms and every status, including 206, 304, 404, HEAD, and the SPA entry fallback:
 
 ```
-Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation
+Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads
 Access-Control-Allow-Origin: *
 ```
 
@@ -176,7 +176,7 @@ Without `allow-same-origin`, the browser gives the artifact document an opaque o
 
 - `allow-popups-to-escape-sandbox` opens `target=_blank` links as normal pages. Without it, external sites open sandboxed and lose their own storage and cookies. An escaped popup is a normal cross-origin page with no access to the application.
 - `allow-modals` makes `window.print()`, `alert()`, and `confirm()` work. Reports often have a print button.
-- `allow-top-navigation-by-user-activation` lets a `target=_top` link that a person clicks leave the viewer's frame (section 15), as it could when the page was the top-level document. Script cannot navigate the tab without that click. Review's frame sets its own `sandbox` attribute without the flag, so the flag widens nothing there.
+- The folder and path forms add `allow-top-navigation-by-user-activation`. Their pages load in the viewer's frame (section 15), and the flag lets a `target=_top` link that a person clicks leave it, as it could when the page was the top-level document. Script cannot navigate the tab without that click. `/v/<token>/` and `/_blob/<id>` keep the list above.
 
 `Access-Control-Allow-Origin: *` is required because module scripts, `fetch`, and web fonts are CORS requests, even from an opaque document to its own folder. Upstream sends the same header on Review lease responses for the same reason (`src/http/create-http-app.ts:3514`). It never comes with `Access-Control-Allow-Credentials`, so no cookie-bearing response becomes readable.
 
