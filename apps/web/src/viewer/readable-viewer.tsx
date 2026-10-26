@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import {IconLayoutNavbarExpand} from "@tabler/icons-react";
 
+import {useSignInContext} from "@/account/use-sign-in-context";
 import {Button} from "@/components/ui/button";
 import {Toaster} from "@/components/ui/sonner";
 
@@ -49,6 +50,7 @@ export function ReadableViewer() {
   const [rawUrl] = useState(() => rawPageUrl(window.location));
   const [openedUrl] = useState(() => `${window.location.pathname}${window.location.search}`);
   const artifact = useReadableArtifact(window.location.pathname);
+  const signIn = useSignInContext();
   const [barHidden, setBarHidden] = useState(readBarHidden);
   // The first load is the page the bar names; any later one left it.
   const [frameLoads, setFrameLoads] = useState(0);
@@ -75,6 +77,7 @@ export function ReadableViewer() {
           onHide={() => changeBarHidden(true)}
           openedUrl={openedUrl}
           rawUrl={rawUrl}
+          signIn={signIn}
         />
       )}
       <main className="relative min-h-0 flex-1">

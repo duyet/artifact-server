@@ -1,23 +1,35 @@
-import {Effect} from "effect";
+import {Effect, Redacted} from "effect";
 
 import type {IssuedApplicationSession} from "../core/installation-identity.js";
+import {accessSettings, type ArtifactRecord} from "../core/model.js";
 import {
   oidcFailureReports,
   type OidcSignIn,
   OidcSignInFailed,
 } from "../core/oidc-sign-in.js";
+import {ContentAccessService} from "./content-access.js";
 import {identitySecretsEqual, InstallationAccessService} from "./installation-access.js";
 
 /** How long a browser may take between leaving for the provider and coming back. */
 export const pendingOidcSignInLifetimeMilliseconds = 10 * 60_000;
 
+/** Where a browser asked to land once it is signed in. */
+export interface OidcSignInReturn {
+  /**
+   * The artifact whose page started the sign-in. Only its ID travels; the
+   * page to land on is rebuilt from the stored artifact at the callback.
+   */
+  readonly returnArtifactId: string | null;
+  /** A Review path, used when there is no artifact or it cannot be read. */
+  readonly returnTo: string;
+}
+
 /** What one browser holds between leaving for the provider and coming back. */
-export interface PendingOidcSignIn {
+export interface PendingOidcSignIn extends OidcSignInReturn {
   readonly codeVerifier: string;
   /** Milliseconds since the epoch. */
   readonly expiresAt: number;
   readonly nonce: string;
-  readonly returnTo: string;
   readonly state: string;
 }
 
@@ -37,6 +49,11 @@ export interface OidcCallbackRequest {
 
 export interface CompletedOidcSignIn {
   readonly issued: IssuedApplicationSession;
+  /**
+   * The return artifact, when it is live, public by link, and the new session
+   * may read it: only such an artifact has a page at its readable root.
+   */
+  readonly returnArtifact: ArtifactRecord | null;
   readonly returnTo: string;
 }
 
@@ -45,13 +62,14 @@ export interface CompletedOidcSignIn {
  * browser must bring back. A provider failure is logged and returned.
  */
 export const startOidcSignIn = Effect.fn("startOidcSignIn")(
-  function*(oidc: OidcSignIn, returnTo: string, now: Date) {
+  function*(oidc: OidcSignIn, back: OidcSignInReturn, now: Date) {
     const authorization = yield* oidc.provider.authorize();
     const pending: PendingOidcSignIn = {
       codeVerifier: authorization.codeVerifier,
       expiresAt: now.getTime() + pendingOidcSignInLifetimeMilliseconds,
       nonce: authorization.nonce,
-      returnTo,
+      returnArtifactId: back.returnArtifactId,
+      returnTo: back.returnTo,
       state: authorization.state,
     };
     return {authorizationUrl: authorization.authorizationUrl, pending};
@@ -115,16 +133,45 @@ export const completeOidcSignIn = Effect.fn("completeOidcSignIn")(
         subject: identity.subject,
       }),
     );
-    const completed: CompletedOidcSignIn = {issued, returnTo: pending.returnTo};
+    const completed: CompletedOidcSignIn = {
+      issued,
+      returnArtifact: pending.returnArtifactId === null
+        ? null
+        : yield* readableReturnArtifact(issued, pending.returnArtifactId),
+      returnTo: pending.returnTo,
+    };
     return completed;
   },
   Effect.tapError(logFailure),
 );
 
 /**
- * A Review path to return to after sign-in, or `/review` for anything else.
- * Only Review: on a server without a content domain, artifacts are served on
- * this origin and could send a freshly signed-in person somewhere else.
+ * The public-link artifact a new session may read, resolved as that session's
+ * next request would be. Anything else, a repository failure included, is null
+ * so the sign-in still lands on its Review path.
+ */
+const readableReturnArtifact = Effect.fn("readableReturnArtifact")(
+  function*(issued: IssuedApplicationSession, artifactId: string) {
+    const access = yield* InstallationAccessService;
+    const content = yield* ContentAccessService;
+    const session = yield* access.authenticateSession(
+      Redacted.make(issued.token, {label: "application-session"}),
+    );
+    const artifact = yield* content.resolveReadableArtifact(session.principal, artifactId);
+    return artifact.accessSetting === accessSettings.publicLink ? artifact : null;
+  },
+  Effect.tapError((failed) =>
+    Effect.logInfo("auth.oidc_sign_in.return_artifact_unreadable").pipe(
+      Effect.annotateLogs({reason: failed._tag}),
+    )),
+  Effect.orElseSucceed(() => null),
+);
+
+/**
+ * A Review path or the home page to return to after sign-in, or `/review`
+ * for anything else. Never an artifact path: on a server without a content
+ * domain, artifacts are served on this origin and could send a freshly
+ * signed-in person somewhere else. An artifact page returns by ID instead.
  */
 export function safeReturnTo(value: string | undefined): string {
   const fallback = "/review";
@@ -137,8 +184,9 @@ export function safeReturnTo(value: string | undefined): string {
   const base = new URL("https://return-to.invalid");
   const parsed = new URL(value, base);
   const returnTo = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-  return parsed.origin === base.origin && returnTo.length <= 1_024 &&
-      (parsed.pathname === "/review" || parsed.pathname.startsWith("/review/"))
+  if (parsed.origin !== base.origin || returnTo.length > 1_024) return fallback;
+  if (returnTo === "/") return returnTo;
+  return parsed.pathname === "/review" || parsed.pathname.startsWith("/review/")
     ? returnTo
     : fallback;
 }

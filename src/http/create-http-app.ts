@@ -154,6 +154,7 @@ import {
   canonicalFolderLocation,
   isHtmlMediaType,
   isolateSameHostResponse,
+  parseArtifactId,
   parseArtifactPath,
   parseSameHostContentRequest,
   rawDocumentPath,
@@ -500,6 +501,7 @@ const pendingOidcSignInSchema = z.object({
   codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/u),
   expiresAt: z.number().int(),
   nonce: z.string().min(16).max(256),
+  returnArtifactId: z.string().max(200).nullable().optional(),
   returnTo: z.string().max(1_024),
   state: z.string().min(16).max(256),
 }).strict();
@@ -549,7 +551,7 @@ export interface HttpAppDependencies {
   readonly contentDomain: string | null;
   /** Server-only credential accepted from the co-launched Vite proxy. */
   readonly developmentProxyCredential?: Redacted.Redacted;
-  /** Where the home page's account menu sends Help, or null for no Help item. */
+  /** Where the account menu sends Help, an https URL or a path on this origin, or null for no Help item. */
   readonly helpUrl: string | null;
   /** The viewer bar's logo, or null to show the product mark. */
   readonly logo: ViewerLogo | null;
@@ -1070,7 +1072,15 @@ export function createHttpApp(
       dependencies,
       startOidcSignIn(
         oidc,
-        safeReturnTo(context.req.query("returnTo")),
+        {
+          // Only this origin's own pages may pick the artifact to land on, so
+          // a link from another site or from sandboxed artifact content cannot
+          // send someone through a real sign-in to a page of its choosing.
+          returnArtifactId: context.req.header("sec-fetch-site") === "same-origin"
+            ? parseArtifactId(context.req.query("returnArtifact"))
+            : null,
+          returnTo: safeReturnTo(context.req.query("returnTo")),
+        },
         dependencies.clock.now(),
       ).pipe(
         Effect.map((value) => ({...value, kind: "started" as const})),
@@ -1124,7 +1134,11 @@ export function createHttpApp(
     if (completed.kind === "refused") return context.redirect(`/review?sso=${completed.browser}`, 303);
     failedOidcCallbacks.refund(clientAddress);
     setApplicationSessionCookies(context, dependencies, completed.issued);
-    return context.redirect(completed.returnTo, 303);
+    // Built from the stored artifact, never from anything the browser sent.
+    const artifactRoot = completed.returnArtifact !== null && dependencies.contentDomain === null
+      ? artifactContentRoot(completed.returnArtifact)
+      : null;
+    return context.redirect(artifactRoot ?? completed.returnTo, 303);
   });
 
   app.post("/auth/local-owner", async (context) => {
@@ -2903,7 +2917,13 @@ function readPendingOidcSignIn(
     return null;
   }
   const parsed = pendingOidcSignInSchema.safeParse(decoded);
-  return parsed.success ? {...parsed.data, returnTo: safeReturnTo(parsed.data.returnTo)} : null;
+  return parsed.success
+    ? {
+      ...parsed.data,
+      returnArtifactId: parseArtifactId(parsed.data.returnArtifactId),
+      returnTo: safeReturnTo(parsed.data.returnTo),
+    }
+    : null;
 }
 
 function oidcCallback(query: Readonly<Record<string, string>>): OidcCallback {

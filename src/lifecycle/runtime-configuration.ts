@@ -176,6 +176,7 @@ export interface RuntimeConfigurationSummary {
   readonly credentialSources: Readonly<Record<string, CredentialSource>>;
   readonly dataDirectory: string | null;
   readonly deploymentMode: DeploymentMode;
+  readonly helpUrl: string | null;
   readonly hostname: string;
   readonly installationId: string;
   readonly logo: ViewerLogoSummary | null;
@@ -556,6 +557,7 @@ export function summarizeRuntimeConfiguration(
       },
       dataDirectory: configuration.dataDirectory,
       deploymentMode: configuration.deploymentMode,
+      helpUrl: configuration.helpUrl,
       hostname: configuration.hostname,
       installationId: configuration.installation.installationId,
       logo: summarizeViewerLogo(configuration.logo),
@@ -577,6 +579,7 @@ export function summarizeRuntimeConfiguration(
     },
     dataDirectory: null,
     deploymentMode: configuration.deploymentMode,
+    helpUrl: configuration.helpUrl,
     hostname: configuration.hostname,
     installationId: configuration.installationId,
     logo: summarizeViewerLogo(configuration.logo),
@@ -871,9 +874,13 @@ function parseHelpUrl(
 ): Effect.Effect<string | null, RuntimeConfigurationError> {
   const field = "ARTIFACT_SERVER_HELP_URL";
   const value = environment[field]?.trim() ?? "";
-  return value === ""
-    ? Effect.succeed(null)
-    : parseHttpsUrl(field, value, `${field} must be an https:// URL without credentials.`);
+  if (value === "") return Effect.succeed(null);
+  if (rootRelativePathPattern.test(value)) return Effect.succeed(value);
+  return parseHttpsUrl(
+    field,
+    value,
+    `${field} must be an https:// URL without credentials or a path that starts with one /.`,
+  );
 }
 
 function parseHttpsUrl(

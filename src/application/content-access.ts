@@ -18,6 +18,7 @@ import type { Principal } from "../core/identity.js";
 import {
   accessSettings,
   type ArtifactPathMatch,
+  type ArtifactRecord,
   type ContentBootstrapRecord,
   type ContentSessionRecord,
   type ArtifactVersion,
@@ -196,6 +197,14 @@ interface ContentAccessOperations {
   readonly issuePreviewLease: (
     command: IssuePreviewLeaseCommand,
   ) => Effect.Effect<IssuedPreviewLease, ContentAccessFailure>;
+  /**
+   * The live artifact with this ID, in any project, when the principal may
+   * open its content: the same project and session checks a bootstrap makes.
+   */
+  readonly resolveReadableArtifact: (
+    principal: Principal,
+    artifactId: string,
+  ) => Effect.Effect<ArtifactRecord, ContentAccessFailure>;
   readonly resolvePublicArtifact: (
     artifactId: string,
   ) => Effect.Effect<PublishedVersion, ContentAccessFailure>;
@@ -437,6 +446,24 @@ function makeContentAccessService(
     return current;
   });
 
+  const resolveReadableArtifact = Effect.fn(
+    "ContentAccessService.resolveReadableArtifact",
+  )(function*(principal: Principal, artifactId: string) {
+    const live = yield* dependencies.repository.findCurrentVersion(null, artifactId);
+    if (live === null) {
+      return yield* Effect.fail(
+        new ArtifactNotFound({message: "The artifact does not exist."}),
+      );
+    }
+    const {artifact} = yield* resolveAuthorizedTarget({
+      artifactId,
+      principal,
+      projectId: live.artifact.projectId,
+      target: {kind: "current"},
+    });
+    return artifact;
+  });
+
   const resolvePublicArtifactPath = Effect.fn(
     "ContentAccessService.resolvePublicArtifactPath",
   )(function*(candidates: readonly string[]) {
@@ -454,6 +481,7 @@ function makeContentAccessService(
     issuePreviewLease,
     resolvePublicArtifact,
     resolvePublicArtifactPath,
+    resolveReadableArtifact,
   });
 }
 

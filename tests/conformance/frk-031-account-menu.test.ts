@@ -15,6 +15,7 @@ import {initializeCompactInstallation} from "../../src/lifecycle/compact-install
 import {
   parseCompactRuntimeConfiguration,
   parseExternalStorageRuntimeConfiguration,
+  summarizeRuntimeConfiguration,
 } from "../../src/lifecycle/runtime-configuration.js";
 import {createLocalRuntime} from "../../src/local/create-local-runtime.js";
 import {
@@ -142,7 +143,7 @@ describe("account menu session and help link", () => {
     await removeTestInstallation(installation);
   });
 
-  test("FRK-031-B: a member's session names their own display name and email, and a configured help URL reaches /auth/context", async () => {
+  test("FRK-031-B: a member's session names their own display name and email, and a configured help URL reaches /auth/context and config check", async () => {
     const alice = (await issueMemberKey("Alice Example", "alice@example.com")).token;
     await issueMemberKey("Bob Example", "bob@example.com");
     server = await startTestServer(installation, {
@@ -163,7 +164,10 @@ describe("account menu session and help link", () => {
     expect(text).not.toContain("bob@example.com");
     expect(text).not.toContain("Bob Example");
 
-    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: helpUrl})).helpUrl).toBe(helpUrl);
+    const configured = await parseExternal({ARTIFACT_SERVER_HELP_URL: helpUrl});
+    expect(configured.helpUrl).toBe(helpUrl);
+    expect(summarizeRuntimeConfiguration(configured).helpUrl).toBe(helpUrl);
+    expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: "/team/help/"})).helpUrl).toBe("/team/help/");
     expect((await parseExternal({})).helpUrl).toBeNull();
     expect((await parseExternal({ARTIFACT_SERVER_HELP_URL: ""})).helpUrl).toBeNull();
     const compactRoot = await mkdtemp(path.join(tmpdir(), "frk-031-compact-"));
@@ -242,7 +246,9 @@ describe("account menu session and help link", () => {
       "http://help.example.com/",
       "javascript:alert(1)",
       "https://user:secret@help.example.com/",
-      "/docs/help",
+      "//evil.example.com/help",
+      "/\\evil.example.com/help",
+      "docs/help",
       "help.example.com",
     ].map(async (value) => {
       const failure = await Effect.runPromise(Effect.flip(
@@ -254,6 +260,6 @@ describe("account menu session and help link", () => {
       ));
       return {field: failure.field, reason: failure.reason};
     }));
-    expect(refused).toEqual(Array.from({length: 5}, () => ({field, reason: "invalid_value"})));
+    expect(refused).toEqual(Array.from({length: 7}, () => ({field, reason: "invalid_value"})));
   });
 });

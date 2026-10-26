@@ -6,9 +6,11 @@ import {
   IconInfoCircle,
   IconX,
 } from "@tabler/icons-react";
-import {lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent} from "react";
+import {lazy, Suspense, useRef, useState, type KeyboardEvent} from "react";
 import {Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis} from "recharts";
 
+import {signInHref} from "@/account/sign-in-context";
+import {useSignInContext} from "@/account/use-sign-in-context";
 import {Sparkline} from "@/components/sparkline";
 import {ThemeMenu} from "@/components/theme-menu";
 import {Alert, AlertDescription} from "@/components/ui/alert";
@@ -55,7 +57,7 @@ import {
   type PublicArtifactTreeFolder,
   type TreeSort,
 } from "./home-tree.js";
-import {readSignInContext, type PublicCatalog, type SignInContext} from "./home-client.js";
+import type {PublicCatalog} from "./home-client.js";
 
 // The row menu carries the API client and the rename dialog. Only a signed-in
 // reader gets a menu, so an anonymous one never downloads that code.
@@ -64,8 +66,8 @@ const ArtifactRowMenu = lazy(async () => ({
 }));
 
 // The account menu carries the API client too, so it loads like the row menu.
-const AccountMenu = lazy(async () => ({
-  default: (await import("./home-account-menu.js")).AccountMenu,
+const HomeAccountMenu = lazy(async () => ({
+  default: (await import("./home-account-menu.js")).HomeAccountMenu,
 }));
 
 /** The copy each chart measure brings to the card and the tree filter. */
@@ -344,28 +346,13 @@ function EmptyCatalog() {
  * in goes to Review's gate, which offers every sign-in this server has.
  */
 function AccountControl({viewerName}: {readonly viewerName: string | null}) {
-  const [context, setContext] = useState<SignInContext | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const loaded = await readSignInContext();
-        if (!cancelled) setContext(loaded);
-      } catch {
-        // Without the context Sign in keeps Review's gate and Help stays hidden.
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const context = useSignInContext();
   if (viewerName === null) {
-    return <ButtonLink href={context?.signInHref ?? "/review"} variant="outline">Sign in</ButtonLink>;
+    return <ButtonLink href={signInHref(context, {kind: "home"})} variant="outline">Sign in</ButtonLink>;
   }
   return (
     <Suspense fallback={<span aria-hidden className="size-8" />}>
-      <AccountMenu helpUrl={context?.helpUrl ?? null} viewerName={viewerName} />
+      <HomeAccountMenu helpUrl={context?.helpUrl ?? null} viewerName={viewerName} />
     </Suspense>
   );
 }

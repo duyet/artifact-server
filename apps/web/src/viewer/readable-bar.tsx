@@ -4,10 +4,13 @@ import {
   IconLayoutNavbarCollapse,
   IconLayoutSidebarLeftExpand,
   IconLink,
+  IconLogin,
   IconMaximize,
 } from "@tabler/icons-react";
 import {toast} from "sonner";
 
+import {AccountMenu, AccountMenuItems} from "@/account/account-menu";
+import {type SignInContext, signInHref} from "@/account/sign-in-context";
 import {Button, ButtonLink} from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,6 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {useIsMobile} from "@/hooks/use-mobile";
 import {IconButton} from "@/review/review-primitives";
 import {ArtifactInfoPopover} from "@/review/viewer/artifact-info-popover";
 import {ViewerLogo} from "@/review/viewer/viewer-logo";
@@ -42,6 +46,7 @@ export function ReadableBar({
   onHide,
   openedUrl,
   rawUrl,
+  signIn,
 }: {
   readonly artifact: ReadableArtifact;
   /**
@@ -55,8 +60,19 @@ export function ReadableBar({
   readonly openedUrl: string;
   /** The opened URL with `?raw=1`: the named artifact's page alone, with no bar. */
   readonly rawUrl: string;
+  /** The server's sign-in route and Help page, or null until it answers. */
+  readonly signIn: SignInContext | null;
 }) {
   const reviewUrl = navigatedAway ? null : artifact.reviewUrl;
+  // A phone has no room beside the menu, so the account moves into it.
+  const accountInMenu = useIsMobile();
+  const reader = artifact.reader;
+  // Sign-in returns to this artifact by ID once its info names one.
+  const signInUrl = signInHref(
+    signIn,
+    artifact.artifactId === null ? {kind: "home"} : {artifactId: artifact.artifactId, kind: "artifact"},
+  );
+  const helpUrl = signIn?.helpUrl ?? null;
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2" aria-label="Artifact viewer">
@@ -113,8 +129,31 @@ export function ReadableBar({
                 </DropdownMenuGroup>
               </>
             )}
+            {accountInMenu && reader.kind === "member" ? (
+              <>
+                <DropdownMenuSeparator />
+                <AccountMenuItems account={reader.account} afterSignOut={openedUrl} helpUrl={helpUrl} />
+              </>
+            ) : null}
+            {accountInMenu && reader.kind === "anonymous" ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem render={<a href={signInUrl} />}>
+                    <IconLogin />
+                    Sign in
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        {!accountInMenu && reader.kind === "member" ? (
+          <AccountMenu account={reader.account} afterSignOut={openedUrl} helpUrl={helpUrl} size="sm" />
+        ) : null}
+        {!accountInMenu && reader.kind === "anonymous" ? (
+          <ButtonLink href={signInUrl} size="xs" variant="outline">Sign in</ButtonLink>
+        ) : null}
       </div>
     </header>
   );
