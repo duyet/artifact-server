@@ -18,6 +18,12 @@ export interface AuthorizationDependencies {
 
 /** Authorization decisions shared by every application operation. */
 export interface AuthorizationOperations {
+  /**
+   * Whether the principal may change artifact settings such as access and
+   * tags. `requireArtifactManagement` enforces exactly this answer, so a
+   * reader that only shows the choice cannot drift from the write it guards.
+   */
+  readonly canManageArtifacts: (principal: Principal) => boolean;
   readonly requireAgentConnection: (
     principal: Principal,
   ) => Effect.Effect<void, AuthorizationDenied>;
@@ -208,16 +214,16 @@ function makeAuthorizationService(
     yield* denied();
   });
 
+  const canManageArtifacts = (principal: Principal): boolean =>
+    principal.installationId === dependencies.installationId && (
+      isDirectHumanPrincipal(principal) ||
+      hasCapability(principal, principalCapabilities.manageAnyArtifact)
+    );
+
   const requireArtifactManagement = Effect.fn(
     "AuthorizationService.requireArtifactManagement",
   )(function*(principal: Principal) {
-    yield* requireInstallation(principal);
-    if (isDirectHumanPrincipal(principal)) return;
-    if (
-      hasCapability(principal, principalCapabilities.manageAnyArtifact)
-    ) {
-      return;
-    }
+    if (canManageArtifacts(principal)) return;
     yield* denied();
   });
 
@@ -286,6 +292,7 @@ function makeAuthorizationService(
   });
 
   return AuthorizationService.of({
+    canManageArtifacts,
     requireAgentConnection,
     requireDispatchSend,
     requireInstallationAdministration,
