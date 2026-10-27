@@ -925,7 +925,8 @@ requirements:
       behavior: {id: CNT-009-B, description: "Load a permitted external dependency from the artifact origin without changing its URL or bytes."}
       failure: {id: CNT-009-F, description: "A blocked external dependency remains blocked and is not silently proxied or copied by Artifact Server."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: CNT-009-B and CNT-009-F run only locally against a real SQLite server, with a recording loopback HTTP server as the other origin, through the version link only. They prove that the served HTML and script keep every external URL byte for byte, that the content responses carry no fetch-restricting Content-Security-Policy directive, that Artifact Server sends no request to the other origin while publishing, checking assets, or serving, that path- and query-shaped proxy attempts never return the external bytes, and that no file in the data directory holds them. No browser loads the page, so the browser's own CORS and network blocking is shown only by the other origin's response headers. No single_server or kubernetes run exists, and no evidence report is attached.
     depends_on: []
     evidence: []
 
