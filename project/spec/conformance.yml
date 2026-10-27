@@ -4194,7 +4194,7 @@ requirements:
       failure: {id: FRK-006-F, description: "An equal, ancestor, or descendant path is 409, a concurrent claim of one path admits one create, malformed paths over HTTP or MCP and a path on a new version are refused, the CLI refuses --path with --artifact, a host-mode server answers CapabilityUnavailable, and a deleted artifact frees its path."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite only. The Postgres race between two server processes runs in CI with Docker, and no deployed run exists.
+    proof_gap: Proved locally against SQLite. The external-storage suite now runs the Postgres overlap check, so two server processes racing for one path admit one create and both serve it, and on one server an equal, ancestor, or descendant path is 409 ARTIFACT_PATH_TAKEN naming the live path it overlaps, and deleting the holder frees the path for a new artifact that then holds it the same way; it runs only in CI with Docker and does not cover MCP or CLI creates, a retried create, malformed paths, a path on a new version, or host mode on Postgres. No deployed run exists.
     depends_on: [FRK-003]
     evidence: []
 
@@ -4348,7 +4348,7 @@ requirements:
       failure: {id: FRK-012-F, description: "A stale expected version is 409 ARTIFACT_MUTATION_CONFLICT, a reused key with another name is 409 IDEMPOTENCY_CONFLICT, a blank name and a missing key are 422, a deleted artifact is 404, and none of them changes the name or records an action."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The Postgres migration 0016 and rename, and the D1 table rebuilds and rename, compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The external-storage suite now runs a rename on Postgres after migration 0016, over HTTP with surrounding spaces and over MCP, so search finds the new name and not the old one, the current version is unchanged, two renamed actions are recorded newest first, and the first key replays the name it set with replayed true; a stale expected version is 409 ARTIFACT_MUTATION_CONFLICT and a reused key with another name is 409 IDEMPOTENCY_CONFLICT, and neither changes the name or records an action. It runs only in CI with Docker and does not cover a blank name, a missing key, or a deleted artifact on Postgres. The D1 table rebuilds and rename compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
     depends_on: [FRK-010, ARC-006]
     evidence: []
 
@@ -4404,7 +4404,7 @@ requirements:
       failure: {id: FRK-021-F, description: "An anonymous PUT is 401, a key with only artifact create and read is 403 AUTHORIZATION_DENIED over REST and MCP, an uppercase, reserved-root, or empty-segment path and an unknown state are 422, and a collapsed folder that holds only a private artifact or nothing is absent from the tree until a public artifact lands in it."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint. The Postgres migration 0020 and its queries run only in CI with Docker, the browser case runs only in CI, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint. The external-storage suite now runs migration 0020 and its queries on Postgres, setting /team/archive/ collapsed over REST and repeating it, setting team/archive/2025 collapsed, reading both sorted in collapsedFolders with every artifact still listed, and setting team/archive expanded over MCP; a key with only artifact create and read gets 403 AUTHORIZATION_DENIED over REST, and a collapsed folder that holds only a private artifact is absent from the tree until a public artifact lands in it. It runs only in CI with Docker and does not cover an anonymous PUT, the MCP refusal, malformed paths and states, or a collapsed folder that holds nothing on Postgres. The browser case runs only in CI, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
 
