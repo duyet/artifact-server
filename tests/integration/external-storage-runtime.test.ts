@@ -41,6 +41,7 @@ import {
   planAsset,
   putAssetBytes,
 } from "../support/assets.js";
+import {MutableClock} from "../support/agent-dispatch.js";
 import {requiredPostgresSchemaVersion} from
   "../../src/storage/postgres-migrations.js";
 import {PostgresArtifactRepository} from "../../src/storage/postgres-artifact-repository.js";
@@ -62,6 +63,7 @@ const apiToken = managedTestKey("external-storage-integration");
 const administratorEmail = "administrator@example.test";
 const runningProcesses = new Set<ChildProcessWithoutNullStreams>();
 const runningInProcessServers = new Set<InProcessExternalStorageServer>();
+const day = 24 * 60 * 60 * 1_000;
 
 const publishResponseSchema = z.object({
   artifact: z.object({
@@ -206,6 +208,62 @@ const publicArtifactTreeSchema = z.object({
     views: publicArtifactViewCountsSchema,
   })),
   truncated: z.boolean(),
+}).loose();
+
+const analyticsDayPattern = /^\d{4}-\d{2}-\d{2}$/u;
+
+const projectActivityReportSchema = z.object({
+  daily: z.array(z.object({
+    day: z.string().regex(analyticsDayPattern),
+    uploads: z.number().int().nonnegative(),
+    views: z.number().int().nonnegative(),
+  }).strict()),
+  generatedAt: z.iso.datetime(),
+  today: z.string().regex(analyticsDayPattern),
+  topArtifacts: z.array(z.object({
+    artifactId: z.string(),
+    name: z.string(),
+    total: z.number().int().nonnegative(),
+    views30d: z.number().int().nonnegative(),
+  }).strict()),
+  totals: z.object({
+    artifacts: z.number().int().nonnegative(),
+    artifactsViewedToday: z.number().int().nonnegative(),
+    averageViewsPerArtifact: z.number().nonnegative(),
+    pageViews: z.number().int().nonnegative(),
+    publicArtifacts: z.number().int().nonnegative(),
+    uploadedToday: z.number().int().nonnegative(),
+    uploads: z.number().int().nonnegative(),
+  }).strict(),
+  windowDays: z.literal(365),
+}).strict();
+
+const artifactActivityReportSchema = z.object({
+  artifactId: z.string(),
+  daily: z.array(z.object({
+    day: z.string().regex(analyticsDayPattern),
+    views: z.number().int().positive(),
+  }).strict()),
+  today: z.string().regex(analyticsDayPattern),
+  views: publicArtifactViewCountsSchema.strict(),
+  windowDays: z.literal(30),
+}).strict();
+
+const memberTreeSchema = z.object({
+  artifacts: z.array(z.object({
+    access: z.enum(["account_required", "public_link"]),
+    manage: z.object({
+      artifactId: z.string(),
+      currentVersionId: z.string(),
+      projectId: z.string(),
+      tags: z.array(z.string()),
+    }).strict().nullable(),
+    mine: z.boolean(),
+    name: z.string(),
+    owner: z.string().nullable(),
+    visibility: z.enum(["private", "public", "unlisted"]),
+  }).loose()),
+  viewer: z.object({name: z.string()}).strict().nullable(),
 }).loose();
 
 interface IntegrationEnvironment {
@@ -2677,6 +2735,303 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       await database.close();
     }
   });
+
+  test("external-storage foundation: Postgres builds the project and artifact activity reports from versions and stored views, and a deleted artifact leaves them", async () => {
+    const identity = {
+      apiToken: managedTestKey("project-analytics"),
+      installationId: `project-analytics-${randomUUID()}`,
+    };
+    // 400 days before 2026-10-17, so the first upload and view fall outside
+    // the 365-day series but inside the all-time totals.
+    const clock = new MutableClock("2025-09-12T10:00:00.000Z");
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {clock},
+    );
+    const publish = async (
+      name: string,
+      accessSetting: "account_required" | "public_link",
+    ) => {
+      const published = await publishNew(server.baseUrl, identity.apiToken, {
+        accessSetting,
+        content: `<!doctype html><title>${name}</title>`,
+        idempotencyKey: `project-analytics-${name}-${randomUUID()}`,
+        name,
+      });
+      expect(published.response.status).toBe(201);
+      return published.body;
+    };
+    const view = async (versionUrl: string, times: number) => {
+      const responses = await Promise.all(Array.from(
+        {length: times},
+        () => fetchContentThroughServer(server.baseUrl, versionUrl),
+      ));
+      expect(responses.map((response) => response.status))
+        .toEqual(responses.map(() => 200));
+      // Views land on the clock's day when they drain, so drain before
+      // moving the clock.
+      expect(await server.flushArtifactViews())
+        .toMatchObject({failedChunks: 0});
+    };
+    const readProject = async () => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        identity.apiToken,
+        "/api/v1/analytics",
+      );
+      expect(response.status).toBe(200);
+      return projectActivityReportSchema.parse(await response.json());
+    };
+    const artifactReport = (artifactId: string) => authenticatedFetch(
+      server.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${artifactId}/analytics`,
+    );
+
+    const atlas = await publish("Atlas", "public_link");
+    await view(atlas.links.version, 3);
+
+    clock.advance(398 * day); // 2026-10-15
+    const atlasTwo = await publishVersion(server.baseUrl, identity.apiToken, {
+      artifactId: atlas.artifact.id,
+      content: "<!doctype html><title>Atlas two</title>",
+      expectedCurrentVersionId: atlas.version.id,
+      idempotencyKey: `project-analytics-atlas-two-${randomUUID()}`,
+    });
+    expect(atlasTwo.response.status).toBe(201);
+    const atlasTwoBody = publishResponseSchema.parse(atlasTwo.body);
+    const ledger = await publish("Ledger", "account_required");
+    await view(atlasTwoBody.links.version, 2);
+
+    clock.advance(2 * day); // 2026-10-17
+    const notes = await publish("Notes", "public_link");
+    await view(atlasTwoBody.links.version, 1);
+    await view(notes.links.version, 4);
+
+    const report = await readProject();
+    expect(report).toEqual({
+      daily: [
+        {day: "2026-10-15", uploads: 2, views: 2},
+        {day: "2026-10-17", uploads: 1, views: 5},
+      ],
+      generatedAt: "2026-10-17T10:00:00.000Z",
+      today: "2026-10-17",
+      // Ledger has no views, so it is absent from the ranking.
+      topArtifacts: [
+        {artifactId: notes.artifact.id, name: "Notes", total: 4, views30d: 4},
+        {artifactId: atlas.artifact.id, name: "Atlas", total: 6, views30d: 3},
+      ],
+      totals: {
+        artifacts: 3,
+        artifactsViewedToday: 2,
+        // (3 + 2 + 1 + 4) views over three artifacts.
+        averageViewsPerArtifact: 3.3,
+        pageViews: 10,
+        publicArtifacts: 2,
+        uploadedToday: 1,
+        uploads: 4,
+      },
+      windowDays: 365,
+    });
+    expect(report.topArtifacts.map((item) => item.name))
+      .not.toContain(ledger.artifact.name);
+
+    const atlasReport = await artifactReport(atlas.artifact.id);
+    expect(atlasReport.status).toBe(200);
+    expect(artifactActivityReportSchema.parse(await atlasReport.json()))
+      .toEqual({
+        artifactId: atlas.artifact.id,
+        daily: [
+          {day: "2026-10-15", views: 2},
+          {day: "2026-10-17", views: 1},
+        ],
+        today: "2026-10-17",
+        views: {last7Days: 3, last30Days: 3, total: 6},
+        windowDays: 30,
+      });
+
+    expect((await mutateArtifact(
+      server.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${notes.artifact.id}`,
+      "DELETE",
+      `project-analytics-delete-notes-${randomUUID()}`,
+      {expectedCurrentVersionId: notes.version.id},
+    )).status).toBe(200);
+
+    expect(await readProject()).toMatchObject({
+      // Notes was today's only upload and four of today's five views.
+      daily: [
+        {day: "2026-10-15", uploads: 2, views: 2},
+        {day: "2026-10-17", uploads: 0, views: 1},
+      ],
+      topArtifacts: [
+        {artifactId: atlas.artifact.id, name: "Atlas", total: 6, views30d: 3},
+      ],
+      totals: {
+        artifacts: 2,
+        artifactsViewedToday: 1,
+        averageViewsPerArtifact: 3,
+        pageViews: 6,
+        publicArtifacts: 1,
+        uploadedToday: 0,
+        uploads: 3,
+      },
+    });
+    expect((await artifactReport(notes.artifact.id)).status).toBe(404);
+  });
+
+  test("external-storage foundation: Postgres serves a member's tree with every live artifact, mine on their own, and a manage handle only where the owner-or-administrator rule allows", async () => {
+    const identity = {
+      apiToken: managedTestKey("member-tree"),
+      installationId: `member-tree-${randomUUID()}`,
+    };
+    const clock = new MutableClock();
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {clock},
+    );
+    const administrator = await seedAdministratorSession(
+      environment,
+      identity.installationId,
+    );
+    const applicationOrigin = "https://artifacts.example.com";
+
+    const issueMemberKey = async (displayName: string, email: string) => {
+      const admitted = await fetch(`${server.baseUrl}/api/v1/members`, {
+        body: JSON.stringify({displayName, email}),
+        headers: browserMutationHeaders(applicationOrigin, administrator),
+        method: "POST",
+      });
+      expect(admitted.status).toBe(201);
+      const memberId = z.object({member: z.object({id: z.string()})})
+        .parse(await admitted.json()).member.id;
+      const issued = await fetch(`${server.baseUrl}/api/v1/api-keys`, {
+        body: JSON.stringify({
+          capabilities: ["artifact:create", "artifact:read"],
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          memberId,
+          name: `${displayName} laptop`,
+        }),
+        headers: browserMutationHeaders(applicationOrigin, administrator),
+        method: "POST",
+      });
+      expect(issued.status).toBe(201);
+      return {memberId, token: issuedKeySchema.parse(await issued.json()).token};
+    };
+    // A member's own browser session, so the viewer is the member herself
+    // and the owner rule admits her as a direct human principal.
+    const signIn = (memberId: string) =>
+      seedMemberSession(environment, identity.installationId, memberId);
+    const readTree = async (cookies: ApplicationCookies | null) => {
+      const response = await fetch(`${server.baseUrl}/api/v1/public/tree`, {
+        headers: cookies === null ? {} : {Cookie: cookies.header},
+      });
+      expect(response.status).toBe(200);
+      // The body depends on the session, so no shared cache may keep it and
+      // no cache may answer one viewer with another viewer's copy.
+      expect(response.headers.get("cache-control")).toBe("private, no-cache");
+      expect(response.headers.get("vary") ?? "").toContain("Cookie");
+      return memberTreeSchema.parse(await response.json());
+    };
+    const publish = async (
+      token: string,
+      name: string,
+      accessSetting: "account_required" | "public_link",
+    ) => {
+      const published = await publishNew(server.baseUrl, token, {
+        accessSetting,
+        content: `<!doctype html><title>${name}</title>`,
+        idempotencyKey: `member-tree-${name}-${randomUUID()}`,
+        name,
+      });
+      expect(published.response.status).toBe(201);
+      // Each publish a minute after the last, so newest first is fixed.
+      clock.advance(60_000);
+      return published.body;
+    };
+
+    const alice = await issueMemberKey("Alice Example", "alice@example.test");
+    const bob = await issueMemberKey("Bob Example", "bob@example.test");
+    await publish(alice.token, "Alice public", "public_link");
+    await publish(alice.token, "Alice private", "account_required");
+    await publish(bob.token, "Bob report", "public_link");
+    const bobUnlisted = await publish(bob.token, "Bob unlisted", "public_link");
+    expect((await mutateArtifact(
+      server.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${bobUnlisted.artifact.id}/tags`,
+      "PATCH",
+      `member-tree-unlist-${randomUUID()}`,
+      {
+        expectedCurrentVersionId: bobUnlisted.version.id,
+        tags: ["unlisted", "archive"],
+      },
+    )).status).toBe(200);
+
+    const anonymous = await readTree(null);
+    expect(anonymous.viewer).toBeNull();
+    expect(anonymous.artifacts.map((artifact) => ({
+      manage: artifact.manage,
+      mine: artifact.mine,
+      name: artifact.name,
+      owner: artifact.owner,
+      visibility: artifact.visibility,
+    }))).toEqual([
+      {manage: null, mine: false, name: "Bob report", owner: "Bob Example laptop", visibility: "public"},
+      {manage: null, mine: false, name: "Alice public", owner: "Alice Example laptop", visibility: "public"},
+    ]);
+
+    // Alice reads every live artifact, including Bob's unlisted one and her
+    // own private one, through the member branch of the catalog query.
+    const aliceTree = await readTree(await signIn(alice.memberId));
+    expect(aliceTree.viewer).toEqual({name: "Alice Example"});
+    expect(aliceTree.artifacts.map((artifact) => ({
+      access: artifact.access,
+      manageable: artifact.manage !== null,
+      mine: artifact.mine,
+      name: artifact.name,
+      visibility: artifact.visibility,
+    }))).toEqual([
+      {access: "public_link", manageable: false, mine: false, name: "Bob unlisted", visibility: "unlisted"},
+      {access: "public_link", manageable: false, mine: false, name: "Bob report", visibility: "public"},
+      {access: "account_required", manageable: true, mine: true, name: "Alice private", visibility: "private"},
+      {access: "public_link", manageable: true, mine: true, name: "Alice public", visibility: "public"},
+    ]);
+
+    // Bob's own session reads the mirror image: his rows are his.
+    const bobTree = await readTree(await signIn(bob.memberId));
+    expect(bobTree.artifacts.map((artifact) => ({
+      manageable: artifact.manage !== null,
+      mine: artifact.mine,
+      name: artifact.name,
+    }))).toEqual([
+      {manageable: true, mine: true, name: "Bob unlisted"},
+      {manageable: true, mine: true, name: "Bob report"},
+      {manageable: false, mine: false, name: "Alice private"},
+      {manageable: false, mine: false, name: "Alice public"},
+    ]);
+
+    // An administrator owns none of them but may change every one, and the
+    // handle carries the artifact's tags sorted.
+    const administratorTree = await readTree(administrator);
+    expect(administratorTree.artifacts.map((artifact) => ({
+      manageable: artifact.manage !== null,
+      mine: artifact.mine,
+      name: artifact.name,
+    }))).toEqual([
+      {manageable: true, mine: false, name: "Bob unlisted"},
+      {manageable: true, mine: false, name: "Bob report"},
+      {manageable: true, mine: false, name: "Alice private"},
+      {manageable: true, mine: false, name: "Alice public"},
+    ]);
+    expect(administratorTree.artifacts[0]?.manage).toMatchObject({
+      artifactId: bobUnlisted.artifact.id,
+      tags: ["archive", "unlisted"],
+    });
+  });
 });
 
 type PublicArtifactTree = z.infer<typeof publicArtifactTreeSchema>;
@@ -2886,6 +3241,7 @@ async function publishNew(
   baseUrl: string,
   token: string,
   input: {
+    readonly accessSetting?: "account_required" | "public_link";
     readonly content: string;
     readonly idempotencyKey: string;
     readonly name: string;
@@ -2902,7 +3258,7 @@ async function publishNew(
   );
   const response = await fetch(upload.commitUrl, {
     body: JSON.stringify({target: {
-      accessSetting: "public_link",
+      accessSetting: input.accessSetting ?? "public_link",
       kind: "new_artifact",
       name: input.name,
       tags: ["external-storage-runtime"],
@@ -3202,29 +3558,50 @@ async function seedAdministratorSession(
     maxConnections: 1,
     url: Redacted.make(environment.databaseUrl),
   }, "validate");
-  const token = `session_${randomUUID()}`;
-  const csrf = `csrf_${randomUUID()}`;
+  let memberId: string;
   try {
-    const repository = new PostgresIdentityRepository(
+    const member = await new PostgresIdentityRepository(
       database,
       scopedInstallationId,
-    );
-    const now = new Date();
-    const member = await repository.admitMember({
-      createdAt: now.toISOString(),
+    ).admitMember({
+      createdAt: new Date().toISOString(),
       displayName: "Team administrator",
       email: administratorEmail,
       id: `member_${randomUUID()}`,
       installationId: scopedInstallationId,
       role: "administrator",
     });
-    await repository.createApplicationSession({
+    memberId = member.id;
+  } finally {
+    await database.close();
+  }
+  return seedMemberSession(environment, scopedInstallationId, memberId);
+}
+
+/** Seed a signed-in session for one existing member, as a browser login would. */
+async function seedMemberSession(
+  environment: IntegrationEnvironment,
+  scopedInstallationId: string,
+  memberId: string,
+): Promise<ApplicationCookies> {
+  const database = await PostgresDatabase.open({
+    maxConnections: 1,
+    url: Redacted.make(environment.databaseUrl),
+  }, "validate");
+  const token = `session_${randomUUID()}`;
+  const csrf = `csrf_${randomUUID()}`;
+  try {
+    const now = new Date();
+    await new PostgresIdentityRepository(
+      database,
+      scopedInstallationId,
+    ).createApplicationSession({
       createdAt: now.toISOString(),
       csrfDigest: sha256Hex(csrf),
       expiresAt: new Date(now.getTime() + 3_600_000).toISOString(),
       id: `session_${randomUUID()}`,
       installationId: scopedInstallationId,
-      subject: {kind: "member", memberId: member.id},
+      subject: {kind: "member", memberId},
       tokenDigest: sha256Hex(token),
     });
   } finally {
