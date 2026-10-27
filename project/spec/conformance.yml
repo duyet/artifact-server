@@ -3977,7 +3977,7 @@ requirements:
       failure: {id: EDT-001-F, description: "An edit naming a path absent from the base manifest, a missing upload, or an aborted transaction creates no version, and no stored version's bytes ever change."}
     deployments: *all
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server, covering the copied manifest, the replaced bytes, the unchanged base, the edited action, the replay, and absent-path, mismatched, extra-file, unknown-base, and unverified uploads saving nothing. An aborted transaction is not exercised directly. The Postgres and D1 commit paths compile and pass the existing suites but no test runs an edit on them, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server, covering the copied manifest, the replaced bytes, the unchanged base, the edited action, the replay, and absent-path, mismatched, extra-file, unknown-base, and unverified uploads saving nothing. On Postgres and S3, an in-process external-storage server proves the copied manifest, the replaced and unchanged bytes of a multi-file version with a binary file, the unchanged base, the one edited action, the replay, and an unknown base or an unverified upload saving nothing. The absent-path, mismatched, and extra-file refusals run only on SQLite, an aborted transaction is not exercised directly, the D1 commit path compiles and passes the existing suites but no test runs an edit on it, and no deployed run exists.
     depends_on: [PUB-001, PUB-006, VER-001]
     evidence: []
 
@@ -3991,7 +3991,7 @@ requirements:
       failure: {id: EDT-002-F, description: "A save whose expected current version is stale returns the publish conflict shape with the actual current version and writes nothing; it never silently overwrites newer work."}
     deployments: *all
     status: implementing
-    proof_gap: The server half is proved locally against SQLite. Committed bytes keep a byte order mark and CRLF endings exactly, and a stale save is the 409 publish conflict naming the actual current version with nothing saved. That the web editor preserves the mark and line endings when it builds the bytes is the client helper's job in apps/web/src/artifact-actions and is not proved by this ID. Postgres, D1, and deployed runs are unproved.
+    proof_gap: The server half is proved locally against SQLite. Committed bytes keep a byte order mark and CRLF endings exactly, and a stale save is the 409 publish conflict naming the actual current version with nothing saved. That the web editor preserves the mark and line endings when it builds the bytes is the client helper's job in apps/web/src/artifact-actions and is not proved by this ID. On Postgres and S3, an in-process external-storage server proves the same server half, with the mark and CRLF endings kept exactly and the stale save refused with nothing saved. D1 and deployed runs are unproved.
     depends_on: [EDT-001]
     evidence: []
 
@@ -4264,7 +4264,7 @@ requirements:
       failure: {id: FRK-013-F, description: "A source file whose bytes do not match the manifest fingerprint aborts the duplicate before commit and creates no artifact."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved against SQLite over a real server through the browser helper with real fetch, including idempotent replay and a missing source file. No browser test drives the dialog, and no Postgres or deployed run exists.
+    proof_gap: Proved against SQLite over a real server through the browser helper with real fetch, including idempotent replay and a missing source file. The same helper with real fetch against an in-process Postgres and S3 external-storage server proves the byte-identical private copy with its name and tags, the unchanged source, the idempotent replay, and a missing source file creating nothing. The fingerprint-mismatch refusal runs only on SQLite, no browser test drives the dialog, and no deployed run exists.
     depends_on: [PUB-001, VER-001, FRK-010]
     evidence: []
 
