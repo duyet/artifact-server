@@ -1306,7 +1306,8 @@ requirements:
       behavior: {id: AUTH-017-B, description: "Authenticate each installation and confirm that database, blob, cache, job, backup, and restore operations receive its trusted scope."}
       failure: {id: AUTH-017-F, description: "Header, query, body, path, token, cache-key, and job-payload tampering cannot select another installation."}
     deployments: *replicated
-    status: specified
+    status: implementing
+    proof_gap: The external-storage suite runs two compiled server processes for two installations on one Postgres database and one bucket. AUTH-017-B proves that artifact, version, and staged-upload rows carry the serving installation, that blobs and staging objects land only under that installation's derived key prefix, and that integrity scans and expired-staging cleanup see only their own installation. AUTH-017-F sends the other installation's token, session cookie, artifact, version, project, and upload IDs, content host, installation headers, query and body fields, an encoded path, a reused idempotency key, and MCP calls to the wrong process; each is refused, and a fingerprint of every installation-scoped table plus the object listing under the victim's prefix is unchanged. No Kubernetes deployment, ingress, or load balancer is exercised. No shared cache exists to test, so cache-key scope is unproved. Backup and restore scope, agent-dispatch IDs, and the remaining HTTP and MCP routes are not in the hostile matrix.
     depends_on: []
     evidence: []
 
@@ -3585,7 +3586,8 @@ requirements:
       behavior: {id: OPS-010-B, description: "Terminate idle, reading, uploading, and committing containers during Compose and Kubernetes replacement and observe the documented durable result for every request."}
       failure: {id: OPS-010-F, description: "A draining process cannot remain ready, accept unbounded new work, exceed the termination deadline, leak providers, or return a successful publish that disappears after exit."}
     deployments: [single_server, kubernetes]
-    status: specified
+    status: implementing
+    proof_gap: The external-storage suite sends SIGTERM to a compiled server process on Postgres and MinIO. OPS-010-B proves that readiness turns to draining while liveness stays up, that new connections are refused after the withdrawal interval, that an upload and a commit already in progress both finish, and that the process exits 0 with the committed version and its bytes served after a restart. OPS-010-F proves that a commit still open at the deadline is reset, saves no artifact or version, and that the process still exits 0 within the bound. Compose and Kubernetes rolling replacement, a real proxy or Service withdrawing the endpoint, idle and reading connections, a commit cut inside its database transaction, and telemetry flushing are not proved. Provider closing is shown only by the process exiting on its own.
     depends_on: [OPS-001, PUB-003, PUB-004]
     evidence: []
 
