@@ -63,6 +63,8 @@ import {requiredPostgresSchemaVersion} from
 import {PostgresArtifactRepository} from "../../src/storage/postgres-artifact-repository.js";
 import {PostgresIdentityRepository} from "../../src/storage/postgres-identity-repository.js";
 import {defaultProjectId} from "../../src/core/model.js";
+import {defaultAssetQuota} from "../../src/core/asset-policy.js";
+import {SystemIdGenerator} from "../../src/core/system.js";
 import {managedApiKeyCredentialPattern} from
   "../../src/core/installation-identity.js";
 import {
@@ -1052,6 +1054,162 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     expect((await deleteAsset(first, assetToken, artifactId, committed.asset.id)).status).toBe(200);
     expect((await fetch(`${second.baseUrl}${blobPath}`)).status).toBe(404);
     expect((await listAssets(second, assetToken, artifactId)).assets).toEqual([]);
+  });
+
+  test("external-storage foundation: a Postgres asset commit that reaches the transaction after another commit under its key returns the first asset as a replay", async () => {
+    const token = managedTestKey("asset-replay-race-installation");
+    const identity = {apiToken: token, installationId: `asset-replay-race-${randomUUID()}`};
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const published = await publishNew(server.baseUrl, token, {
+      content: "<h1>asset replay page</h1>",
+      idempotencyKey: `asset-replay-page-${randomUUID()}`,
+      name: "Asset replay page",
+    });
+    expect(published.response.status).toBe(201);
+    const {artifact} = published.body;
+    const principal = managedTestPrincipal(token);
+    const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 4, 3, 2, 1]);
+    const ids = new SystemIdGenerator();
+    const assetWithId = (id: string) => ({
+      artifactId: artifact.id,
+      // The upload expires an hour after the plan, so commit at the real time.
+      createdAt: new Date().toISOString(),
+      createdByDisplayName: principal.displayName,
+      createdByPrincipalId: principal.principalId,
+      id,
+      mediaType: "image/png",
+      name: "chart.png",
+      projectId: artifact.projectId,
+      sha256: sha256(bytes),
+      size: bytes.byteLength,
+    });
+    const planned = await planAsset(server, token, artifact.id, {
+      bytes,
+      mediaType: "image/png",
+      name: "chart.png",
+    });
+    expect(planned.status).toBe(201);
+    const plan = assetPlanSchema.parse(await planned.json());
+    // Both committers hold the claim they read before the first one ended
+    // the upload, as a client retrying after a lost response does.
+    const command = {
+      idempotencyKey: `asset-replay-race-${randomUUID()}`,
+      inputDigest: "same-asset-commit-input",
+      quota: defaultAssetQuota,
+      upload: {
+        expiresAt: plan.expiresAt,
+        id: plan.uploadId,
+        principalId: principal.principalId,
+      },
+    };
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    try {
+      const repository = await PostgresArtifactRepository.open(
+        database,
+        identity.installationId,
+      );
+      const first = await repository.commitAsset({...command, asset: assetWithId(ids.assetId())});
+      expect(first.replayed).toBe(false);
+      // The second committer checked for its key before the first one wrote
+      // it, so it enters the transaction holding a different new asset ID.
+      const second = await repository.commitAsset({...command, asset: assetWithId(ids.assetId())});
+      expect(second).toEqual({asset: first.asset, replayed: true});
+      const listed = await repository.listAssets(artifact.projectId, artifact.id);
+      expect(listed.assets.map((asset) => asset.id)).toEqual([first.asset.id]);
+    } finally {
+      await database.close();
+      await server.stop();
+    }
+  });
+
+  test("external-storage foundation: a Postgres version commit whose staged files are not all verified fails as UploadIncomplete inside the transaction", async () => {
+    const token = managedTestKey("version-readiness-race-installation");
+    const identity = {apiToken: token, installationId: `version-readiness-race-${randomUUID()}`};
+    const server = await startInProcessExternalStorageServer(environment, identity);
+    const published = await publishNew(server.baseUrl, token, {
+      content: "<h1>first version</h1>",
+      idempotencyKey: `version-readiness-page-${randomUUID()}`,
+      name: "Version readiness page",
+    });
+    expect(published.response.status).toBe(201);
+    const {artifact, version} = published.body;
+    const principal = managedTestPrincipal(token);
+    const files = [
+      textFile("index.html", "text/html; charset=utf-8", "<h1>second version</h1>"),
+      textFile("notes.md", "text/markdown; charset=utf-8", "# Never uploaded\n"),
+    ];
+    const upload = await planExternalStorageUpload(server.baseUrl, token, files, "index.html");
+    const entrySlot = upload.files.find((file) => file.path === "index.html");
+    const entryFile = files[0];
+    if (entrySlot === undefined || entryFile === undefined) {
+      throw new Error("The upload plan has no entry file slot.");
+    }
+    const verified = await fetch(entrySlot.uploadUrl, {
+      body: copiedArrayBuffer(entryFile.bytes),
+      headers: {Authorization: `Bearer ${token}`},
+      method: "PUT",
+    });
+    expect(verified.ok).toBe(true);
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    try {
+      const repository = await PostgresArtifactRepository.open(
+        database,
+        identity.installationId,
+      );
+      const staged = await repository.findStagedUpload(
+        upload.projectId,
+        upload.uploadId,
+        principal.principalId,
+      );
+      if (staged === null) throw new Error("The staged upload is missing.");
+      expect(Object.fromEntries(staged.files.map((file) =>
+        [file.entry.path, file.uploadedAt !== null]
+      ))).toEqual({"index.html": true, "notes.md": false});
+      const ids = new SystemIdGenerator();
+      // The committer read the upload as ready before this point, so only the
+      // transaction's own count stands between it and a version with no bytes.
+      await expect(repository.commitVersion({
+        artifactId: artifact.id,
+        authorizedByPrincipalId: principal.authorizedByPrincipalId,
+        contentToken: ids.contentToken(),
+        createdAt: new Date().toISOString(),
+        edit: null,
+        expectedCurrentVersionId: version.id,
+        idempotencyKey: `version-readiness-race-${randomUUID()}`,
+        inputDigest: "unverified-version-input",
+        manifest: staged.manifest,
+        principalDisplayName: principal.displayName,
+        principalId: principal.principalId,
+        projectId: upload.projectId,
+        source: {
+          kind: "staged_upload",
+          principalId: principal.principalId,
+          projectId: upload.projectId,
+          uploadId: upload.uploadId,
+        },
+        versionId: ids.versionId(),
+      })).rejects.toMatchObject({_tag: "UploadIncomplete"});
+      const versions = await repository.listArtifactVersions(artifact.projectId, artifact.id);
+      expect(versions.map((saved) => saved.id)).toEqual([version.id]);
+      await expect(repository.findStagedUpload(
+        upload.projectId,
+        upload.uploadId,
+        principal.principalId,
+      )).resolves.toMatchObject({committedVersionId: null, status: "open"});
+    } finally {
+      await database.close();
+      await server.stop();
+    }
   });
 
   test("external-storage foundation: two processes racing for one artifact path admit exactly one create and both serve it", async () => {
