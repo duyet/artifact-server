@@ -821,12 +821,16 @@ export function createHttpApp(
 
   app.on(["GET", "HEAD"], ["/review", "/review/*"], async (context) => {
     // Agents hand out Review URLs; with no browser login those would end at a
-    // dead sign-in gate, so they resolve to the artifact itself.
+    // dead sign-in gate for a reader without a session, so they resolve to
+    // the artifact itself. A signed-in member stays in Review.
     if (dependencies.browserAccess.loginKind === browserLoginKinds.none) {
       const artifact = artifactIdSchema.safeParse(
         new URL(context.req.url).searchParams.get("artifact"),
       );
-      if (artifact.success) {
+      if (
+        artifact.success &&
+        await optionalSessionPrincipal(context, dependencies) === null
+      ) {
         return context.redirect(
           `/artifacts/${encodeURIComponent(artifact.data)}`,
           302,

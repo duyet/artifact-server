@@ -4162,8 +4162,8 @@ requirements:
     owner: authorization
     source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
     acceptance:
-      behavior: {id: FRK-004-B, description: "Start with no provider, read login kind none from /auth/context, publish with the API key, and follow a Review link to the artifact folder."}
-      failure: {id: FRK-004-F, description: "Browser login routes answer 404 without a redirect or cookie, and a Review link cannot choose another route."}
+      behavior: {id: FRK-004-B, description: "Start with no provider, read login kind none from /auth/context, publish with the API key, follow a Review link to the artifact folder, and open the same Review link as a member signed in with an API key and get Review."}
+      failure: {id: FRK-004-F, description: "Browser login routes answer 404 without a redirect or cookie, a Review link cannot choose another route, and a forged session cookie still redirects."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Tests are not written yet; no deployed run exists.
