@@ -1104,15 +1104,16 @@ requirements:
 
   - id: AUTH-005
     kind: behavior
-    behavior: Public links are unlisted and send X-Robots-Tag noindex, nofollow, but the product states that these are not access control and links can be redistributed.
+    behavior: Public links send X-Robots-Tag noindex, nofollow and are listed on the public home page unless tagged unlisted; the product states that neither the header nor the unlisted tag is access control.
     owner: web-application
-    source: {file: artifact-server-product-spec.html, anchor: sharing}
+    source: {file: ../../docs/fork/HOMEPAGE.md, anchor: the-tree-endpoint}
     acceptance:
-      behavior: {id: AUTH-005-B, description: "Inspect a public response and the visibility UI for the indexing header and redistribution warning."}
-      failure: {id: AUTH-005-F, description: "No product copy or authorization check treats robots directives or URL secrecy as a security boundary."}
+      behavior: {id: AUTH-005-B, description: "A public-link artifact's content responses carry X-Robots-Tag noindex, nofollow, it appears in the anonymous public tree, and the Review share dialog states that a public link can be redistributed."}
+      failure: {id: AUTH-005-F, description: "The same artifact tagged unlisted is absent from the anonymous tree but still served with the noindex header to anyone holding the link, and an account_required artifact is neither listed nor served anonymously."}
     deployments: *all
-    status: specified
+    status: implementing
     depends_on: [AUTH-003]
+    proof_gap: The test proves the noindex header, the anonymous tree listing, the unlisted tag, and anonymous denial of account-required content against a real server. It does not assert the Review share dialog's redistribution warning (apps/web/src/review/review-share.tsx), which has no web unit test or browser assertion yet, and it checks the header on the artifact entry response only, not on every asset or archive response.
     evidence: []
 
   - id: AUTH-006
