@@ -68,6 +68,10 @@ export function errorMessage(error: Error): string {
 /** Converts one action kind into compact action-history text. */
 export function actionLabel(value: ArtifactAction["action"]): string {
   switch (value) {
+    case "asset_added":
+      return "Added asset";
+    case "asset_deleted":
+      return "Deleted asset";
     case "change_access":
       return "Changed access";
     case "change_tags":

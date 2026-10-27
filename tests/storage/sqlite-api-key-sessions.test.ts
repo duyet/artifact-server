@@ -8,6 +8,7 @@ import {afterEach, beforeEach, describe, expect, test} from "vitest";
 import {principalCapabilities} from "../../src/core/identity.js";
 import type {StoredManagedApiKey} from "../../src/core/installation-identity.js";
 import {SqliteIdentityRepository} from "../../src/storage/sqlite-identity-repository.js";
+import {requiredSqliteSchemaVersion} from "../../src/storage/sqlite-schema.js";
 
 const installationId = "installation_api_key_sessions";
 const createdAt = "2026-10-01T00:00:00.000Z";
@@ -174,7 +175,7 @@ describe("SQLite API-key browser sessions", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: requiredSqliteSchemaVersion});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'api_key_sessions_key_idx'",
       ).get()).toEqual({name: "api_key_sessions_key_idx"});
