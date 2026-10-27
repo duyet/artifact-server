@@ -804,7 +804,8 @@ requirements:
       behavior: {id: CNT-001-B, description: "Open plain HTML, a multi-page site, and compiled React, Vue, and Svelte fixtures from their published entry files."}
       failure: {id: CNT-001-F, description: "No request starts a build, package installation, source transform, or artifact-specific server process."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: CNT-001-B and CNT-001-F run only locally, over HTTP against a real SQLite server, through the version link only. The React, Vue, and Svelte fixtures are hand-written in the shape of Vite and SvelteKit static builds (hashed module scripts, modulepreload, CSS, fonts, dynamic imports); they are not real compiler output. No browser runs them, so the tests prove that every entry file and every relative or root reference resolves to the stored bytes with the declared type, not that the scripts execute. CNT-001-F proves that source files, package manifests, and build configuration come back byte-identical, that build output paths answer 404, and that the data directory gains no node_modules, dist, or marker files. It does not observe child processes directly. No single_server or kubernetes run exists, and no evidence report is attached.
     depends_on: [ART-003, MAN-001]
     evidence: []
 
