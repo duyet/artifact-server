@@ -790,7 +790,8 @@ requirements:
       behavior: {id: AUD-001-B, description: "Perform every mutation, including comment creates, replies, edits, resolves, reopens, and deletes, through human and agent principals and inspect complete immutable action records."}
       failure: {id: AUD-001-F, description: "A mutation cannot commit without a valid actor and action record."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: AUD-001-B and AUD-001-F run only locally against a real SQLite server. They cover publish, new version, edit, restore, access change, tags, rename, artifact deletion, and comment create, reply, update, resolve, reopen, reply delete, and thread delete, as a signed-in human (no authorizer) and as a service key that human issued (the human as authorizer), read back through the artifact action history. AUD-001-F refuses every action insert with a SQLite trigger and proves publish, new version, edit, restore, access, tags, rename, and delete each roll back, then retries with the same keys. Comment clear and the administrator's bulk make-private are not exercised, although make-private runs the same access change. Asset uploads, copies, and deletions (FRK-019) record no action, and deleteAsset receives no principal at all. Project create, rename, and archive, agent registration and dispatch, and member and API-key changes also record no action, because the actions table requires an artifact and version. No connection-change surface exists, because this fork ships no Plannotator connection. Opening an older fork SQLite database rewrites link and capture actions to publish and deletes relink actions, so history from before that upgrade is not immutable. Postgres (single_server, kubernetes) has no run, and no evidence report is attached.
     depends_on: []
     evidence: []
 
@@ -803,7 +804,8 @@ requirements:
       behavior: {id: CNT-001-B, description: "Open plain HTML, a multi-page site, and compiled React, Vue, and Svelte fixtures from their published entry files."}
       failure: {id: CNT-001-F, description: "No request starts a build, package installation, source transform, or artifact-specific server process."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: CNT-001-B and CNT-001-F run only locally, over HTTP against a real SQLite server, through the version link only. The React, Vue, and Svelte fixtures are hand-written in the shape of Vite and SvelteKit static builds (hashed module scripts, modulepreload, CSS, fonts, dynamic imports); they are not real compiler output. No browser runs them, so the tests prove that every entry file and every relative or root reference resolves to the stored bytes with the declared type, not that the scripts execute. CNT-001-F proves that source files, package manifests, and build configuration come back byte-identical, that build output paths answer 404, and that the data directory gains no node_modules, dist, or marker files. It does not observe child processes directly. No single_server or kubernetes run exists, and no evidence report is attached.
     depends_on: [ART-003, MAN-001]
     evidence: []
 
@@ -923,7 +925,8 @@ requirements:
       behavior: {id: CNT-009-B, description: "Load a permitted external dependency from the artifact origin without changing its URL or bytes."}
       failure: {id: CNT-009-F, description: "A blocked external dependency remains blocked and is not silently proxied or copied by Artifact Server."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: CNT-009-B and CNT-009-F run only locally against a real SQLite server, with a recording loopback HTTP server as the other origin, through the version link only. They prove that the served HTML and script keep every external URL byte for byte, that the content responses carry no fetch-restricting Content-Security-Policy directive, that Artifact Server sends no request to the other origin while publishing, checking assets, or serving, that path- and query-shaped proxy attempts never return the external bytes, and that no file in the data directory holds them. No browser loads the page, so the browser's own CORS and network blocking is shown only by the other origin's response headers. No single_server or kubernetes run exists, and no evidence report is attached.
     depends_on: []
     evidence: []
 

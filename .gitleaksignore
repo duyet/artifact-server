@@ -39,3 +39,5 @@ dbc3e29a87ec7b68aba002162a7498ff0b2004ec:tests/conformance/edt-artifact-edit.tes
 2ceab338d1b2ecd1dfc1cfd4c468d8c293775de6:tests/conformance/frk-010-artifact-owner.test.ts:generic-api-key:107
 2ceab338d1b2ecd1dfc1cfd4c468d8c293775de6:tests/conformance/frk-010-artifact-owner.test.ts:generic-api-key:179
 ba062a4ab348f2eac269e70df0d1002f7ac3877b:tests/conformance/frk-011-analytics.test.ts:generic-api-key:109
+e4a4ee50db7cb61a120d62f6ac70a9db6fd1fbc5:tests/conformance/aud-001-action-attribution.test.ts:generic-api-key:241
+e4a4ee50db7cb61a120d62f6ac70a9db6fd1fbc5:tests/conformance/aud-001-action-attribution.test.ts:generic-api-key:251
