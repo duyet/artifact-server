@@ -34,12 +34,17 @@ function HomeShell() {
         const loaded = await readPublicCatalog();
         if (!cancelled) setCatalog(loaded);
       } catch (cause) {
-        if (!cancelled) {
-          setFailure(
-            cause instanceof Error
-              ? cause.message
-              : "The public catalog could not be read.",
-          );
+        if (cancelled) return;
+        const message = cause instanceof Error
+          ? cause.message
+          : "The public catalog could not be read.";
+        // Only the first read has no tree to fall back on. A reread follows a
+        // row-menu change, so its toaster is mounted and the tree stays.
+        if (revision === 0) {
+          setFailure(message);
+        } else {
+          const {toast} = await import("sonner");
+          toast.error("The catalog could not be refreshed.", {description: message});
         }
       }
     };
