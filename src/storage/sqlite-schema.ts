@@ -51,3 +51,16 @@ export function readSqliteMigrationStatus(
     database.close();
   }
 }
+
+/** Refuse, before any schema change, a database written by a newer build. */
+export function refuseNewerSqliteSchema(database: DatabaseSync): void {
+  const currentVersion = userVersionRowSchema.parse(
+    database.prepare("PRAGMA user_version").get(),
+  ).user_version;
+  if (currentVersion <= requiredSqliteSchemaVersion) return;
+  database.close();
+  throw new Error(
+    `SQLite schema ${currentVersion} is newer; ` +
+      `this build requires schema ${requiredSqliteSchemaVersion}.`,
+  );
+}

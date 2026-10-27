@@ -767,10 +767,10 @@ requirements:
     source: {file: phase-10-cli-auth-and-remote-publishing.md, anchor: publication-path}
     acceptance:
       behavior: {id: CLI-003-B, description: "Commit a publication, lose the response, restart the CLI process, retry the same command, receive the replayed original result, and observe exactly one artifact and version."}
-      failure: {id: CLI-003-F, description: "A changed input or target, corrupt pending record, concurrent operation, or different server cannot reuse or replace a pending identity and cannot create a duplicate while the earlier result is unresolved."}
+      failure: {id: CLI-003-F, description: "A changed input or target, corrupt pending record, concurrent operation, or different server cannot reuse or replace a pending identity and cannot create a duplicate while the earlier result is unresolved. A server refusal of the input itself (HTTP 413 or 422) resolves a fresh attempt, or a resumed attempt refused at commit, so an edited input publishes under a new identity; an upload-stage refusal of a resumed attempt keeps its identity."}
     deployments: *all
     status: behavior_verified
-    proof_gap: Local real-process and real-HTTP proof covers a dropped commit response, restart recovery, changed-input refusal, and duplicate prevention. Equivalent recovery evidence is not yet attached for every team deployment.
+    proof_gap: Local real-process and real-HTTP proof covers a dropped commit response, restart recovery, changed-input refusal, duplicate prevention, release of a fresh pending identity after a 422 input refusal, and retention of a resumed identity after an upload-stage 422. A resumed attempt refused at commit is not exercised. Equivalent recovery evidence is not yet attached for every team deployment.
     depends_on: [CLI-002, PUB-006, PUB-008]
     evidence:
       - deployment: local
@@ -3481,7 +3481,7 @@ requirements:
 
   - id: OPS-004
     kind: behavior
-    behavior: An integrity check verifies every committed manifest and referenced blob without changing stored records or bytes.
+    behavior: An integrity check verifies every committed manifest, every referenced blob, and the blob behind every live asset without changing stored records or bytes.
     owner: operations
     source: {file: artifact-server-product-spec.html, anchor: implementation}
     acceptance:
@@ -3489,7 +3489,7 @@ requirements:
       failure: {id: OPS-004-F, description: "Detect missing blobs, digest mismatches, invalid paths, orphaned current pointers, and cross-installation references without repairing them silently."}
     deployments: *all
     status: implementing
-    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached. Foundation tests in the compact lifecycle CLI suite and the external-storage suite detect a missing manifest blob and a missing asset blob, but they are not attached under these IDs.
     depends_on: [MAN-001, MAN-006]
     evidence: []
 

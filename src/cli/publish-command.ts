@@ -115,7 +115,12 @@ export function configurePublishCommand(
         operation.idempotencyKey,
         prepared,
       );
-      if (!outcome.success) throw cliPublicationError(outcome.error);
+      if (!outcome.success) {
+        if (releasesPendingOperation(outcome.error, operation.resumed)) {
+          await operation.complete();
+        }
+        throw cliPublicationError(outcome.error);
+      }
       console.log(JSON.stringify(outcome.result, null, 2));
       await operation.complete();
     });
@@ -236,6 +241,22 @@ function withEntryPath(
 ): FilePublicationIntent {
   if (entryPath === undefined) return command;
   return {...command, entryPath};
+}
+
+/**
+ * A 413 or 422 means the server refused this input, so the pending key must
+ * not hold back a corrected input. A resumed key is released only when the
+ * commit itself was refused: the server checks the key before the input
+ * there, and an earlier attempt under it may have committed before an
+ * upload-stage refusal. Every other failure keeps the key for replay.
+ */
+function releasesPendingOperation(
+  error: FilePublicationFailure,
+  resumed: boolean,
+): boolean {
+  if (error._tag !== "FilePublicationProtocolError") return false;
+  if (error.status !== 413 && error.status !== 422) return false;
+  return !resumed || error.operation === "commit_upload";
 }
 
 function cliPublicationError(error: FilePublicationFailure): Error {

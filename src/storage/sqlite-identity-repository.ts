@@ -20,7 +20,7 @@ import {
   principalCapabilities,
   principalKinds,
 } from "../core/identity.js";
-import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
+import {refuseNewerSqliteSchema, requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import type {
   AdmitMemberRecord,
   BootstrapManagedApiKeyRepository,
@@ -121,6 +121,7 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
       timeout: 5_000,
     });
     this.#database.enableDefensive(true);
+    refuseNewerSqliteSchema(this.#database);
     this.#database.exec("PRAGMA journal_mode = WAL;");
     this.#database.exec("PRAGMA synchronous = FULL;");
     this.#migrate();

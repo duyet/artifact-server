@@ -1903,7 +1903,9 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       apiToken: managedTestKey("integrity-runtime"),
       installationId: `external-integrity-${randomUUID()}`,
     };
-    const server = await startInProcessExternalStorageServer(environment, identity);
+    const server = await startInProcessExternalStorageServer(environment, identity, {
+      contentDomain: null,
+    });
     const published = await publishNew(server.baseUrl, identity.apiToken, {
       content: "external integrity proof",
       idempotencyKey: `external-integrity-${randomUUID()}`,
@@ -1911,6 +1913,18 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       routingMode: "spa",
     });
     expect(published.response.status).toBe(201);
+    const assetBytes = new TextEncoder().encode("external integrity asset\n");
+    const planned = await planAsset(server, identity.apiToken, published.body.artifact.id, {
+      bytes: assetBytes,
+      mediaType: "text/markdown",
+      name: "notes.md",
+    });
+    expect(planned.status).toBe(201);
+    const plan = assetPlanSchema.parse(await planned.json());
+    expect((await putAssetBytes(plan.file.uploadUrl, identity.apiToken, assetBytes)).status)
+      .toBe(200);
+    expect((await commitAsset(plan, identity.apiToken, `external-integrity-asset-${randomUUID()}`))
+      .status).toBe(201);
     await server.stop();
 
     const configuration = {
@@ -1928,7 +1942,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const healthy = await checkExternalStorageIntegrity(configuration);
     expect(healthy).toMatchObject({
       artifactsChecked: 1,
-      blobsChecked: 1,
+      blobsChecked: 2,
       problems: [],
       status: "healthy",
       versionsChecked: 1,
@@ -1937,6 +1951,17 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const namespace = createHash("sha256")
       .update(identity.installationId)
       .digest("hex");
+    const assetDigest = sha256(assetBytes);
+    await s3Client.send(new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: `installations/${namespace}/blobs/${assetDigest.slice(0, 2)}/${assetDigest}`,
+    }));
+    const missingAsset = await checkExternalStorageIntegrity(configuration);
+    expect(missingAsset).toMatchObject({
+      problems: [{artifactId: published.body.artifact.id, code: "blob_missing"}],
+      status: "corrupt",
+    });
+
     const listed = await s3Client.send(new ListObjectsV2Command({
       Bucket: bucket,
       Prefix: `installations/${namespace}/blobs/`,
@@ -1947,7 +1972,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
 
     const corrupt = await checkExternalStorageIntegrity(configuration);
     expect(corrupt).toMatchObject({
-      problems: [{code: "blob_missing"}],
+      problems: [{code: "blob_missing"}, {code: "blob_missing"}],
       status: "corrupt",
     });
   });

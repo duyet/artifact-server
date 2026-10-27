@@ -154,7 +154,7 @@ import {
   registeredAgentRetentionMilliseconds,
 } from "../core/publishing-limits.js";
 import { createManifest } from "../manifest/create-manifest.js";
-import {requiredSqliteSchemaVersion} from "./sqlite-schema.js";
+import {refuseNewerSqliteSchema, requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
 import {
   artifactOwnerColumns,
@@ -539,6 +539,7 @@ export class SqliteArtifactRepository implements
       timeout: 5_000,
     });
     this.#database.enableDefensive(true);
+    refuseNewerSqliteSchema(this.#database);
     this.#database.exec("PRAGMA journal_mode = WAL;");
     this.#database.exec("PRAGMA synchronous = FULL;");
     this.#migrate(installationId);

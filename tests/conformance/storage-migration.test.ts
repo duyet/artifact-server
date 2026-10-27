@@ -9,6 +9,9 @@ import {z} from "zod";
 import {publishNew, publishVersion} from "../support/publishing.js";
 import {createManifest} from "../../src/manifest/create-manifest.js";
 import {defaultProjectId} from "../../src/core/model.js";
+import {SqliteArtifactRepository} from "../../src/storage/sqlite-artifact-repository.js";
+import {SqliteIdentityRepository} from "../../src/storage/sqlite-identity-repository.js";
+import {requiredSqliteSchemaVersion} from "../../src/storage/sqlite-schema.js";
 import {
   apiHeaders,
   createTestInstallation,
@@ -606,5 +609,29 @@ describe("local storage migration", () => {
       replayed: false,
       retainedVersionCount: 1,
     });
+  });
+
+  test("foundation: a database written by a newer build is refused without changing it", () => {
+    const databasePath = path.join(installation.dataDirectory, "artifact-server.db");
+    const newerVersion = requiredSqliteSchemaVersion + 1;
+    const newer = new DatabaseSync(databasePath);
+    newer.exec(`PRAGMA user_version = ${newerVersion};`);
+    newer.close();
+
+    expect(() => new SqliteArtifactRepository(databasePath)).toThrow(
+      `SQLite schema ${newerVersion} is newer; this build requires schema ${requiredSqliteSchemaVersion}.`,
+    );
+    expect(() => new SqliteIdentityRepository(databasePath)).toThrow(
+      `SQLite schema ${newerVersion} is newer; this build requires schema ${requiredSqliteSchemaVersion}.`,
+    );
+
+    const inspected = new DatabaseSync(databasePath, {readOnly: true});
+    try {
+      expect(inspected.prepare("PRAGMA user_version").get()).toEqual({user_version: newerVersion});
+      expect(inspected.prepare("SELECT count(*) AS count FROM sqlite_master").get()).toEqual({count: 0});
+      expect(inspected.prepare("PRAGMA journal_mode").get()).toEqual({journal_mode: "delete"});
+    } finally {
+      inspected.close();
+    }
   });
 });
