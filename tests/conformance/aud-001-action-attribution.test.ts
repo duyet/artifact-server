@@ -238,7 +238,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
 
     const unauthenticated = new Headers({
       "Content-Type": "application/json",
-      "Idempotency-Key": "aud-001-anonymous-tags",
+      "Idempotency-Key": "audit-anonymous-tags-attempt",
     });
     const anonymous = await fetch(`${server.baseUrl}${scoped(published, "/tags")}`, {
       body: JSON.stringify({expectedCurrentVersionId: second.version.id, tags: ["x"]}),
@@ -248,7 +248,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     expect(anonymous.status).toBe(401);
     await anonymous.arrayBuffer();
     unauthenticated.set("Authorization", "Bearer as_key_forged_not-a-real-secret");
-    unauthenticated.set("Idempotency-Key", "aud-001-forged-tags");
+    unauthenticated.set("Idempotency-Key", "audit-forged-tags-attempt");
     const forged = await fetch(`${server.baseUrl}${scoped(published, "/tags")}`, {
       body: JSON.stringify({expectedCurrentVersionId: second.version.id, tags: ["x"]}),
       headers: unauthenticated,
