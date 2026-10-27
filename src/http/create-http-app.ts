@@ -812,6 +812,9 @@ export function createHttpApp(
       "static-asset",
     ));
 
+  app.on(["GET", "HEAD"], "/favicon.svg", (context) =>
+    serveWebAsset(context, dependencies, "/favicon.svg", "favicon"));
+
   app.on(
     ["GET", "HEAD"],
     "/review-frame",
@@ -4561,7 +4564,16 @@ function reviewFrameContentSecurityPolicy(
   ].join("; ");
 }
 
-type WebAssetKind = "application-shell" | "review-frame" | "static-asset";
+type WebAssetKind = "application-shell" | "favicon" | "review-frame" | "static-asset";
+
+// Hashed assets never change under one name. The favicon's name carries no
+// hash, so a changed icon must reach a returning browser within a day.
+const webAssetCacheControl = {
+  "application-shell": "no-cache, must-revalidate",
+  favicon: "public, max-age=86400",
+  "review-frame": "no-cache, must-revalidate",
+  "static-asset": "public, max-age=31536000, immutable",
+} as const satisfies Record<WebAssetKind, string>;
 
 async function serveWebAsset(
   context: Context<HttpEnvironment>,
@@ -4585,15 +4597,15 @@ async function webAssetResponse(
   const asset = await dependencies.webAssets.fetch(assetPath, method);
   if (asset === null || !asset.ok) return null;
   const headers = new Headers({
-    "Cache-Control": kind === "static-asset"
-      ? "public, max-age=31536000, immutable"
-      : "no-cache, must-revalidate",
+    "Cache-Control": webAssetCacheControl[kind],
     "Content-Security-Policy": kind === "review-frame"
       ? reviewFrameContentSecurityPolicy(
         dependencies.contentDomain,
         responseApplicationUrl(context, dependencies).origin,
       )
-      : applicationShellContentSecurityPolicy(dependencies.logo),
+      : kind === "favicon"
+        ? viewerLogoContentSecurityPolicy
+        : applicationShellContentSecurityPolicy(dependencies.logo),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
   });

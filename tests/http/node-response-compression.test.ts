@@ -31,6 +31,7 @@ const shellFixture = `<!doctype html><title>Shell</title>${
   "<p>compressible shell padding</p>".repeat(64)
 }`;
 const binaryFixture = new Uint8Array(2048).map((_, index) => index % 251);
+const faviconFixture = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"></svg>";
 
 const versionDetailsSchema = z.object({
   manifest: z.object({
@@ -68,6 +69,7 @@ describe("Node server response compression and asset caching", () => {
       path.join(webAssetsRoot, "assets", "logo.png"),
       binaryFixture,
     );
+    await writeFile(path.join(webAssetsRoot, "favicon.svg"), faviconFixture);
     server = await startTestServer(installation, {webAssetsRoot});
   });
 
@@ -165,6 +167,19 @@ describe("Node server response compression and asset caching", () => {
     expect(shell.headers.get("cache-control")).toBe("no-cache, must-revalidate");
     expect(shell.headers.get("vary")).toContain("Accept-Encoding");
     expect(gunzipSync(shell.body).toString("utf8")).toBe(shellFixture);
+  });
+
+  test("foundation: the favicon every page links is served and revalidated, not cached forever", async () => {
+    const favicon = await rawRequest(server, "/favicon.svg", {});
+    expect(favicon.status).toBe(200);
+    expect(favicon.headers.get("content-type")).toBe("image/svg+xml");
+    expect(favicon.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect(favicon.body.toString("utf8")).toBe(faviconFixture);
+
+    const revalidated = await rawRequest(server, "/favicon.svg", {
+      "If-None-Match": favicon.headers.get("etag") ?? "",
+    });
+    expect(revalidated.status).toBe(304);
   });
 
   test("foundation: small and binary responses stay identity-encoded", async () => {
