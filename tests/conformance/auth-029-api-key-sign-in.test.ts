@@ -10,6 +10,7 @@ import {
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
 import {principalCapabilities} from "../../src/core/identity.js";
+import {installationOperatorActor} from "../../src/core/installation-identity.js";
 import type {Clock} from "../../src/core/ports.js";
 import {SqliteIdentityRepository} from "../../src/storage/sqlite-identity-repository.js";
 import {
@@ -123,6 +124,7 @@ async function seedAdministratorSession(
   const csrf = "administrator-csrf-token-for-api-key-revocation-test";
   try {
     const member = await repository.admitMember({
+      actor: installationOperatorActor,
       createdAt: clock.now().toISOString(),
       displayName: "Administrator",
       email: "administrator@example.test",

@@ -839,6 +839,32 @@ const addAssetActions = Effect.gen(function*() {
       ))`);
 });
 
+// Project, member, and API-key changes have no artifact or version, so they
+// get their own history. A once-only change carries an action key; a
+// repeatable project change carries none.
+const addInstallationActions = Effect.gen(function*() {
+  const sql = yield* SqlClient;
+  yield* sql.unsafe(`CREATE TABLE installation_actions (
+    installation_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN (
+      'project_created', 'project_renamed', 'project_archived',
+      'project_unarchived', 'member_admitted', 'member_deactivated',
+      'api_key_issued', 'api_key_revoked'
+    )),
+    subject_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    principal_display_name TEXT NOT NULL,
+    authorized_by_principal_id TEXT,
+    action_key TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (installation_id, id),
+    UNIQUE (installation_id, action_key)
+  )`);
+  yield* sql.unsafe(`CREATE INDEX installation_actions_created
+    ON installation_actions (installation_id, created_at DESC, id DESC)`);
+});
+
 const migrationLoader = Migrator.fromRecord({
   "0001_initial_shared_schema": initialSchema,
   "0002_project_scoped_artifacts": addProjectScope,
@@ -861,10 +887,11 @@ const migrationLoader = Migrator.fromRecord({
   "0019_assets": addAssets,
   "0020_collapsed_folders": addCollapsedFolders,
   "0021_asset_actions": addAssetActions,
+  "0022_installation_actions": addInstallationActions,
 });
 
 /** Schema revision required by this Artifact Server build. */
-export const requiredPostgresSchemaVersion = 21;
+export const requiredPostgresSchemaVersion = 22;
 
 /** Migration compatibility observed without changing Postgres. */
 export interface PostgresMigrationStatus {
@@ -982,6 +1009,9 @@ export const readPostgresMigrationStatus = Effect.gen(function*() {
   }, {
     migration_id: 21,
     name: "asset_actions",
+  }, {
+    migration_id: 22,
+    name: "installation_actions",
   }] as const;
   const observedRequiredHistory = rows.filter(
     (row) => row.migration_id <= requiredPostgresSchemaVersion,

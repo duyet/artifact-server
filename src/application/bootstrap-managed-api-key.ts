@@ -5,6 +5,7 @@ import {Redacted} from "effect";
 import type {BootstrapManagedApiKeyRepository} from
   "../core/identity-ports.js";
 import {
+  installationOperatorActor,
   managedApiKeyCredentialPattern,
   type StoredManagedApiKey,
 } from "../core/installation-identity.js";
@@ -54,7 +55,10 @@ export async function ensureBootstrapManagedApiKey(input: {
     rotatedFromId: null,
     secretDigest,
   };
-  const persisted = await input.repository.initializeBootstrapApiKey(stored);
+  const persisted = await input.repository.initializeBootstrapApiKey(
+    stored,
+    installationOperatorActor,
+  );
   assertMatchingBootstrapKey(persisted, secretDigest);
 }
 

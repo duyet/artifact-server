@@ -51,8 +51,36 @@ const replyCreationSchema = z.object({
   reply: z.object({id: z.string()}).loose(),
 }).loose();
 const issuedKeySchema = z.object({
-  apiKey: z.object({principalId: z.string()}).loose(),
+  apiKey: z.object({id: z.string(), principalId: z.string()}).loose(),
   token: z.string().startsWith("as_key_"),
+}).loose();
+type IssuedKey = z.infer<typeof issuedKeySchema>;
+const installationActionSchema = z.object({
+  authorizedByPrincipalId: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  id: z.string(),
+  kind: z.string(),
+  principalDisplayName: z.string(),
+  principalId: z.string(),
+  subjectId: z.string(),
+}).strict();
+type InstallationAction = z.infer<typeof installationActionSchema>;
+const installationActionPageSchema = z.object({
+  actions: z.array(installationActionSchema),
+  nextCursor: z.string().nullable(),
+}).strict();
+const projectRecordSchema = z.object({
+  archivedAt: z.string().nullable(),
+  id: z.string(),
+  name: z.string(),
+}).loose();
+const projectSchema = z.object({project: projectRecordSchema}).loose();
+const projectListSchema = z.object({projects: z.array(projectRecordSchema)}).loose();
+const memberRecordSchema = z.object({id: z.string(), status: z.string()}).loose();
+const memberSchema = z.object({member: memberRecordSchema}).loose();
+const memberListSchema = z.object({members: z.array(memberRecordSchema)}).loose();
+const apiKeyListSchema = z.object({
+  apiKeys: z.array(z.object({id: z.string(), revokedAt: z.string().nullable()}).loose()),
 }).loose();
 const assetPlanSchema = z.object({
   commitUrl: z.url(),
@@ -104,6 +132,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
   let server: RunningTestServer;
   let human: Actor;
   let agent: Actor;
+  let agentKey: IssuedKey;
 
   beforeEach(async () => {
     installation = await createTestInstallation();
@@ -145,6 +174,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     });
     if (issued.status !== 201) throw new Error(`Issuing the agent key answered ${issued.status}.`);
     const key = issuedKeySchema.parse(await issued.json());
+    agentKey = key;
     agent = {
       authorizedByPrincipalId: humanId,
       headers: (idempotencyKey?: string) => {
@@ -235,6 +265,110 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
       }),
     ]);
     expect(agentThread.thread.id.length).toBeGreaterThan(0);
+
+    // Signing in admitted the local administrator, who then issued the agent key.
+    const signInActions = await readInstallationActions();
+    expect(summarizeActions(signInActions)).toEqual(sortedSummaries([
+      {
+        authorizedByPrincipalId: null,
+        kind: "member_admitted",
+        principalDisplayName: "Local administrator",
+        principalId: human.principalId,
+        subjectId: human.principalId,
+      },
+      {
+        authorizedByPrincipalId: null,
+        kind: "api_key_issued",
+        principalDisplayName: "Local administrator",
+        principalId: human.principalId,
+        subjectId: agentKey.apiKey.id,
+      },
+    ]));
+
+    const stewardKey = await issueKey(["project:manage"], "Project steward");
+    const steward = bearerActor(stewardKey, human.principalId);
+    const project = (await expectJson(
+      await send(human, "POST", "/api/v1/projects", {body: {name: "Audited project"}}),
+      201,
+      projectSchema,
+    )).project;
+    await expectJson(await send(steward, "PATCH", `/api/v1/projects/${project.id}`, {
+      body: {name: "Audited project, renamed"},
+    }), 200, projectSchema);
+    await expectJson(
+      await send(human, "POST", `/api/v1/projects/${project.id}/archive`),
+      200,
+      projectSchema,
+    );
+    await expectJson(
+      await send(steward, "POST", `/api/v1/projects/${project.id}/unarchive`),
+      200,
+      projectSchema,
+    );
+    const member = (await expectJson(await send(human, "POST", "/api/v1/members", {
+      body: {displayName: "Audited member", email: auditedMemberEmail},
+    }), 201, memberSchema)).member;
+    await expectJson(
+      await send(human, "POST", `/api/v1/members/${member.id}/deactivate`),
+      200,
+      memberSchema,
+    );
+    const rotatedKey = await issueKey(["artifact:read"], "Rotated reader");
+    const replacementKey = await expectJson(
+      await send(human, "POST", `/api/v1/api-keys/${rotatedKey.apiKey.id}/rotate`),
+      201,
+      issuedKeySchema,
+    );
+    await expectJson(
+      await send(human, "POST", `/api/v1/api-keys/${replacementKey.apiKey.id}/revoke`),
+      200,
+      anyJson,
+    );
+
+    const response = await send(human, "GET", "/api/v1/administration/actions?limit=100");
+    const body: unknown = await response.json();
+    expect(response.status).toBe(200);
+    const recorded = installationActionPageSchema.parse(body).actions;
+    const serialized = JSON.stringify(body);
+    for (const secret of [
+      agentKey.token,
+      stewardKey.token,
+      rotatedKey.token,
+      replacementKey.token,
+      auditedMemberEmail,
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+    const createdTimes = recorded.map((action) => action.createdAt);
+    expect(createdTimes).toEqual(createdTimes.toSorted().toReversed());
+    const byHuman = (kind: string, subjectId: string) => ({
+      authorizedByPrincipalId: null,
+      kind,
+      principalDisplayName: "Local administrator",
+      principalId: human.principalId,
+      subjectId,
+    });
+    const bySteward = (kind: string, subjectId: string) => ({
+      authorizedByPrincipalId: human.principalId,
+      kind,
+      principalDisplayName: "Project steward",
+      principalId: steward.principalId,
+      subjectId,
+    });
+    expect(summarizeActions(recorded)).toEqual(sortedSummaries([
+      ...summarizeActions(signInActions),
+      byHuman("api_key_issued", stewardKey.apiKey.id),
+      byHuman("project_created", project.id),
+      bySteward("project_renamed", project.id),
+      byHuman("project_archived", project.id),
+      bySteward("project_unarchived", project.id),
+      byHuman("member_admitted", member.id),
+      byHuman("member_deactivated", member.id),
+      byHuman("api_key_issued", rotatedKey.apiKey.id),
+      byHuman("api_key_revoked", rotatedKey.apiKey.id),
+      byHuman("api_key_issued", replacementKey.apiKey.id),
+      byHuman("api_key_revoked", replacementKey.apiKey.id),
+    ]));
   });
 
   test("AUD-001-F: a mutation cannot commit without a valid actor and its action record", async () => {
@@ -400,7 +534,137 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
         versionId: first,
       }),
     ]);
+
+    const denied = await send(agent, "GET", "/api/v1/administration/actions");
+    expect(denied.status).toBe(403);
+    await denied.arrayBuffer();
+
+    const project = (await expectJson(
+      await send(human, "POST", "/api/v1/projects", {body: {name: "Kept project"}}),
+      201,
+      projectSchema,
+    )).project;
+    const archived = (await expectJson(
+      await send(human, "POST", "/api/v1/projects", {body: {name: "Archived project"}}),
+      201,
+      projectSchema,
+    )).project;
+    await expectJson(
+      await send(human, "POST", `/api/v1/projects/${archived.id}/archive`),
+      200,
+      projectSchema,
+    );
+    const member = (await expectJson(await send(human, "POST", "/api/v1/members", {
+      body: {displayName: "Kept member", email: auditedMemberEmail},
+    }), 201, memberSchema)).member;
+    const keptKey = await issueKey(["artifact:read"], "Kept reader");
+    const keptReader = bearerActor(keptKey, human.principalId);
+    const installationBaseline = {
+      actions: await readInstallationActions(),
+      keys: await readList("/api/v1/api-keys", apiKeyListSchema),
+      members: await readList("/api/v1/members", memberListSchema),
+      projects: await readList("/api/v1/projects", projectListSchema),
+    };
+
+    refuseInstallationActionRecords();
+    const installationRefusals: readonly (readonly [string, () => Promise<Response>])[] = [
+      ["project create", () => send(human, "POST", "/api/v1/projects", {
+        body: {name: "Never created"},
+      })],
+      ["project rename", () => send(human, "PATCH", `/api/v1/projects/${project.id}`, {
+        body: {name: "Never renamed"},
+      })],
+      ["project archive", () => send(human, "POST", `/api/v1/projects/${project.id}/archive`)],
+      ["project unarchive", () =>
+        send(human, "POST", `/api/v1/projects/${archived.id}/unarchive`)],
+      ["member admit", () => send(human, "POST", "/api/v1/members", {
+        body: {displayName: "Never admitted", email: "never-admitted@example.test"},
+      })],
+      ["member deactivate", () =>
+        send(human, "POST", `/api/v1/members/${member.id}/deactivate`)],
+      ["key issue", () => send(human, "POST", "/api/v1/api-keys", {
+        body: {
+          capabilities: ["artifact:read"],
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          name: "Never issued",
+        },
+      })],
+      ["key revoke", () => send(human, "POST", `/api/v1/api-keys/${keptKey.apiKey.id}/revoke`)],
+      ["key rotate", () => send(human, "POST", `/api/v1/api-keys/${keptKey.apiKey.id}/rotate`)],
+    ];
+    for (const [label, attempt] of installationRefusals) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await attempt();
+      expect({label, status: response.status}).toEqual({label, status: 500});
+      // eslint-disable-next-line no-await-in-loop
+      await response.arrayBuffer();
+    }
+    expect({
+      actions: await readInstallationActions(),
+      keys: await readList("/api/v1/api-keys", apiKeyListSchema),
+      members: await readList("/api/v1/members", memberListSchema),
+      projects: await readList("/api/v1/projects", projectListSchema),
+    }).toEqual(installationBaseline);
+    const stillValid = await send(keptReader, "GET", "/api/v1/projects");
+    expect(stillValid.status).toBe(200);
+    await stillValid.arrayBuffer();
+
+    acceptInstallationActionRecords();
+    const readmitted = await send(human, "POST", "/api/v1/members", {
+      body: {displayName: "Kept member", email: auditedMemberEmail},
+    });
+    expect(readmitted.status).toBe(409);
+    await readmitted.arrayBuffer();
+    // Each change runs twice in a row; only the first is recorded.
+    for (const routePath of [
+      `/api/v1/projects/${archived.id}/archive`,
+      `/api/v1/projects/${archived.id}/archive`,
+      `/api/v1/members/${member.id}/deactivate`,
+      `/api/v1/members/${member.id}/deactivate`,
+      `/api/v1/api-keys/${keptKey.apiKey.id}/revoke`,
+      `/api/v1/api-keys/${keptKey.apiKey.id}/revoke`,
+    ]) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await send(human, "POST", routePath);
+      expect({routePath, status: response.status}).toEqual({routePath, status: 200});
+      // eslint-disable-next-line no-await-in-loop
+      await response.arrayBuffer();
+    }
+    const afterReplays = await readInstallationActions();
+    expect(afterReplays.slice(afterReplays.length - installationBaseline.actions.length))
+      .toEqual(installationBaseline.actions);
+    expect(summarizeActions(afterReplays.slice(
+      0,
+      afterReplays.length - installationBaseline.actions.length,
+    ))).toEqual(sortedSummaries([
+      {kind: "member_deactivated", subjectId: member.id},
+      {kind: "api_key_revoked", subjectId: keptKey.apiKey.id},
+    ].map(({kind, subjectId}) => ({
+      authorizedByPrincipalId: null,
+      kind,
+      principalDisplayName: "Local administrator",
+      principalId: human.principalId,
+      subjectId,
+    }))));
   });
+
+  async function readInstallationActions(): Promise<readonly InstallationAction[]> {
+    const response = await send(human, "GET", "/api/v1/administration/actions?limit=100");
+    return (await expectJson(response, 200, installationActionPageSchema)).actions;
+  }
+
+  async function readList<T>(routePath: string, schema: z.ZodType<T>): Promise<T> {
+    return expectJson(await send(human, "GET", routePath), 200, schema);
+  }
+
+  async function issueKey(
+    capabilities: readonly string[],
+    name: string,
+  ): Promise<IssuedKey> {
+    return expectJson(await send(human, "POST", "/api/v1/api-keys", {
+      body: {capabilities, expiresAt: "2099-01-01T00:00:00.000Z", name},
+    }), 201, issuedKeySchema);
+  }
 
   async function performEveryMutation(
     actor: Actor,
@@ -636,6 +900,24 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     });
   }
 
+  function refuseInstallationActionRecords(): void {
+    withInstallationDatabase((database) => {
+      database.exec(
+        `CREATE TRIGGER installation_action_outage
+         BEFORE INSERT ON installation_actions
+         BEGIN
+           SELECT RAISE(ABORT, 'the installation action history refused the write');
+         END;`,
+      );
+    });
+  }
+
+  function acceptInstallationActionRecords(): void {
+    withInstallationDatabase((database) => {
+      database.exec("DROP TRIGGER installation_action_outage;");
+    });
+  }
+
   function acceptActionRecords(): void {
     withInstallationDatabase((database) => {
       database.exec("DROP TRIGGER action_ledger_outage;");
@@ -686,6 +968,43 @@ type PublishTarget =
     readonly kind: "edit";
     readonly path: string;
   };
+
+const auditedMemberEmail = "audited-member@example.test";
+
+function bearerActor(key: IssuedKey, authorizedByPrincipalId: string): Actor {
+  return {
+    authorizedByPrincipalId,
+    headers: (idempotencyKey?: string) => {
+      const headers = new Headers({
+        Authorization: `Bearer ${key.token}`,
+        "Content-Type": "application/json",
+      });
+      if (idempotencyKey !== undefined) headers.set("Idempotency-Key", idempotencyKey);
+      return headers;
+    },
+    principalId: key.apiKey.principalId,
+  };
+}
+
+type ActionSummary = Omit<InstallationAction, "createdAt" | "id">;
+
+function summarizeActions(actions: readonly ActionSummary[]): readonly ActionSummary[] {
+  return sortedSummaries(actions.map((action) => ({
+    authorizedByPrincipalId: action.authorizedByPrincipalId,
+    kind: action.kind,
+    principalDisplayName: action.principalDisplayName,
+    principalId: action.principalId,
+    subjectId: action.subjectId,
+  })));
+}
+
+// Actions written in the same millisecond have no defined order, so
+// comparisons sort by what each action changed.
+function sortedSummaries(actions: readonly ActionSummary[]): readonly ActionSummary[] {
+  return actions.toSorted((left, right) =>
+    `${left.kind}:${left.subjectId}`.localeCompare(`${right.kind}:${right.subjectId}`)
+  );
+}
 
 function commitAssetUpload(
   actor: Actor,

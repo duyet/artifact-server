@@ -20,11 +20,22 @@ import {
   principalCapabilities,
   principalKinds,
 } from "../core/identity.js";
+import {
+  type InstallationActionPage,
+  installationActionKinds,
+  type InstallationActor,
+} from "../core/model.js";
+import {
+  createSqliteInstallationActions,
+  insertSqliteInstallationAction,
+  listSqliteInstallationActions,
+} from "./sqlite-installation-actions.js";
 import {refuseNewerSqliteSchema, requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import type {
   AdmitMemberRecord,
   BootstrapManagedApiKeyRepository,
   CreateApplicationSessionRecord,
+  ListInstallationActions,
 } from "../core/identity-ports.js";
 
 const membershipRoleSchema = z.enum([
@@ -141,33 +152,41 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
   }
 
   async admitMember(command: AdmitMemberRecord): Promise<InstallationMember> {
-    try {
-      this.#database.prepare(`
-        INSERT INTO installation_members (
-          id, installation_id, email, display_name, role, status,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        command.id,
-        command.installationId,
-        command.email,
-        command.displayName,
-        command.role,
-        memberStatuses.active,
-        command.createdAt,
-        command.createdAt,
-      );
-    } catch (cause) {
-      if (isSqliteConstraint(cause)) {
-        throw new IdentityConflict({
-          message: "That email is already admitted to this installation.",
-        });
+    return this.#transaction(() => {
+      try {
+        this.#database.prepare(`
+          INSERT INTO installation_members (
+            id, installation_id, email, display_name, role, status,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          command.id,
+          command.installationId,
+          command.email,
+          command.displayName,
+          command.role,
+          memberStatuses.active,
+          command.createdAt,
+          command.createdAt,
+        );
+      } catch (cause) {
+        if (isSqliteConstraint(cause)) {
+          throw new IdentityConflict({
+            message: "That email is already admitted to this installation.",
+          });
+        }
+        throw cause;
       }
-      throw cause;
-    }
-    const member = await this.findMember(command.installationId, command.id);
-    if (member === null) throw new Error("The admitted member was not persisted.");
-    return member;
+      insertSqliteInstallationAction(this.#database, command.installationId, {
+        actor: command.actor,
+        createdAt: command.createdAt,
+        kind: installationActionKinds.memberAdmitted,
+        subjectId: command.id,
+      });
+      const member = this.#findMember(command.installationId, command.id);
+      if (member === null) throw new Error("The admitted member was not persisted.");
+      return member;
+    });
   }
 
   async listMembers(installationId: string): Promise<readonly InstallationMember[]> {
@@ -239,9 +258,9 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     installationId: string,
     memberId: string,
     updatedAt: string,
+    actor: InstallationActor,
   ): Promise<InstallationMember> {
-    this.#database.exec("BEGIN IMMEDIATE;");
-    try {
+    return this.#transaction(() => {
       const existing = this.#findMember(installationId, memberId);
       if (existing === null) {
         throw new IdentityNotFound({message: "The member does not exist."});
@@ -283,12 +302,14 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         WHERE
           installation_id = ? AND principal_kind = ? AND principal_id = ?
       `).run(updatedAt, installationId, principalKinds.human, memberId);
-      this.#database.exec("COMMIT;");
+      insertSqliteInstallationAction(this.#database, installationId, {
+        actor,
+        createdAt: updatedAt,
+        kind: installationActionKinds.memberDeactivated,
+        subjectId: memberId,
+      });
       return {...existing, status: memberStatuses.inactive, updatedAt};
-    } catch (cause) {
-      this.#database.exec("ROLLBACK;");
-      throw cause;
-    }
+    });
   }
 
   async createApplicationSession(
@@ -447,21 +468,23 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     }
   }
 
-  async createApiKey(key: StoredManagedApiKey): Promise<ManagedApiKey> {
-    this.#insertApiKey(key);
-    return withoutSecretDigest(key);
+  async createApiKey(
+    key: StoredManagedApiKey,
+    actor: InstallationActor,
+  ): Promise<ManagedApiKey> {
+    return this.#transaction(() => {
+      this.#insertIssuedApiKey(key, actor);
+      return withoutSecretDigest(key);
+    });
   }
 
   async initializeBootstrapApiKey(
     key: StoredManagedApiKey,
+    actor: InstallationActor,
   ): Promise<StoredManagedApiKey> {
-    this.#database.exec("BEGIN IMMEDIATE;");
-    try {
+    return this.#transaction(() => {
       const existing = this.#findApiKey(key.installationId, key.id);
-      if (existing !== null) {
-        this.#database.exec("COMMIT;");
-        return existing;
-      }
+      if (existing !== null) return existing;
       const state = countRowSchema.parse(this.#database.prepare(`
         SELECT (
           (SELECT COUNT(*) FROM installation_members WHERE installation_id = ?)
@@ -474,13 +497,9 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
             "The private-team bootstrap key id cannot change after installation identity exists.",
         });
       }
-      this.#insertApiKey(key);
-      this.#database.exec("COMMIT;");
+      this.#insertIssuedApiKey(key, actor);
       return key;
-    } catch (cause) {
-      this.#database.exec("ROLLBACK;");
-      throw cause;
-    }
+    });
   }
 
   async findApiKey(
@@ -542,9 +561,9 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     installationId: string,
     keyId: string,
     revokedAt: string,
+    actor: InstallationActor,
   ): Promise<ManagedApiKey> {
-    this.#database.exec("BEGIN IMMEDIATE;");
-    try {
+    return this.#transaction(() => {
       const result = this.#database.prepare(`
         UPDATE managed_api_keys
         SET revoked_at = COALESCE(revoked_at, ?)
@@ -554,14 +573,16 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         throw new IdentityNotFound({message: "The API key does not exist."});
       }
       this.#revokeApiKeySessions(installationId, keyId, revokedAt);
+      insertSqliteInstallationAction(this.#database, installationId, {
+        actor,
+        createdAt: revokedAt,
+        kind: installationActionKinds.apiKeyRevoked,
+        subjectId: keyId,
+      });
       const key = this.#findApiKey(installationId, keyId);
       if (key === null) throw new Error("The revoked API key disappeared.");
-      this.#database.exec("COMMIT;");
       return withoutSecretDigest(key);
-    } catch (cause) {
-      this.#database.exec("ROLLBACK;");
-      throw cause;
-    }
+    });
   }
 
   #revokeApiKeySessions(
@@ -581,9 +602,9 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     previousKeyId: string,
     replacement: StoredManagedApiKey,
     revokedAt: string,
+    actor: InstallationActor,
   ): Promise<ManagedApiKey> {
-    this.#database.exec("BEGIN IMMEDIATE;");
-    try {
+    return this.#transaction(() => {
       const result = this.#database.prepare(`
         UPDATE managed_api_keys
         SET revoked_at = ?
@@ -599,13 +620,21 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         });
       }
       this.#revokeApiKeySessions(installationId, previousKeyId, revokedAt);
-      this.#insertApiKey(replacement);
-      this.#database.exec("COMMIT;");
+      insertSqliteInstallationAction(this.#database, installationId, {
+        actor,
+        createdAt: revokedAt,
+        kind: installationActionKinds.apiKeyRevoked,
+        subjectId: previousKeyId,
+      });
+      this.#insertIssuedApiKey(replacement, actor);
       return withoutSecretDigest(replacement);
-    } catch (cause) {
-      this.#database.exec("ROLLBACK;");
-      throw cause;
-    }
+    });
+  }
+
+  async listInstallationActions(
+    command: ListInstallationActions,
+  ): Promise<InstallationActionPage> {
+    return listSqliteInstallationActions(this.#database, command);
   }
 
   async createLoginAttempt(attempt: LoginAttempt): Promise<void> {
@@ -697,6 +726,28 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
     );
   }
 
+  #insertIssuedApiKey(key: StoredManagedApiKey, actor: InstallationActor): void {
+    this.#insertApiKey(key);
+    insertSqliteInstallationAction(this.#database, key.installationId, {
+      actor,
+      createdAt: key.createdAt,
+      kind: installationActionKinds.apiKeyIssued,
+      subjectId: key.id,
+    });
+  }
+
+  #transaction<Result>(operation: () => Result): Result {
+    this.#database.exec("BEGIN IMMEDIATE;");
+    try {
+      const result = operation();
+      this.#database.exec("COMMIT;");
+      return result;
+    } catch (cause) {
+      this.#database.exec("ROLLBACK;");
+      throw cause;
+    }
+  }
+
   #migrate(): void {
     this.#database.exec(`
       CREATE TABLE IF NOT EXISTS installation_members (
@@ -767,6 +818,7 @@ export class SqliteIdentityRepository implements BootstrapManagedApiKeyRepositor
         consumed_at TEXT
       );
     `);
+    createSqliteInstallationActions(this.#database);
     this.#addLoginAttemptNonceIfMissing();
     this.#database.exec(`PRAGMA user_version = ${requiredSqliteSchemaVersion};`);
   }

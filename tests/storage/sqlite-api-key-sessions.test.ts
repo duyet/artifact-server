@@ -6,7 +6,10 @@ import {DatabaseSync} from "node:sqlite";
 import {afterEach, beforeEach, describe, expect, test} from "vitest";
 
 import {principalCapabilities} from "../../src/core/identity.js";
-import type {StoredManagedApiKey} from "../../src/core/installation-identity.js";
+import {
+  installationOperatorActor,
+  type StoredManagedApiKey,
+} from "../../src/core/installation-identity.js";
 import {SqliteIdentityRepository} from "../../src/storage/sqlite-identity-repository.js";
 import {requiredSqliteSchemaVersion} from "../../src/storage/sqlite-schema.js";
 
@@ -61,7 +64,7 @@ describe("SQLite API-key browser sessions", () => {
   });
 
   test("AUTH-030-B: a key session resolves to its key until the session or the key ends", async () => {
-    await repository.createApiKey(storedKey("key_live"));
+    await repository.createApiKey(storedKey("key_live"), installationOperatorActor);
     const created = await repository.createApplicationSession(
       keySession("key_live", "token-live"),
     );
@@ -103,21 +106,28 @@ describe("SQLite API-key browser sessions", () => {
   });
 
   test("foundation: revoking, rotating, or expiring the key ends every session it signed in", async () => {
-    await repository.createApiKey(storedKey("key_revoked"));
-    await repository.createApiKey(storedKey("key_rotated"));
+    await repository.createApiKey(storedKey("key_revoked"), installationOperatorActor);
+    await repository.createApiKey(storedKey("key_rotated"), installationOperatorActor);
     await repository.createApiKey(
       storedKey("key_expiring", "2026-10-02T12:00:00.000Z"),
+      installationOperatorActor,
     );
     await repository.createApplicationSession(keySession("key_revoked", "token-revoked"));
     await repository.createApplicationSession(keySession("key_rotated", "token-rotated"));
     await repository.createApplicationSession(keySession("key_expiring", "token-expiring"));
 
-    await repository.revokeApiKey(installationId, "key_revoked", requestTime);
+    await repository.revokeApiKey(
+      installationId,
+      "key_revoked",
+      requestTime,
+      installationOperatorActor,
+    );
     await repository.rotateApiKey(
       installationId,
       "key_rotated",
       {...storedKey("key_replacement"), rotatedFromId: "key_rotated"},
       requestTime,
+      installationOperatorActor,
     );
 
     const lookups = await Promise.all(
@@ -164,7 +174,7 @@ describe("SQLite API-key browser sessions", () => {
     }
 
     repository = new SqliteIdentityRepository(databasePath);
-    await repository.createApiKey(storedKey("key_upgraded"));
+    await repository.createApiKey(storedKey("key_upgraded"), installationOperatorActor);
     await repository.createApplicationSession(keySession("key_upgraded", "token-upgraded"));
     const found = await repository.findApplicationSession(
       installationId,

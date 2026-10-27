@@ -5,9 +5,15 @@ import type {
   ManagedApiKey,
   StoredManagedApiKey,
 } from "./installation-identity.js";
+import type {
+  InstallationActionPage,
+  InstallationActor,
+  PageCursor,
+} from "./model.js";
 
 /** Values persisted when admitting one installation member. */
 export interface AdmitMemberRecord {
+  readonly actor: InstallationActor;
   readonly createdAt: string;
   readonly displayName: string;
   readonly email: string;
@@ -29,7 +35,18 @@ export interface CreateApplicationSessionRecord {
   readonly tokenDigest: string;
 }
 
-/** Persistent identity operations required by the Node application composition. */
+/** One bounded read of the installation action history, newest first. */
+export interface ListInstallationActions {
+  readonly cursor: PageCursor | null;
+  readonly installationId: string;
+  readonly limit: number;
+}
+
+/**
+ * Persistent identity operations required by the Node application composition.
+ * Each member and API-key change records its installation action, attributed
+ * to the given actor, in the same transaction; a replay records nothing.
+ */
 export interface IdentityRepository {
   admitMember(command: AdmitMemberRecord): Promise<InstallationMember>;
   consumeLoginAttempt(
@@ -37,7 +54,10 @@ export interface IdentityRepository {
     provider: string,
     consumedAt: string,
   ): Promise<LoginAttempt>;
-  createApiKey(key: StoredManagedApiKey): Promise<ManagedApiKey>;
+  createApiKey(
+    key: StoredManagedApiKey,
+    actor: InstallationActor,
+  ): Promise<ManagedApiKey>;
   createApplicationSession(
     command: CreateApplicationSessionRecord,
   ): Promise<ApplicationSession>;
@@ -46,6 +66,7 @@ export interface IdentityRepository {
     installationId: string,
     memberId: string,
     updatedAt: string,
+    actor: InstallationActor,
   ): Promise<InstallationMember>;
   findActiveMemberByEmail(
     installationId: string,
@@ -66,11 +87,15 @@ export interface IdentityRepository {
   ): Promise<InstallationMember | null>;
   hasMembers(installationId: string): Promise<boolean>;
   listApiKeys(installationId: string): Promise<readonly ManagedApiKey[]>;
+  listInstallationActions(
+    command: ListInstallationActions,
+  ): Promise<InstallationActionPage>;
   listMembers(installationId: string): Promise<readonly InstallationMember[]>;
   revokeApiKey(
     installationId: string,
     keyId: string,
     revokedAt: string,
+    actor: InstallationActor,
   ): Promise<ManagedApiKey>;
   revokeApplicationSession(
     installationId: string,
@@ -82,6 +107,7 @@ export interface IdentityRepository {
     previousKeyId: string,
     replacement: StoredManagedApiKey,
     revokedAt: string,
+    actor: InstallationActor,
   ): Promise<ManagedApiKey>;
 }
 
@@ -90,5 +116,6 @@ export interface BootstrapManagedApiKeyRepository extends IdentityRepository {
   /** Return the same key, or create it only while the installation has no identity state. */
   initializeBootstrapApiKey(
     key: StoredManagedApiKey,
+    actor: InstallationActor,
   ): Promise<StoredManagedApiKey>;
 }

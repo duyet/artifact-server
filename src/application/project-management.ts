@@ -15,6 +15,7 @@ import {
   ProjectSelectionRequired,
 } from "../core/errors.js";
 import type {Principal} from "../core/identity.js";
+import {installationActorOf} from "../core/installation-identity.js";
 import type {ProjectRecord} from "../core/model.js";
 import type {
   CreateProject,
@@ -196,6 +197,7 @@ function makeProjectManagementService(
       yield* authorization.requireProjectManagement(command.principal);
       const name = yield* parseProjectName(command.name);
       const project = yield* dependencies.repository.createProject({
+        actor: installationActorOf(command.principal),
         archivedAt: null,
         createdAt: DateTime.formatIso(yield* dependencies.clock.now),
         id: dependencies.ids.projectId(),
@@ -218,6 +220,8 @@ function makeProjectManagementService(
       yield* authorization.requireProjectManagement(command.principal);
       yield* requireProject(command.principal, command.projectId);
       return yield* dependencies.repository.renameProject({
+        actor: installationActorOf(command.principal),
+        changedAt: DateTime.formatIso(yield* dependencies.clock.now),
         name: yield* parseProjectName(command.name),
         projectId: command.projectId,
       });
@@ -226,7 +230,11 @@ function makeProjectManagementService(
 
   const setProjectArchive = Effect.fn(
     "ProjectManagementService.setProjectArchive",
-  )(function*(command: ReadProjectCommand, archivedAt: string | null) {
+  )(function*(
+    command: ReadProjectCommand,
+    archivedAt: string | null,
+    changedAt: string,
+  ) {
     yield* authorization.requireProjectManagement(command.principal);
     const project = yield* requireProject(command.principal, command.projectId);
     const alreadyInRequestedState = archivedAt === null
@@ -234,24 +242,28 @@ function makeProjectManagementService(
       : project.archivedAt !== null;
     if (alreadyInRequestedState) return project;
     return yield* dependencies.repository.setProjectArchive({
+      actor: installationActorOf(command.principal),
       archivedAt,
+      changedAt,
       projectId: command.projectId,
     });
   });
 
   const archiveProject = Effect.fn("ProjectManagementService.archiveProject")(
     function*(command: ReadProjectCommand) {
-      return yield* setProjectArchive(
-        command,
-        DateTime.formatIso(yield* dependencies.clock.now),
-      );
+      const now = DateTime.formatIso(yield* dependencies.clock.now);
+      return yield* setProjectArchive(command, now, now);
     },
   );
 
   const unarchiveProject = Effect.fn(
     "ProjectManagementService.unarchiveProject",
   )(function*(command: ReadProjectCommand) {
-    return yield* setProjectArchive(command, null);
+    return yield* setProjectArchive(
+      command,
+      null,
+      DateTime.formatIso(yield* dependencies.clock.now),
+    );
   });
 
   return ProjectManagementService.of({

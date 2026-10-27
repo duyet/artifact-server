@@ -432,6 +432,7 @@ const artifactPageQuerySchema = pageQuerySchema.extend({
   tags: z.array(z.string().max(200)).max(20).default([]),
 });
 const publicLinksPageQuerySchema = pageQuerySchema.omit({search: true});
+const installationActionPageQuerySchema = pageQuerySchema.omit({search: true});
 const makePublicLinkPrivateItemSchema = z.object({
   artifactId: z.string().min(1).max(200),
   expectedCurrentVersionId: z.string().min(1).max(200),
@@ -1424,6 +1425,25 @@ export function createHttpApp(
       ),
     );
     return context.json(issued, 201);
+  });
+
+  app.get("/api/v1/administration/actions", async (context) => {
+    const query = installationActionPageQuerySchema.parse(context.req.query());
+    const page = await runHttpApplicationEffect(
+      context,
+      dependencies,
+      InstallationAccessService.use((access) =>
+        access.listInstallationActions({
+          cursor: decodePageCursor(query.cursor),
+          limit: query.limit,
+          principal: context.get("principal"),
+        })
+      ),
+    );
+    return context.json({
+      actions: page.items,
+      nextCursor: encodePageCursor(page.nextCursor),
+    });
   });
 
   app.get("/api/v1/administration/public-links", async (context) => {

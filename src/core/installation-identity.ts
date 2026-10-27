@@ -1,8 +1,10 @@
 import type {
   MembershipRole,
+  Principal,
   PrincipalCapability,
   PrincipalKind,
 } from "./identity.js";
+import type {InstallationActor} from "./model.js";
 
 /** Serialized form shared by every persisted Artifact Server managed API key. */
 export const managedApiKeyCredentialPattern =
@@ -13,6 +15,26 @@ export const managedApiKeyCredentialPattern =
  * Signing a browser in with such a key acts as the member directly.
  */
 export const installationOperatorPrincipalId = "installation-operator";
+
+/**
+ * The actor recorded for an installation change an operator makes outside the
+ * application: an operator key, the private-team bootstrap key, or the keys an
+ * operator key replaces.
+ */
+export const installationOperatorActor: InstallationActor = {
+  authorizedByPrincipalId: null,
+  principalDisplayName: "Installation operator",
+  principalId: installationOperatorPrincipalId,
+};
+
+/** The actor recorded for an installation change a signed-in principal makes. */
+export function installationActorOf(principal: Principal): InstallationActor {
+  return {
+    authorizedByPrincipalId: principal.authorizedByPrincipalId,
+    principalDisplayName: principal.displayName,
+    principalId: principal.id,
+  };
+}
 
 /** Installation member lifecycle states. */
 export const memberStatuses = {

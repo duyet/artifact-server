@@ -12,6 +12,7 @@ import type {
   AdmitMemberRecord,
   BootstrapManagedApiKeyRepository,
   CreateApplicationSessionRecord,
+  ListInstallationActions,
 } from "../core/identity-ports.js";
 import {
   type ApplicationSession,
@@ -26,7 +27,16 @@ import {
   principalCapabilities,
   principalKinds,
 } from "../core/identity.js";
+import {
+  type InstallationActionPage,
+  installationActionKinds,
+  type InstallationActor,
+} from "../core/model.js";
 import type {PostgresDatabase} from "./postgres-database.js";
+import {
+  insertPostgresInstallationAction,
+  listPostgresInstallationActions,
+} from "./postgres-installation-actions.js";
 
 const membershipRoleSchema = z.enum([
   membershipRoles.administrator,
@@ -136,9 +146,9 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
 
   async admitMember(command: AdmitMemberRecord): Promise<InstallationMember> {
     this.#assertInstallationScope(command.installationId);
-    try {
-      await this.#database.run(Effect.gen({self: this}, function*() {
-        const sql = yield* SqlClient;
+    return this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
         yield* sql`INSERT INTO installation_members (
           installation_id, id, email, display_name, role, status,
           created_at, updated_at
@@ -146,19 +156,24 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
           ${command.installationId}, ${command.id}, ${command.email},
           ${command.displayName}, ${command.role}, ${memberStatuses.active},
           ${command.createdAt}, ${command.createdAt}
-        )`;
-      }));
-    } catch (cause) {
-      if (isConstraintFailure(cause)) {
-        throw new IdentityConflict({
-          message: "That email is already admitted to this installation.",
+        )`.pipe(Effect.mapError((cause) =>
+          isConstraintFailure(cause)
+            ? new IdentityConflict({
+              message: "That email is already admitted to this installation.",
+            })
+            : cause
+        ));
+        yield* insertPostgresInstallationAction(command.installationId, {
+          actor: command.actor,
+          createdAt: command.createdAt,
+          kind: installationActionKinds.memberAdmitted,
+          subjectId: command.id,
         });
-      }
-      throw cause;
-    }
-    const member = await this.findMember(command.installationId, command.id);
-    if (member === null) throw new Error("The admitted member was not persisted.");
-    return member;
+        const member = yield* this.#findMember(command.installationId, command.id, false);
+        if (member === null) throw new Error("The admitted member was not persisted.");
+        return member;
+      }));
+    }));
   }
 
   async listMembers(installationId: string): Promise<readonly InstallationMember[]> {
@@ -198,6 +213,7 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     installationId: string,
     memberId: string,
     updatedAt: string,
+    actor: InstallationActor,
   ): Promise<InstallationMember> {
     this.#assertInstallationScope(installationId);
     return this.#database.run(Effect.gen({self: this}, function*() {
@@ -240,6 +256,12 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
           WHERE installation_id = ${installationId}
             AND principal_kind = ${principalKinds.human}
             AND principal_id = ${memberId}`;
+        yield* insertPostgresInstallationAction(installationId, {
+          actor,
+          createdAt: updatedAt,
+          kind: installationActionKinds.memberDeactivated,
+          subjectId: memberId,
+        });
         return {...existing, status: memberStatuses.inactive, updatedAt};
       }));
     }));
@@ -361,14 +383,21 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     }));
   }
 
-  async createApiKey(key: StoredManagedApiKey): Promise<ManagedApiKey> {
+  async createApiKey(
+    key: StoredManagedApiKey,
+    actor: InstallationActor,
+  ): Promise<ManagedApiKey> {
     this.#assertInstallationScope(key.installationId);
-    await this.#database.run(this.#insertApiKey(key));
+    await this.#database.run(Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      yield* sql.withTransaction(this.#insertIssuedApiKey(key, actor));
+    }));
     return withoutSecretDigest(key);
   }
 
   async initializeBootstrapApiKey(
     key: StoredManagedApiKey,
+    actor: InstallationActor,
   ): Promise<StoredManagedApiKey> {
     this.#assertInstallationScope(key.installationId);
     return this.#database.run(Effect.gen({self: this}, function*() {
@@ -396,7 +425,7 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
               "The private-team bootstrap key id cannot change after installation identity exists.",
           });
         }
-        yield* this.#insertApiKey(key);
+        yield* this.#insertIssuedApiKey(key, actor);
         return key;
       }));
     }));
@@ -427,6 +456,7 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     installationId: string,
     keyId: string,
     revokedAt: string,
+    actor: InstallationActor,
   ): Promise<ManagedApiKey> {
     this.#assertInstallationScope(installationId);
     return this.#database.run(Effect.gen({self: this}, function*() {
@@ -442,6 +472,12 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
           });
         }
         yield* revokeApiKeySessions(installationId, keyId, revokedAt);
+        yield* insertPostgresInstallationAction(installationId, {
+          actor,
+          createdAt: revokedAt,
+          kind: installationActionKinds.apiKeyRevoked,
+          subjectId: keyId,
+        });
         const key = yield* this.#findApiKey(installationId, keyId, false);
         if (key === null) throw new Error("The revoked API key disappeared.");
         return withoutSecretDigest(key);
@@ -454,6 +490,7 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
     previousKeyId: string,
     replacement: StoredManagedApiKey,
     revokedAt: string,
+    actor: InstallationActor,
   ): Promise<ManagedApiKey> {
     this.#assertInstallationScope(installationId);
     this.#assertInstallationScope(replacement.installationId);
@@ -478,10 +515,23 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
         yield* sql`UPDATE managed_api_keys SET revoked_at = ${revokedAt}
           WHERE installation_id = ${installationId} AND id = ${previousKeyId}`;
         yield* revokeApiKeySessions(installationId, previousKeyId, revokedAt);
-        yield* this.#insertApiKey(replacement);
+        yield* insertPostgresInstallationAction(installationId, {
+          actor,
+          createdAt: revokedAt,
+          kind: installationActionKinds.apiKeyRevoked,
+          subjectId: previousKeyId,
+        });
+        yield* this.#insertIssuedApiKey(replacement, actor);
         return withoutSecretDigest(replacement);
       }));
     }));
+  }
+
+  async listInstallationActions(
+    command: ListInstallationActions,
+  ): Promise<InstallationActionPage> {
+    this.#assertInstallationScope(command.installationId);
+    return this.#database.run(listPostgresInstallationActions(command));
   }
 
   async createLoginAttempt(attempt: LoginAttempt): Promise<void> {
@@ -579,6 +629,21 @@ export class PostgresIdentityRepository implements BootstrapManagedApiKeyReposit
       ), [installationId, keyId]);
       const row = apiKeyRowSchema.nullable().parse(rows[0] ?? null);
       return row === null ? null : parseApiKey(row);
+    });
+  }
+
+  #insertIssuedApiKey(
+    key: StoredManagedApiKey,
+    actor: InstallationActor,
+  ): Effect.Effect<void, unknown, SqlClient> {
+    return Effect.gen({self: this}, function*() {
+      yield* this.#insertApiKey(key);
+      yield* insertPostgresInstallationAction(key.installationId, {
+        actor,
+        createdAt: key.createdAt,
+        kind: installationActionKinds.apiKeyIssued,
+        subjectId: key.id,
+      });
     });
   }
 

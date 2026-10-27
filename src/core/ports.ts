@@ -36,6 +36,7 @@ import type {
   CommentThreadClearing,
   PageCursor,
   PublishedVersion,
+  InstallationActor,
   ProjectRecord,
   ProjectActivityDays,
   ProjectActivityTotals,
@@ -576,17 +577,23 @@ export interface CreateStagedUpload {
 }
 
 /** Values persisted when creating one project. */
-export type CreateProject = ProjectRecord;
+export interface CreateProject extends ProjectRecord {
+  readonly actor: InstallationActor;
+}
 
 /** Values used to change one project's label. */
 export interface RenameProject {
+  readonly actor: InstallationActor;
   readonly name: string;
   readonly projectId: string;
+  readonly changedAt: string;
 }
 
 /** Values used to archive or unarchive one project. */
 export interface SetProjectArchive {
+  readonly actor: InstallationActor;
   readonly archivedAt: string | null;
+  readonly changedAt: string;
   readonly projectId: string;
 }
 

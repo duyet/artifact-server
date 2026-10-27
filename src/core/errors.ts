@@ -431,6 +431,7 @@ export class IdentityRepositoryFailure extends Schema.TaggedError<IdentityReposi
       "findApplicationSession",
       "hasMembers",
       "listApiKeys",
+      "listInstallationActions",
       "listMembers",
       "revokeApiKey",
       "revokeApplicationSession",

@@ -33,6 +33,7 @@ import {
   agentBeaconStates,
   agentDispatchStates,
   artifactActionKinds,
+  installationActionKinds,
   catalogScopes,
   commentThreadStates,
   dispatchHoldsCommentThread,
@@ -134,6 +135,7 @@ import type {
   UpdateCommentThread,
   PublicationSource,
   ProjectRepository,
+  CreateProject,
   RenameProject,
   RestoreArtifactVersion,
   ServedAsset,
@@ -156,6 +158,11 @@ import {
   registeredAgentRetentionMilliseconds,
 } from "../core/publishing-limits.js";
 import { createManifest } from "../manifest/create-manifest.js";
+import type {NewInstallationAction} from "./installation-action-row.js";
+import {
+  createSqliteInstallationActions,
+  insertSqliteInstallationAction,
+} from "./sqlite-installation-actions.js";
 import {refuseNewerSqliteSchema, requiredSqliteSchemaVersion} from "./sqlite-schema.js";
 import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
 import {
@@ -549,8 +556,8 @@ export class SqliteArtifactRepository implements
     this.#migrate(installationId);
   }
 
-  createProject(command: ProjectRecord): Promise<ProjectRecord> {
-    return Promise.resolve().then(() => {
+  createProject(command: CreateProject): Promise<ProjectRecord> {
+    return Promise.resolve().then(() => this.#transaction(() => {
       try {
         this.#database.prepare(`
           INSERT INTO projects (id, installation_id, name, created_at, archived_at)
@@ -568,8 +575,14 @@ export class SqliteArtifactRepository implements
         }
         throw cause;
       }
+      this.#insertInstallationAction({
+        actor: command.actor,
+        createdAt: command.createdAt,
+        kind: installationActionKinds.projectCreated,
+        subjectId: command.id,
+      });
       return this.#readProject(command.id);
-    });
+    }));
   }
 
   findProject(projectId: string): Promise<ProjectRecord | null> {
@@ -588,27 +601,45 @@ export class SqliteArtifactRepository implements
   }
 
   renameProject(command: RenameProject): Promise<ProjectRecord> {
-    return Promise.resolve().then(() => {
+    return Promise.resolve().then(() => this.#transaction(() => {
       const result = this.#database.prepare(
         "UPDATE projects SET name = ? WHERE id = ?",
       ).run(command.name, command.projectId);
       if (result.changes !== 1) {
         throw new ProjectNotFound({message: "The project does not exist."});
       }
+      this.#insertInstallationAction({
+        actor: command.actor,
+        createdAt: command.changedAt,
+        kind: installationActionKinds.projectRenamed,
+        subjectId: command.projectId,
+      });
       return this.#readProject(command.projectId);
-    });
+    }));
   }
 
   setProjectArchive(command: SetProjectArchive): Promise<ProjectRecord> {
-    return Promise.resolve().then(() => {
+    return Promise.resolve().then(() => this.#transaction(() => {
       const result = this.#database.prepare(
         "UPDATE projects SET archived_at = ? WHERE id = ?",
       ).run(command.archivedAt, command.projectId);
       if (result.changes !== 1) {
         throw new ProjectNotFound({message: "The project does not exist."});
       }
+      this.#insertInstallationAction({
+        actor: command.actor,
+        createdAt: command.changedAt,
+        kind: command.archivedAt === null
+          ? installationActionKinds.projectUnarchived
+          : installationActionKinds.projectArchived,
+        subjectId: command.projectId,
+      });
       return this.#readProject(command.projectId);
-    });
+    }));
+  }
+
+  #insertInstallationAction(action: NewInstallationAction): void {
+    insertSqliteInstallationAction(this.#database, this.#installationId, action);
   }
 
   close(): void {
@@ -4650,6 +4681,7 @@ export class SqliteArtifactRepository implements
       CREATE INDEX IF NOT EXISTS content_sessions_expiry
         ON content_sessions (expires_at);
     `);
+    createSqliteInstallationActions(this.#database);
     this.#addVersionPublisherColumnIfMissing();
     this.#addActionAuthorizerColumnIfMissing();
     this.#addIdempotencyOperationColumnsIfMissing();
