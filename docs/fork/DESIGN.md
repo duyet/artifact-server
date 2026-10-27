@@ -127,7 +127,7 @@ Publish does not pick or store the folder. The folder is a pure function of the 
 The content router reads only the first path segment:
 
 1. If the segment is `v`, the next segment is the token and the rest is the manifest path. The four branches of section 1 run unchanged.
-2. If the segment matches `^([a-z0-9]+(-[a-z0-9]+)*-)?<uuid>$`, it is the folder of artifact `art_<uuid>`. `resolvePublicArtifact` (`src/application/content-access.ts:409`) finds the current version, and `serveVersionContent` serves it. `/<folder>` redirects (308) to `/<folder>/`, so relative URLs resolve inside the folder. A folder with a stale or wrong name part redirects (308) to the canonical folder.
+2. If the segment matches `^([a-z0-9]+(-[a-z0-9]+)*-)?<uuid>$`, it is the folder of artifact `art_<uuid>`. `resolvePublicArtifact` (`src/application/content-access.ts:409`) finds the current version, and `serveVersionContent` serves it. `/<folder>` redirects (308) to `/<folder>/`, so relative URLs resolve inside the folder. A folder with a stale or wrong name part redirects (308) to the canonical folder. Both folder redirects carry `Cache-Control: no-store`, because a rename can bring an old name back, and a browser that kept the old redirect would loop.
 3. Anything else goes to the application routes.
 
 These application prefixes stay reserved: `/`, `/api`, `/auth`, `/mcp`, `/health`, `/ready`, `/.well-known`, `/assets`, `/review`, `/review-frame`, `/workbench`, `/projects`, `/administration`, and `/artifacts`. No application segment is `v` or ends in a UUID, so the code needs no reserved list. A test walks the Hono route table and fails if a registered first segment matches rule 1 or rule 2. A colliding upstream route then fails CI instead of hiding content.
@@ -224,7 +224,7 @@ Upstream isolates top-level content twice, with a separate registrable domain an
 
 1. The browser login kind `none` in `BrowserAccess` (`src/core/browser-access.ts:21`) is the only private-team kind. Both server modes use `{mode: "private_team", loginKind: "none"}`. `/auth/context` reports `none`.
 2. The Review sign-in gate (`apps/web/src/review/review-app.tsx:458`) shows the API-key sign-in form (see below) instead of a dead **Sign in** button. The client schema at `apps/web/src/api/client.ts:83` accepts `none`.
-3. With login kind `none`, `GET /review?artifact=<id>…` redirects to `/artifacts/<id>`, which redirects to the folder. MCP tells agents to hand users the Review URL (`src/mcp/artifact-mcp-server.ts:1244`, `:2334`). Without this redirect, every link an agent shares would end at a sign-in page.
+3. With login kind `none`, `GET /review?artifact=<id>…` from a reader without a session redirects to `/artifacts/<id>`, which redirects to the folder. A signed-in member gets Review. MCP tells agents to hand users the Review URL (`src/mcp/artifact-mcp-server.ts:1244`, `:2334`). Without this redirect, every link an agent shares would end at a sign-in page.
 4. With login kind `none`, new artifacts default to `public_link`. One function, `defaultAccessSetting(browserAccess)` in `src/core/browser-access.ts`, owns the rule. It returns `public_link` for `none` and `account_required` for `local_owner`.
    - HTTP: the commit schema (`src/http/create-http-app.ts:192`) makes `accessSetting` optional, and the commit route (`:2224`) fills in the default.
    - MCP: `McpHttpAdapterDependencies` and `ArtifactMcpServerDependencies` gain `defaultAccessSetting`, which `createHttpApp` sets. The commit tool schema (`src/mcp/artifact-mcp-server.ts:1250`) defaults to it.

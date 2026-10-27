@@ -114,24 +114,28 @@ describe("artifact folders in path mode", () => {
       const response = await manual(`${server.baseUrl}${requested}`);
       await response.arrayBuffer();
       return {
+        cacheControl: response.headers.get("cache-control"),
         location: response.headers.get("location"),
         requested,
         status: response.status,
       };
     }));
+    // A rename can bring a name back, so a cached redirect from it would loop.
     expect(redirects).toEqual([
       {
+        cacheControl: "no-store",
         location: `/${folder}/assets/a.css?x=1`,
         requested: `/wrong-name-${uuid}/assets/a.css?x=1`,
         status: 308,
       },
-      {location: `/${folder}/`, requested: `/${uuid}/`, status: 308},
+      {cacheControl: "no-store", location: `/${folder}/`, requested: `/${uuid}/`, status: 308},
       {
+        cacheControl: "no-store",
         location: `/${folder}/?tab=1`,
         requested: `/${folder}?tab=1`,
         status: 308,
       },
-      {location: `/${folder}/`, requested: `/${folder}`, status: 308},
+      {cacheControl: "no-store", location: `/${folder}/`, requested: `/${folder}`, status: 308},
     ]);
 
     const unknown = await fetch(

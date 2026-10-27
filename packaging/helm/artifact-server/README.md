@@ -217,6 +217,12 @@ provide. `logo.alt` is required with `logo.url`, and `logo.alt` and `logo.link`
 need a `logo.url`. The chart rejects an invalid shape at render time. The server
 still checks lengths and the image itself at startup.
 
+`helpUrl`, `logo.url`, and `logo.link` must be an `https://` URL without
+credentials, and `helpUrl` and `logo.link` may instead be a path that starts
+with exactly one `/` and holds no backslash or whitespace. `oidc.scopes` must be
+scopes separated by single spaces. The chart refuses some odd URLs the server
+would accept, such as an IPv6 host, an uppercase scheme, or a non-ASCII host.
+
 ## NetworkPolicy
 
 NetworkPolicy is disabled by default. Standard Kubernetes policies cannot allow

@@ -109,6 +109,19 @@ expect_rendered_count 1 'name: ARTIFACT_SERVER_ASSET_QUOTA_COUNT$' "$artifactser
 expect_rendered_count 1 'value: "250"$' "$artifactserver_settings_deployment"
 expect_rendered_count 1 'value: "536870912"$' "$artifactserver_settings_deployment"
 
+artifactserver_path_links_deployment=$(helm template artifact-server "$artifactserver_chart" \
+  --kube-version 1.36.0 "${artifactserver_settings_values[@]}" \
+  --set configuration.helpUrl=/docs/help \
+  --set "configuration.logo.link=https://example.test/home?from=logo#top" \
+  --show-only templates/deployment.yaml)
+expect_rendered_count 1 'value: "/docs/help"$' "$artifactserver_path_links_deployment"
+expect_rendered_count 1 'value: "https://example.test/home\?from=logo#top"$' "$artifactserver_path_links_deployment"
+artifactserver_path_links_deployment=$(helm template artifact-server "$artifactserver_chart" \
+  --kube-version 1.36.0 "${artifactserver_settings_values[@]}" \
+  --set configuration.logo.link=/docs/x \
+  --show-only templates/deployment.yaml)
+expect_rendered_count 1 'value: "/docs/x"$' "$artifactserver_path_links_deployment"
+
 expect_render_failure() {
   local artifactserver_expected=$1
   shift
@@ -185,6 +198,30 @@ expect_render_failure "/configuration/logo/url" \
   "${artifactserver_values[@]}" \
   --set configuration.logo.url=/etc/logo.png \
   --set configuration.logo.alt=Logo
+
+# The schema refuses what the server refuses at startup: a second slash or a
+# backslash after the first slash, credentials in an https:// URL, and scopes
+# that are not single-space-separated tokens. --set outranks --set-json, so
+# these values are not also given with --set.
+for artifactserver_link in '"/\\evil"' '"//evil.example"' '"https://u:p@example.test/"'; do
+  expect_render_failure "/configuration/helpUrl" \
+    "${artifactserver_values[@]}" \
+    --set-json "configuration.helpUrl=$artifactserver_link"
+  expect_render_failure "/configuration/logo/link" \
+    "${artifactserver_values[@]}" \
+    --set configuration.logo.url=https://example.test/logo.svg \
+    --set configuration.logo.alt=Logo \
+    --set-json "configuration.logo.link=$artifactserver_link"
+done
+
+for artifactserver_scopes in '"openid  email"' '"openid email "' '"openid \"email\""' '"openid e\\mail"'; do
+  expect_render_failure "/configuration/oidc/scopes" \
+    "${artifactserver_values[@]}" \
+    --set configuration.oidc.issuer=https://sso.example.test \
+    --set configuration.oidc.clientId=artifact-server \
+    --set secret.keys.oidcClientSecret=oidc-client-secret \
+    --set-json "configuration.oidc.scopes=$artifactserver_scopes"
+done
 
 mkdir -p -- "$artifactserver_repository/release"
 helm package "$artifactserver_chart" \

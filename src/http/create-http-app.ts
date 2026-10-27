@@ -177,6 +177,7 @@ import {
   portableDownloadFilename,
 } from "./content-disposition.js";
 import {
+  ownerName,
   PublicArtifactCatalogService,
   publicCatalogLimit,
 } from "../application/public-artifact-catalog.js";
@@ -820,12 +821,16 @@ export function createHttpApp(
 
   app.on(["GET", "HEAD"], ["/review", "/review/*"], async (context) => {
     // Agents hand out Review URLs; with no browser login those would end at a
-    // dead sign-in gate, so they resolve to the artifact itself.
+    // dead sign-in gate for a reader without a session, so they resolve to
+    // the artifact itself. A signed-in member stays in Review.
     if (dependencies.browserAccess.loginKind === browserLoginKinds.none) {
       const artifact = artifactIdSchema.safeParse(
         new URL(context.req.url).searchParams.get("artifact"),
       );
-      if (artifact.success) {
+      if (
+        artifact.success &&
+        await optionalSessionPrincipal(context, dependencies) === null
+      ) {
         return context.redirect(
           `/artifacts/${encodeURIComponent(artifact.data)}`,
           302,
@@ -3299,15 +3304,16 @@ function publishResponse(
 }
 
 /**
- * The viewer's info popover. The owner appears by stored display name only:
- * the owner's principal ID and any email stay out of this response.
+ * The viewer's info popover. The owner appears by stored display name only,
+ * withheld when it holds an email: the owner's principal ID and any email
+ * stay out of this response.
  */
 function artifactInfoResponse(info: ArtifactInfo) {
   return {
     artifactId: info.artifact.id,
     canManage: info.canManage,
     name: info.artifact.name,
-    owner: {displayName: info.artifact.owner.displayName},
+    owner: {displayName: ownerName(info.artifact.owner.displayName)},
     updatedAt: info.current.createdAt,
     version: {id: info.current.id, number: info.current.number},
     views: {
@@ -3937,7 +3943,11 @@ async function serveArtifactFolder(
     ),
   );
   const canonical = canonicalFolderLocation(request, current.artifact);
-  if (canonical !== null) return context.redirect(canonical, 308);
+  if (canonical !== null) {
+    // A rename can bring a name back, so a browser must not keep this answer.
+    context.header("Cache-Control", "no-store");
+    return context.redirect(canonical, 308);
+  }
   return serveVersionContent(
     context,
     request.versionUrl,

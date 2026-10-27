@@ -240,12 +240,12 @@ function catalogScopeFor(
 const emailAddressPattern = /[^\s@]+@[^\s@]+/u;
 
 /**
- * The owner's display name as the tree may show it. A blank name is no name,
- * and a name holding an email address is withheld rather than shown to
- * anyone. A key name such as `Ada Lovelace @ laptop` holds no address and is
+ * The owner's display name as the tree and artifact info may show it. A
+ * blank name is no name, and a name holding an email address is withheld
+ * rather than shown to anyone. A key name such as `Ada Lovelace @ laptop` holds no address and is
  * shown.
  */
-function ownerName(displayName: string | null): string | null {
+export function ownerName(displayName: string | null): string | null {
   const name = displayName?.trim() ?? "";
   return name === "" || emailAddressPattern.test(name) ? null : name;
 }
