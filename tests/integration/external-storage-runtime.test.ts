@@ -24,6 +24,10 @@ import {
 } from "@modelcontextprotocol/server";
 
 import {startExternalStorageServer} from "../../src/external-storage/start-external-storage-server.js";
+import type {IssueOperatorKeyCommand} from
+  "../../src/application/installation-access.js";
+import {createExternalStorageRuntime} from
+  "../../src/external-storage/create-external-storage-runtime.js";
 import {checkExternalStorageIntegrity} from
   "../../src/lifecycle/integrity-check.js";
 import type {ArtifactViewDrainReport} from
@@ -336,6 +340,69 @@ const sessionPrincipalSchema = z.object({
     id: z.string(),
     kind: z.string(),
     membershipRole: z.string(),
+  }).loose(),
+});
+
+const memberAdmissionSchema = z.object({member: z.object({id: z.string()}).loose()}).loose();
+
+const apiKeyListSchema = z.object({
+  apiKeys: z.array(z.object({id: z.string(), principalId: z.string()}).loose()),
+}).loose();
+
+const authorshipSchema = z.object({
+  artifact: z.object({
+    name: z.string(),
+    owner: z.object({displayName: z.string().nullable(), principalId: z.string()}),
+  }),
+  current: z.object({
+    version: z.object({
+      publisherDisplayName: z.string().nullable(),
+      publisherPrincipalId: z.string(),
+    }),
+  }),
+});
+
+const publishedVersionAuthorSchema = z.object({
+  version: z.object({
+    id: z.string(),
+    publisherDisplayName: z.string().nullable(),
+    publisherPrincipalId: z.string(),
+  }),
+});
+
+const assetReferenceSchema = z.object({
+  confidence: z.enum(["certain", "heuristic"]),
+  file: z.string(),
+  kind: z.string(),
+  line: z.number().nullable(),
+  raw: z.string(),
+  resolvedPath: z.string(),
+}).strict();
+
+const assetCheckReportSchema = z.object({
+  artifactId: z.string(),
+  references: z.array(assetReferenceSchema),
+  summary: z.object({
+    broken: z.number(),
+    byKind: z.record(z.string(), z.number()),
+    checkedFiles: z.number(),
+    heuristic: z.number(),
+    truncated: z.boolean(),
+  }).strict(),
+  version: z.object({id: z.string()}).loose(),
+}).strict();
+
+const assetCheckCommitSchema = z.object({
+  artifact: z.object({id: z.string()}).loose(),
+  assetCheck: z.object({broken: z.number(), heuristic: z.number()}).strict().nullable(),
+  version: z.object({id: z.string()}).loose(),
+}).loose();
+
+const mcpToolTextResultSchema = z.object({
+  result: z.object({
+    content: z.array(z.object({text: z.string()}).loose()),
+    isError: z.boolean().optional(),
+    structuredContent: z.unknown().optional(),
   }).loose(),
 });
 
@@ -3799,9 +3866,402 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       status: 409,
     });
   });
+
+  test("external-storage foundation: Postgres reuses the member an operator key names, refuses the replaced key, signs the browser in as that administrator, and gives a non-administrator email no key", async () => {
+    const identity = {
+      apiToken: managedTestKey("operator-key"),
+      installationId: `operator-key-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const first = await issueOperatorKey(environment, identity, {
+      displayName: "Ops Lead",
+      email: "ops@example.test",
+      keyName: "Ops Lead",
+      role: "administrator",
+    });
+    const repeated = await issueOperatorKey(environment, identity, {
+      displayName: "Ops Lead",
+      email: "OPS@example.test",
+      keyName: "Ops Lead",
+      role: "administrator",
+    });
+    expect(repeated.member.id).toBe(first.member.id);
+    expect(repeated.issued.apiKey.id).not.toBe(first.issued.apiKey.id);
+
+    // The server never saw the first key before it was replaced, so no cached
+    // credential can stand in for the revocation Postgres holds.
+    expect((await apiKeySignIn(server.baseUrl, first.issued.token)).status).toBe(401);
+    const session = await signInWithApiKey(server.baseUrl, repeated.issued.token);
+    const current = await fetch(`${server.baseUrl}/api/v1/session`, {
+      headers: {Cookie: session.header},
+    });
+    expect(current.status).toBe(200);
+    expect(await current.json()).toMatchObject({
+      authenticationMethod: "session",
+      principal: {
+        authorizedByPrincipalId: null,
+        id: first.member.id,
+        kind: "human",
+        membershipRole: "administrator",
+      },
+    });
+
+    const origin = "https://artifacts.example.com";
+    const admitted = await fetch(`${server.baseUrl}/api/v1/members`, {
+      body: JSON.stringify({
+        displayName: "Reader",
+        email: "reader@example.test",
+        role: "member",
+      }),
+      headers: browserMutationHeaders(origin, session),
+      method: "POST",
+    });
+    expect(admitted.status).toBe(201);
+    const reader = memberAdmissionSchema.parse(await admitted.json()).member;
+    const readerKey = await fetch(`${server.baseUrl}/api/v1/api-keys`, {
+      body: JSON.stringify({
+        capabilities: ["artifact:read"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        memberId: reader.id,
+        name: "Reader laptop",
+      }),
+      headers: browserMutationHeaders(origin, session),
+      method: "POST",
+    });
+    expect(readerKey.status).toBe(201);
+
+    const listKeys = async () => {
+      const response = await fetch(`${server.baseUrl}/api/v1/api-keys`, {
+        headers: {Cookie: session.header},
+      });
+      expect(response.status).toBe(200);
+      return apiKeyListSchema.parse(await response.json()).apiKeys;
+    };
+    const keysBefore = await listKeys();
+    expect(keysBefore.filter((key) => key.principalId === first.member.id)
+      .map((key) => key.id).toSorted())
+      .toEqual([first.issued.apiKey.id, repeated.issued.apiKey.id].toSorted());
+    expect(keysBefore.filter((key) => key.principalId === reader.id)).toHaveLength(1);
+
+    // As a bearer the operator key stays a delegated key, not the administrator.
+    expect((await authenticatedFetch(
+      server.baseUrl,
+      repeated.issued.token,
+      "/api/v1/members",
+    )).status).toBe(403);
+
+    await expect(issueOperatorKey(environment, identity, {
+      displayName: "Reader",
+      email: "reader@example.test",
+      keyName: "Reader",
+      role: "administrator",
+    })).rejects.toMatchObject({
+      _tag: "IdentityConflict",
+      message: expect.stringContaining("role is member, not administrator"),
+    });
+    expect((await listKeys()).map((key) => key.id).toSorted())
+      .toEqual(keysBefore.map((key) => key.id).toSorted());
+
+    const readerLaptop = await issueOperatorKey(environment, identity, {
+      displayName: "Reader",
+      email: "reader@example.test",
+      keyName: "Reader @ laptop",
+      role: "member",
+    });
+    expect(readerLaptop.member.id).toBe(reader.id);
+    expect(readerLaptop.issued.apiKey.name).toBe("Reader @ laptop");
+  });
+
+  test("external-storage foundation: Postgres records each member key's name as author, keeps a member key off another principal's artifact, and re-issuing a key name revokes only that key", async () => {
+    const identity = {
+      apiToken: managedTestKey("member-keys"),
+      installationId: `member-keys-${randomUUID()}`,
+    };
+    let server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const laptop = "Duyet Le @ duet-mbp";
+    const desktop = "Duyet Le @ duet-linux";
+    const issue = (keyName: string, role: "administrator" | "member" = "member") =>
+      issueOperatorKey(environment, identity, {
+        displayName: "Duyet Le",
+        email: "duyet@example.test",
+        keyName,
+        role,
+      });
+    const details = async (artifactId: string) => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        identity.apiToken,
+        `/api/v1/artifacts/${artifactId}`,
+      );
+      expect(response.status).toBe(200);
+      return authorshipSchema.parse(await response.json());
+    };
+
+    const onLaptop = await issue(laptop);
+    const onDesktop = await issue(desktop);
+    expect(onLaptop.member.role).toBe("member");
+    expect(onDesktop.member.id).toBe(onLaptop.member.id);
+
+    const created = await publishNew(server.baseUrl, onLaptop.issued.token, {
+      accessSetting: "account_required",
+      content: "<!doctype html><title>Report</title>",
+      idempotencyKey: `member-keys-report-${randomUUID()}`,
+      name: "Report",
+    });
+    expect(created.response.status).toBe(201);
+    const fromDesktop = await publishVersion(server.baseUrl, onDesktop.issued.token, {
+      artifactId: created.body.artifact.id,
+      content: "<!doctype html><title>Report, desktop edit</title>",
+      expectedCurrentVersionId: created.body.version.id,
+      idempotencyKey: `member-keys-desktop-${randomUUID()}`,
+    });
+    expect(fromDesktop.response.status).toBe(201);
+    const desktopVersion = publishedVersionAuthorSchema.parse(fromDesktop.body).version;
+    expect(desktopVersion).toMatchObject({
+      publisherDisplayName: desktop,
+      publisherPrincipalId: onLaptop.member.id,
+    });
+    const fromLaptop = await publishVersion(server.baseUrl, onLaptop.issued.token, {
+      artifactId: created.body.artifact.id,
+      content: "<!doctype html><title>Report, laptop edit</title>",
+      expectedCurrentVersionId: desktopVersion.id,
+      idempotencyKey: `member-keys-laptop-${randomUUID()}`,
+    });
+    expect(fromLaptop.response.status).toBe(201);
+    const report = await details(created.body.artifact.id);
+    expect(report.artifact.owner).toEqual({
+      displayName: laptop,
+      principalId: onLaptop.member.id,
+    });
+    expect(report.current.version).toEqual({
+      publisherDisplayName: laptop,
+      publisherPrincipalId: onLaptop.member.id,
+    });
+
+    const theirs = await publishNew(server.baseUrl, identity.apiToken, {
+      accessSetting: "account_required",
+      content: "<!doctype html><title>Theirs</title>",
+      idempotencyKey: `member-keys-theirs-${randomUUID()}`,
+      name: "Theirs",
+    });
+    expect(theirs.response.status).toBe(201);
+    const overwrite = await publishVersion(server.baseUrl, onLaptop.issued.token, {
+      artifactId: theirs.body.artifact.id,
+      content: "<!doctype html><title>Taken</title>",
+      expectedCurrentVersionId: theirs.body.version.id,
+      idempotencyKey: `member-keys-overwrite-${randomUUID()}`,
+    });
+    expect(overwrite.response.status).toBe(403);
+    const renamed = await mutateArtifact(
+      server.baseUrl,
+      onLaptop.issued.token,
+      `/api/v1/artifacts/${theirs.body.artifact.id}/name`,
+      "PATCH",
+      `member-keys-rename-${randomUUID()}`,
+      {expectedCurrentVersionId: theirs.body.version.id, name: "Taken"},
+    );
+    expect(renamed.status).toBe(403);
+    const untouched = await details(theirs.body.artifact.id);
+    expect(untouched.artifact.name).toBe("Theirs");
+    expect(untouched.current.version.publisherPrincipalId)
+      .toBe(managedTestPrincipal(identity.apiToken).principalId);
+
+    const reissued = await issue(laptop);
+    expect(reissued.issued.apiKey.id).not.toBe(onLaptop.issued.apiKey.id);
+    // The serving process caches the laptop key it already verified, and only
+    // the issuing runtime clears its own cache, so a fresh server reads the
+    // revocation from Postgres.
+    await server.stop();
+    server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    expect(await bearerStatus(server.baseUrl, onLaptop.issued.token)).toBe(401);
+    expect(await bearerStatus(server.baseUrl, reissued.issued.token)).toBe(200);
+    expect(await bearerStatus(server.baseUrl, onDesktop.issued.token)).toBe(200);
+
+    await expect(issue("Promoted", "administrator")).rejects.toMatchObject({
+      _tag: "IdentityConflict",
+      message: expect.stringContaining("role is member, not administrator"),
+    });
+  });
+
+  test("external-storage foundation: Postgres and S3 report a folder's broken references over REST and MCP for the current and an exact version, with the counts on both commit results", async () => {
+    const identity = {
+      apiToken: managedTestKey("asset-check"),
+      installationId: `asset-check-${randomUUID()}`,
+    };
+    // The expected references assume the same-origin served roots.
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const encoder = new TextEncoder();
+    const file = (filePath: string, mediaType: string, text: string): StagedTestFile => ({
+      bytes: encoder.encode(text),
+      mediaType,
+      path: filePath,
+    });
+    const reportFolder = [
+      file("index.html", "text/html", [
+        "<!doctype html><html><head>",
+        "<link rel=\"stylesheet\" href=\"css/site.css\">",
+        "</head><body>",
+        "<img src=\"shots/a.jpg\" alt=\"correct\">",
+        "<img src=\"my-report/shots/a.jpg\" alt=\"repeats its own folder\">",
+        "<img srcset=\"shots/a.jpg 1x, shots/a@2x.jpg 2x\" alt=\"one missing candidate\">",
+        "<img src=\"https://images.example.com/logo.png\" alt=\"external\">",
+        "<template><img src=\"${src}\" alt=\"template\"></template>",
+        "<a href=\"pages/about.html\">About</a>",
+        "<img src=\"/elsewhere/logo.png\" alt=\"outside the artifact\">",
+        "<script>fetch(\"data/ok.json\"); fetch(\"data/missing.json\");</script>",
+        "</body></html>",
+      ].join("\n")),
+      file("css/site.css", "text/css", [
+        "@font-face { font-family: Brand; src: url(\"../fonts/brand.woff2\") format(\"woff2\"); }",
+        "body { background: url(../shots/a.jpg); }",
+      ].join("\n")),
+      file("pages/about.html", "text/html",
+        "<!doctype html><a href=\"../index.html\">Home</a><img src=\"../shots/a.jpg\" alt=\"up\">"),
+      file("pages/based.html", "text/html",
+        "<!doctype html><base href=\"../\"><img src=\"shots/a.jpg\" alt=\"via base\"><img src=\"shots/b.jpg\" alt=\"missing via base\">"),
+      file("shots/a.jpg", "image/jpeg", "jpeg"),
+      file("data/ok.json", "application/json", "{}"),
+    ];
+    const expectedBroken = [
+      {confidence: "certain", file: "css/site.css", kind: "css-url", line: 1, raw: "../fonts/brand.woff2", resolvedPath: "fonts/brand.woff2"},
+      {confidence: "heuristic", file: "index.html", kind: "outside", line: 10, raw: "/elsewhere/logo.png", resolvedPath: "/elsewhere/logo.png"},
+      {confidence: "heuristic", file: "index.html", kind: "script", line: 11, raw: "data/missing.json", resolvedPath: "data/missing.json"},
+      {confidence: "certain", file: "index.html", kind: "html-attr", line: 5, raw: "my-report/shots/a.jpg", resolvedPath: "my-report/shots/a.jpg"},
+      {confidence: "certain", file: "index.html", kind: "html-attr", line: 6, raw: "shots/a@2x.jpg", resolvedPath: "shots/a@2x.jpg"},
+      {confidence: "certain", file: "pages/based.html", kind: "html-attr", line: 1, raw: "shots/b.jpg", resolvedPath: "shots/b.jpg"},
+    ];
+    const readAssetCheck = async (artifactId: string, versionId: string | null) => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        identity.apiToken,
+        versionId === null
+          ? `/api/v1/artifacts/${artifactId}/asset-check`
+          : `/api/v1/artifacts/${artifactId}/versions/${versionId}/asset-check`,
+      );
+      expect(response.status).toBe(200);
+      return assetCheckReportSchema.parse(await response.json());
+    };
+    const callTool = async (name: string, toolArguments: McpTestParameters) => {
+      const response = await externalStorageMcpRequest(
+        server.baseUrl,
+        identity.apiToken,
+        "tools/call",
+        {arguments: toolArguments, name},
+        name,
+      );
+      expect(response.status).toBe(200);
+      const {result} = mcpToolTextResultSchema.parse(await response.json());
+      expect(result.isError).not.toBe(true);
+      return result;
+    };
+
+    const firstUpload = await stageExternalStorageFiles(
+      server.baseUrl,
+      identity.apiToken,
+      reportFolder,
+      "index.html",
+    );
+    const committed = await fetch(firstUpload.commitUrl, {
+      body: JSON.stringify({target: {
+        accessSetting: "public_link",
+        kind: "new_artifact",
+        name: "My report",
+        path: "my-report",
+        tags: [],
+      }}),
+      headers: mutationHeaders(identity.apiToken, `asset-check-first-${randomUUID()}`),
+      method: "POST",
+    });
+    expect(committed.status).toBe(201);
+    const first = assetCheckCommitSchema.parse(await committed.json());
+    expect(first.assetCheck).toEqual({broken: 4, heuristic: 2});
+
+    const current = await readAssetCheck(first.artifact.id, null);
+    expect(current.version.id).toBe(first.version.id);
+    expect(sortedAssetReferences(current.references)).toEqual(expectedBroken);
+    expect(current.summary).toEqual({
+      broken: 4,
+      byKind: {
+        "css-import": 0,
+        "css-url": 1,
+        "html-attr": 3,
+        "meta-refresh": 0,
+        outside: 1,
+        script: 1,
+      },
+      checkedFiles: 4,
+      heuristic: 2,
+      truncated: false,
+    });
+
+    // A second version must not change what the first one reports.
+    const secondUpload = await stageExternalStorageFiles(server.baseUrl, identity.apiToken, [
+      file("index.html", "text/html", "<!doctype html><img src=\"shots/a.jpg\" alt=\"kept\"><img src=\"shots/c.jpg\" alt=\"new miss\">"),
+      file("shots/a.jpg", "image/jpeg", "jpeg"),
+    ], "index.html");
+    const viaMcp = await callTool("artifact_commit_upload", {
+      idempotencyKey: `asset-check-second-${randomUUID()}`,
+      target: {
+        artifactId: first.artifact.id,
+        expectedCurrentVersionId: first.version.id,
+        kind: "new_version",
+      },
+      uploadId: secondUpload.uploadId,
+    });
+    const second = assetCheckCommitSchema.parse(viaMcp.structuredContent);
+    expect(second.assetCheck).toEqual({broken: 1, heuristic: 0});
+    expect(viaMcp.content[0]?.text)
+      .toContain("Asset check: 1 broken and 0 possibly broken references.");
+
+    const exactFirst = await readAssetCheck(first.artifact.id, first.version.id);
+    expect(exactFirst.version.id).toBe(first.version.id);
+    expect(sortedAssetReferences(exactFirst.references)).toEqual(expectedBroken);
+    const mcpFirst = assetCheckReportSchema.parse((await callTool("artifact_check_assets", {
+      artifactId: first.artifact.id,
+      versionId: first.version.id,
+    })).structuredContent);
+    expect(sortedAssetReferences(mcpFirst.references)).toEqual(expectedBroken);
+    expect(mcpFirst.summary).toEqual(exactFirst.summary);
+    const mcpCurrent = assetCheckReportSchema.parse((await callTool("artifact_check_assets", {
+      artifactId: first.artifact.id,
+    })).structuredContent);
+    expect(mcpCurrent.version.id).toBe(second.version.id);
+    expect(mcpCurrent.references.map((reference) => reference.raw)).toEqual(["shots/c.jpg"]);
+
+    const unknownVersion = await authenticatedFetch(
+      server.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${first.artifact.id}/versions/ver_missing/asset-check`,
+    );
+    expect(unknownVersion.status).toBe(404);
+  });
 });
 
 type PublicArtifactTree = z.infer<typeof publicArtifactTreeSchema>;
+
+function sortedAssetReferences(
+  references: readonly z.infer<typeof assetReferenceSchema>[],
+) {
+  return references.toSorted((left, right) =>
+    `${left.file}\u0000${left.raw}` < `${right.file}\u0000${right.raw}` ? -1 : 1
+  );
+}
 
 /** Resolve one public tree item by name, failing loudly rather than silently. */
 function publicTreeEntry(tree: PublicArtifactTree, name: string) {
@@ -4077,14 +4537,34 @@ async function stageExternalStorageFile(
   projectId?: string,
   routingMode?: "spa" | "static",
 ): Promise<z.infer<typeof uploadResponseSchema>> {
-  const bytes = new TextEncoder().encode(content);
-  const files = [{
+  return stageExternalStorageFiles(baseUrl, token, [{
+    bytes: new TextEncoder().encode(content),
     mediaType: "text/html; charset=utf-8",
     path: "index.html",
-    sha256: createHash("sha256").update(bytes).digest("hex"),
-    size: bytes.byteLength,
-  }];
-  const body = {entryPath: "index.html", files, projectId, routingMode};
+  }], "index.html", projectId, routingMode);
+}
+
+interface StagedTestFile {
+  readonly bytes: Uint8Array;
+  readonly mediaType: string;
+  readonly path: string;
+}
+
+async function stageExternalStorageFiles(
+  baseUrl: string,
+  token: string,
+  stagedFiles: readonly StagedTestFile[],
+  entryPath: string,
+  projectId?: string,
+  routingMode?: "spa" | "static",
+): Promise<z.infer<typeof uploadResponseSchema>> {
+  const files = stagedFiles.map((file) => ({
+    mediaType: file.mediaType,
+    path: file.path,
+    sha256: createHash("sha256").update(file.bytes).digest("hex"),
+    size: file.bytes.byteLength,
+  }));
+  const body = {entryPath, files, projectId, routingMode};
   const createUpload = await fetch(`${baseUrl}/api/v1/uploads`, {
     body: JSON.stringify(body),
     headers: {
@@ -4094,18 +4574,23 @@ async function stageExternalStorageFile(
     method: "POST",
   });
   const upload = uploadResponseSchema.parse(await createUpload.json());
-  const plannedFile = upload.files[0];
-  if (plannedFile === undefined) {
-    throw new Error("The external-storage upload plan did not contain its declared file.");
+  if (upload.files.length !== stagedFiles.length) {
+    throw new Error("The external-storage upload plan did not contain every declared file.");
   }
-  const uploaded = await fetch(plannedFile.uploadUrl, {
-    body: bytes,
-    headers: {Authorization: `Bearer ${token}`},
-    method: "PUT",
-  });
-  if (!uploaded.ok) {
-    throw new Error(`The external-storage staged upload failed with HTTP ${uploaded.status}.`);
-  }
+  await Promise.all(upload.files.map(async (plannedFile) => {
+    const file = stagedFiles.find((candidate) => candidate.path === plannedFile.path);
+    if (file === undefined) {
+      throw new Error(`The external-storage upload plan names undeclared ${plannedFile.path}.`);
+    }
+    const uploaded = await fetch(plannedFile.uploadUrl, {
+      body: copiedArrayBuffer(file.bytes),
+      headers: {Authorization: `Bearer ${token}`},
+      method: "PUT",
+    });
+    if (!uploaded.ok) {
+      throw new Error(`The external-storage staged upload failed with HTTP ${uploaded.status}.`);
+    }
+  }));
   return upload;
 }
 
@@ -4385,6 +4870,69 @@ async function seedMemberSession(
     csrf,
     header: `__Host-artifact_session=${token}; __Host-artifact_csrf=${csrf}`,
   };
+}
+
+/**
+ * Issue a key as artifactserver admin issue-key does in external-storage mode:
+ * a second runtime on the same Postgres and S3, closed once the key exists.
+ */
+async function issueOperatorKey(
+  environment: IntegrationEnvironment,
+  identity: {readonly apiToken: string; readonly installationId: string},
+  command: Omit<IssueOperatorKeyCommand, "expiresAt">,
+) {
+  const runtime = await createExternalStorageRuntime({
+    apiToken: Redacted.make(identity.apiToken),
+    applicationOrigin: "https://artifacts.example.com",
+    bootstrapAdministratorEmail: administratorEmail,
+    browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+    contentDomain: null,
+    databaseUrl: Redacted.make(environment.databaseUrl),
+    installationId: identity.installationId,
+    objectStorage: createS3ObjectStorageProviderFactory({
+      accessKeyId: environment.accessKey,
+      bucket,
+      endpoint: environment.endpoint,
+      forcePathStyle: true,
+      region,
+      secretAccessKey: Redacted.make(environment.secretKey),
+    }),
+  });
+  try {
+    return await runtime.issueOperatorKey({
+      ...command,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+  } finally {
+    await runtime.close();
+  }
+}
+
+function apiKeySignIn(baseUrl: string, apiKey: string): Promise<Response> {
+  return fetch(`${baseUrl}/auth/api-key`, {
+    body: JSON.stringify({apiKey}),
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "https://artifacts.example.com",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+    },
+    method: "POST",
+  });
+}
+
+async function signInWithApiKey(
+  baseUrl: string,
+  apiKey: string,
+): Promise<ApplicationCookies> {
+  const response = await apiKeySignIn(baseUrl, apiKey);
+  expect(response.status).toBe(204);
+  const session = hostCookiePair(response, "artifact_session");
+  const csrf = hostCookiePair(response, "artifact_csrf");
+  if (session === undefined || csrf === undefined) {
+    throw new Error("API-key sign-in did not issue both application cookies.");
+  }
+  return {csrf: csrf.slice(csrf.indexOf("=") + 1), header: `${session}; ${csrf}`};
 }
 
 /** One Set-Cookie pair; an https application origin names every cookie with __Host-. */
