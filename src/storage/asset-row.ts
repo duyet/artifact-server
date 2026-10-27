@@ -1,7 +1,7 @@
 import {z} from "zod";
 
 import {AssetNotFound, IdempotencyConflict} from "../core/errors.js";
-import {accessSettings} from "../core/model.js";
+import {accessSettings, type artifactActionKinds} from "../core/model.js";
 import type {CommittedAsset} from "../core/ports.js";
 
 const nonnegativeIntegerSchema = z.coerce.number().int().nonnegative();
@@ -68,4 +68,16 @@ export function replayedAsset(
     throw new AssetNotFound({message: "The asset this key created was deleted."});
   }
   return {asset, replayed: true};
+}
+
+/**
+ * The action key an asset's addition or deletion records. An asset is added
+ * once and tombstoned once, so its ID keys each action without touching the
+ * client's idempotency keys.
+ */
+export function assetActionKey(
+  assetId: string,
+  action: typeof artifactActionKinds.assetAdded | typeof artifactActionKinds.assetDeleted,
+): string {
+  return `asset:${assetId}:${action}`;
 }

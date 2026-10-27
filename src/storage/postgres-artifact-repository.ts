@@ -95,6 +95,7 @@ import type {
   CommitArtifactVersion,
   ArtifactAssetRepository,
   CommitAsset,
+  DeleteAsset,
   StagedUploadClaim,
   CommitNewArtifact,
   CommittedAsset,
@@ -138,6 +139,7 @@ import type {
 } from "../core/ports.js";
 import {assetQuotaFailure} from "../core/asset-policy.js";
 import {
+  assetActionKey,
   assetColumns,
   assetReplayRowSchema,
   assetRowSchema,
@@ -186,6 +188,8 @@ const uploadStatusSchema = z.enum([
   uploadStatuses.open,
 ]);
 const artifactActionKindSchema = z.enum([
+  artifactActionKinds.assetAdded,
+  artifactActionKinds.assetDeleted,
   artifactActionKinds.changeAccess,
   artifactActionKinds.changeTags,
   artifactActionKinds.commentCreate,
@@ -1076,34 +1080,58 @@ export class PostgresArtifactRepository implements
             asset.createdAt,
           ],
         );
+        yield* this.#insertAction({
+          artifactId: asset.artifactId,
+          authorizedByPrincipalId: command.authorizedByPrincipalId,
+          createdAt: asset.createdAt,
+          idempotencyKey: assetActionKey(asset.id, artifactActionKinds.assetAdded),
+          principalId: asset.createdByPrincipalId,
+          projectId: asset.projectId,
+        }, artifactActionKinds.assetAdded, artifact.currentVersionId);
         return {asset, replayed: false};
       }));
     }));
   }
 
-  async deleteAsset(
-    projectId: string,
-    artifactId: string,
-    assetId: string,
-    deletedAt: string,
-  ): Promise<AssetRecord> {
+  async deleteAsset(command: DeleteAsset): Promise<AssetRecord> {
     const installationId = this.#installationId;
-    const rows = await this.#database.run(Effect.gen(function*() {
+    return this.#database.run(Effect.gen({self: this}, function*() {
       const sql = yield* SqlClient;
-      return yield* sql.unsafe<object>(
-        `UPDATE assets AS asset SET deleted_at = $1
-         WHERE asset.installation_id = $2 AND asset.id = $3
-           AND asset.project_id = $4 AND asset.artifact_id = $5
-           AND asset.deleted_at IS NULL
-         RETURNING ${assetColumns}`,
-        [deletedAt, installationId, assetId, projectId, artifactId],
-      );
+      return yield* sql.withTransaction(Effect.gen({self: this}, function*() {
+        const artifact = yield* this.#readArtifactOrNull(
+          command.projectId,
+          command.artifactId,
+          false,
+        );
+        const rows = artifact === null ? [] : yield* sql.unsafe<object>(
+          `UPDATE assets AS asset SET deleted_at = $1
+           WHERE asset.installation_id = $2 AND asset.id = $3
+             AND asset.project_id = $4 AND asset.artifact_id = $5
+             AND asset.deleted_at IS NULL
+           RETURNING ${assetColumns}`,
+          [
+            command.deletedAt,
+            installationId,
+            command.assetId,
+            command.projectId,
+            command.artifactId,
+          ],
+        );
+        const deleted = assetRowSchema.nullable().parse(rows[0] ?? null);
+        if (artifact === null || deleted === null) {
+          return yield* new AssetNotFound({message: "The asset does not exist."});
+        }
+        yield* this.#insertAction({
+          artifactId: command.artifactId,
+          authorizedByPrincipalId: command.authorizedByPrincipalId,
+          createdAt: command.deletedAt,
+          idempotencyKey: assetActionKey(command.assetId, artifactActionKinds.assetDeleted),
+          principalId: command.principalId,
+          projectId: command.projectId,
+        }, artifactActionKinds.assetDeleted, artifact.currentVersionId);
+        return deleted;
+      }));
     }));
-    const deleted = assetRowSchema.nullable().parse(rows[0] ?? null);
-    if (deleted === null) {
-      throw new AssetNotFound({message: "The asset does not exist."});
-    }
-    return deleted;
   }
 
   async findIdempotentAsset(

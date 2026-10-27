@@ -31,6 +31,8 @@ export type CatalogScope = (typeof catalogScopes)[keyof typeof catalogScopes];
 
 /** Artifact mutation kinds persisted in the standalone action history. */
 export const artifactActionKinds = {
+  assetAdded: "asset_added",
+  assetDeleted: "asset_deleted",
   changeAccess: "change_access",
   changeTags: "change_tags",
   commentCreate: "comment_create",

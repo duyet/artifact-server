@@ -37,6 +37,7 @@ import {
 import type {
   CommitAsset,
   CommittedAsset,
+  DeleteAsset,
   IdGenerator,
   ServedAsset,
 } from "../core/ports.js";
@@ -114,10 +115,7 @@ export interface ArtifactAssetRepositoryPort {
     | ArtifactRepositoryFailure
   >;
   deleteAsset(
-    projectId: string,
-    artifactId: string,
-    assetId: string,
-    deletedAt: string,
+    command: DeleteAsset,
   ): Effect.Effect<AssetRecord, AssetNotFound | ArtifactRepositoryFailure>;
   findArtifact(
     projectId: string,
@@ -321,6 +319,7 @@ function makeArtifactAssetService(
           sha256: file.sha256,
           size: file.size,
         },
+        authorizedByPrincipalId: principal.authorizedByPrincipalId,
         idempotencyKey,
         inputDigest,
         quota: dependencies.quota,
@@ -479,12 +478,14 @@ function makeArtifactAssetService(
     function*(command: ArtifactAssetCommand & {readonly assetId: string}) {
       const artifact = yield* writableArtifact(command);
       const deletedAt = DateTime.formatIso(yield* dependencies.clock.now);
-      return yield* dependencies.repository.deleteAsset(
-        artifact.projectId,
-        artifact.id,
-        command.assetId,
+      return yield* dependencies.repository.deleteAsset({
+        artifactId: artifact.id,
+        assetId: command.assetId,
+        authorizedByPrincipalId: command.principal.authorizedByPrincipalId,
         deletedAt,
-      );
+        principalId: command.principal.id,
+        projectId: artifact.projectId,
+      });
     },
   );
 

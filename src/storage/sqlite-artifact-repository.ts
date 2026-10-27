@@ -102,6 +102,7 @@ import type {
   ArtifactAssetRepository,
   CommitArtifactVersion,
   CommitAsset,
+  DeleteAsset,
   StagedUploadClaim,
   CommitNewArtifact,
   CommittedAsset,
@@ -141,6 +142,7 @@ import type {
 } from "../core/ports.js";
 import {assetQuotaFailure} from "../core/asset-policy.js";
 import {
+  assetActionKey,
   assetColumns,
   assetReplayRowSchema,
   assetRowSchema,
@@ -184,6 +186,8 @@ const uploadStatusSchema = z.enum([
 ]);
 const routingModeSchema = z.enum([routingModes.static, routingModes.spa]);
 const artifactActionKindSchema = z.enum([
+  artifactActionKinds.assetAdded,
+  artifactActionKinds.assetDeleted,
   artifactActionKinds.changeAccess,
   artifactActionKinds.changeTags,
   artifactActionKinds.commentCreate,
@@ -1061,7 +1065,8 @@ export class SqliteArtifactRepository implements
           command.inputDigest,
         );
         if (replayed !== null) return replayed;
-        if (this.#readArtifactOrNull(asset.projectId, asset.artifactId) === null) {
+        const artifact = this.#readArtifactOrNull(asset.projectId, asset.artifactId);
+        if (artifact === null) {
           throw new ArtifactNotFound({message: "The artifact does not exist."});
         }
         if (command.upload !== null) {
@@ -1095,33 +1100,49 @@ export class SqliteArtifactRepository implements
             command.inputDigest,
             asset.createdAt,
           );
+        this.#insertAction(
+          asset.projectId,
+          asset.artifactId,
+          artifact.currentVersionId,
+          assetActionKey(asset.id, artifactActionKinds.assetAdded),
+          asset.createdAt,
+          artifactActionKinds.assetAdded,
+          asset.createdByPrincipalId,
+          command.authorizedByPrincipalId,
+        );
         return {asset, replayed: false};
       }),
     );
   }
 
-  deleteAsset(
-    projectId: string,
-    artifactId: string,
-    assetId: string,
-    deletedAt: string,
-  ): Promise<AssetRecord> {
+  deleteAsset(command: DeleteAsset): Promise<AssetRecord> {
     return Promise.resolve().then(() =>
       this.#transaction(() => {
-        const row = this.#database
+        const artifact = this.#readArtifactOrNull(command.projectId, command.artifactId);
+        const row = artifact === null ? null : this.#database
           .prepare(
             `SELECT ${assetColumns} FROM assets asset
              WHERE asset.id = ? AND asset.project_id = ? AND asset.artifact_id = ?
                AND asset.deleted_at IS NULL`,
           )
-          .get(assetId, projectId, artifactId);
+          .get(command.assetId, command.projectId, command.artifactId);
         const live = assetRowSchema.nullable().parse(row ?? null);
-        if (live === null) {
+        if (artifact === null || live === null) {
           throw new AssetNotFound({message: "The asset does not exist."});
         }
         this.#database
           .prepare("UPDATE assets SET deleted_at = ? WHERE id = ?")
-          .run(deletedAt, assetId);
+          .run(command.deletedAt, command.assetId);
+        this.#insertAction(
+          command.projectId,
+          command.artifactId,
+          artifact.currentVersionId,
+          assetActionKey(command.assetId, artifactActionKinds.assetDeleted),
+          command.deletedAt,
+          artifactActionKinds.assetDeleted,
+          command.principalId,
+          command.authorizedByPrincipalId,
+        );
         return live;
       }));
   }

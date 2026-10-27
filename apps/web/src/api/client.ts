@@ -235,6 +235,8 @@ export interface ArtifactDetails {
 
 export interface ArtifactAction {
   readonly action:
+    | "asset_added"
+    | "asset_deleted"
     | "change_access"
     | "change_tags"
     | "comment_create"
@@ -387,6 +389,8 @@ const artifactDetailsSchema: z.ZodType<ArtifactDetails> = z.object({
 
 const actionSchema: z.ZodType<ArtifactAction> = z.object({
   action: z.enum([
+    "asset_added",
+    "asset_deleted",
     "change_access",
     "change_tags",
     "comment_create",

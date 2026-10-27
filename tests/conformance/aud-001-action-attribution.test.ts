@@ -54,6 +54,19 @@ const issuedKeySchema = z.object({
   apiKey: z.object({principalId: z.string()}).loose(),
   token: z.string().startsWith("as_key_"),
 }).loose();
+const assetPlanSchema = z.object({
+  commitUrl: z.url(),
+  file: z.object({uploadUrl: z.url()}).loose(),
+  uploadId: z.string(),
+}).loose();
+const committedAssetSchema = z.object({
+  asset: z.object({id: z.string()}).loose(),
+  replayed: z.boolean(),
+}).strict();
+const assetListingSchema = z.object({
+  assets: z.array(z.object({id: z.string()}).loose()),
+}).loose();
+const assetBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
 const anyJson = z.object({}).loose();
 const sessionSchema = z.object({principal: z.object({id: z.string()}).loose()})
   .loose();
@@ -74,6 +87,9 @@ const mutationSequence = [
   "comment_reopen",
   "comment_delete",
   "comment_delete",
+  "asset_added",
+  "asset_added",
+  "asset_deleted",
   "delete",
 ] as const;
 
@@ -91,7 +107,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
 
   beforeEach(async () => {
     installation = await createTestInstallation();
-    server = await startTestServer(installation);
+    server = await startTestServer(installation, {contentDomain: null});
     const cookies = await signInAdministrator(server, installation);
     const browserHeaders = (idempotencyKey?: string): Headers => {
       const headers = new Headers({
@@ -170,6 +186,9 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
         expect(record.idempotencyKey.length).toBeGreaterThan(0);
       }
       expect(new Set(ledger.map((record) => record.id)).size).toBe(ledger.length);
+      expect(ledger.filter((record) => record.action.startsWith("asset_")))
+        .toEqual(Array.from({length: 3}, () =>
+          expect.objectContaining({versionId: published.version.id})));
     }
 
     const target = await publish(human, "aud-001-immutable-publish", {
@@ -233,8 +252,10 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
       expectedCurrentVersionId: first,
       kind: "new_version",
     });
+    const kept = await addAsset(agent, published, "audit-kept-asset");
     const baseline = await readArtifact(published);
     const baselineLedger = await readActions(published);
+    const baselineAssets = await readAssetIds(published);
 
     const unauthenticated = new Headers({
       "Content-Type": "application/json",
@@ -259,6 +280,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     expect(await readArtifact(published)).toEqual(baseline);
     expect(await readActions(published)).toEqual(baselineLedger);
 
+    const refusedAssetPlan = await planAssetUpload(agent, published);
     refuseActionRecords();
     const refusals: readonly (readonly [string, () => Promise<Response>])[] = [
       ["new artifact", () => commitPublish(agent, "aud-001-refused-new", {
@@ -301,6 +323,12 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
         body: {expectedCurrentVersionId: second.version.id},
         key: "aud-001-refused-delete",
       })],
+      ["asset commit", () => commitAssetUpload(agent, refusedAssetPlan, "audit-refused-asset-commit")],
+      ["asset copy", () => send(agent, "POST", scoped(published, "/assets/copies"), {
+        body: {sourceArtifactId: published.artifact.id, sourceAssetId: kept},
+        key: "audit-refused-asset-copy",
+      })],
+      ["asset delete", () => send(agent, "DELETE", scoped(published, `/assets/${kept}`))],
     ];
     for (const [label, attempt] of refusals) {
       // The refusals run in order so each one sees the unchanged artifact.
@@ -312,6 +340,7 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     }
     expect(await readArtifact(published)).toEqual(baseline);
     expect(await readActions(published)).toEqual(baselineLedger);
+    expect(await readAssetIds(published)).toEqual(baselineAssets);
     expect(countArtifacts()).toBe(1);
 
     acceptActionRecords();
@@ -332,7 +361,19 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     });
     expect(restored.status).toBe(200);
     await restored.arrayBuffer();
-    const recovered = (await readActions(published)).slice(0, 2).toReversed();
+    // The refused commit left its upload open, so the same key commits it now.
+    const retried = await expectJson(
+      await commitAssetUpload(agent, refusedAssetPlan, "audit-refused-asset-commit"),
+      201,
+      committedAssetSchema,
+    );
+    await expectJson(
+      await send(agent, "DELETE", scoped(published, `/assets/${kept}`)),
+      200,
+      anyJson,
+    );
+    expect(await readAssetIds(published)).toEqual([retried.asset.id]);
+    const recovered = (await readActions(published)).slice(0, 4).toReversed();
     expect(recovered).toEqual([
       expect.objectContaining({
         action: "change_tags",
@@ -343,6 +384,18 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
       expect.objectContaining({
         action: "restore",
         idempotencyKey: "aud-001-refused-restore",
+        principalId: agent.principalId,
+        versionId: first,
+      }),
+      expect.objectContaining({
+        action: "asset_added",
+        authorizedByPrincipalId: human.principalId,
+        principalId: agent.principalId,
+        versionId: first,
+      }),
+      expect.objectContaining({
+        action: "asset_deleted",
+        authorizedByPrincipalId: human.principalId,
         principalId: agent.principalId,
         versionId: first,
       }),
@@ -418,6 +471,29 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
     ));
     await expectEmpty(await send(actor, "DELETE", scoped(published, `/comments/${thread.id}`)));
 
+    const assetPlan = await planAssetUpload(actor, published);
+    const added = await expectJson(
+      await commitAssetUpload(actor, assetPlan, `${prefix}-asset`),
+      201,
+      committedAssetSchema,
+    );
+    const replayed = await expectJson(
+      await commitAssetUpload(actor, assetPlan, `${prefix}-asset`),
+      200,
+      committedAssetSchema,
+    );
+    expect(replayed).toEqual({asset: added.asset, replayed: true});
+    await expectJson(await send(actor, "POST", scoped(published, "/assets/copies"), {
+      body: {sourceArtifactId: published.artifact.id, sourceAssetId: added.asset.id},
+      key: `${prefix}-asset-copy`,
+    }), 201, committedAssetSchema);
+    const deleteAsset = () =>
+      send(actor, "DELETE", scoped(published, `/assets/${added.asset.id}`));
+    await expectJson(await deleteAsset(), 200, anyJson);
+    const repeated = await deleteAsset();
+    expect(repeated.status).toBe(404);
+    await repeated.arrayBuffer();
+
     await expectJson(await send(actor, "DELETE", scoped(published, ""), {
       body: {expectedCurrentVersionId: current},
       key: `${prefix}-delete`,
@@ -473,6 +549,48 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
       headers: actor.headers(idempotencyKey),
       method: "POST",
     });
+  }
+
+  async function planAssetUpload(
+    actor: Actor,
+    published: PublishResponse,
+  ): Promise<z.infer<typeof assetPlanSchema>> {
+    const plan = await expectJson(
+      await send(actor, "POST", scoped(published, "/assets/uploads"), {
+        body: {
+          mediaType: "image/png",
+          name: "chart.png",
+          sha256: createHash("sha256").update(assetBytes).digest("hex"),
+          size: assetBytes.byteLength,
+        },
+      }), 201, assetPlanSchema);
+    const uploaded = await fetch(plan.file.uploadUrl, {
+      body: assetBytes,
+      headers: actor.headers(),
+      method: "PUT",
+    });
+    expect(uploaded.status).toBe(200);
+    await uploaded.arrayBuffer();
+    return plan;
+  }
+
+  async function addAsset(
+    actor: Actor,
+    published: PublishResponse,
+    idempotencyKey: string,
+  ): Promise<string> {
+    const plan = await planAssetUpload(actor, published);
+    return (await expectJson(
+      await commitAssetUpload(actor, plan, idempotencyKey),
+      201,
+      committedAssetSchema,
+    )).asset.id;
+  }
+
+  async function readAssetIds(published: PublishResponse): Promise<readonly string[]> {
+    const response = await send(human, "GET", scoped(published, "/assets"));
+    return (await expectJson(response, 200, assetListingSchema)).assets
+      .map((asset) => asset.id);
   }
 
   async function readActions(published: PublishResponse): Promise<readonly ActionRecord[]> {
@@ -568,6 +686,18 @@ type PublishTarget =
     readonly kind: "edit";
     readonly path: string;
   };
+
+function commitAssetUpload(
+  actor: Actor,
+  plan: z.infer<typeof assetPlanSchema>,
+  idempotencyKey: string,
+): Promise<Response> {
+  return fetch(plan.commitUrl, {
+    body: JSON.stringify({uploadId: plan.uploadId}),
+    headers: actor.headers(idempotencyKey),
+    method: "POST",
+  });
+}
 
 function scoped(published: PublishResponse, suffix: string): string {
   return `/api/v1/artifacts/${published.artifact.id}${suffix}?projectId=${published.artifact.projectId}`;

@@ -345,6 +345,7 @@ describe("staged upload lifecycle", () => {
         createdAt: new Date(Date.parse(committed.asset.createdAt) - 1).toISOString(),
         id: new SystemIdGenerator().assetId(),
       },
+      authorizedByPrincipalId: null,
       idempotencyKey: "asset-ends-upload-once-stale",
       inputDigest: "stale-claim",
       quota: defaultAssetQuota,

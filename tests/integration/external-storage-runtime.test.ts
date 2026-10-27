@@ -1097,6 +1097,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     // Both committers hold the claim they read before the first one ended
     // the upload, as a client retrying after a lost response does.
     const command = {
+      authorizedByPrincipalId: null,
       idempotencyKey: `asset-replay-race-${randomUUID()}`,
       inputDigest: "same-asset-commit-input",
       quota: defaultAssetQuota,
@@ -1124,6 +1125,189 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       const listed = await repository.listAssets(artifact.projectId, artifact.id);
       expect(listed.assets.map((asset) => asset.id)).toEqual([first.asset.id]);
     } finally {
+      await database.close();
+      await server.stop();
+    }
+  });
+
+  test("external-storage foundation: Postgres records each asset addition, copy, and deletion as one attributed action in the asset's own transaction", async () => {
+    const token = managedTestKey("asset-actions-installation");
+    const identity = {apiToken: token, installationId: `asset-actions-${randomUUID()}`};
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const principal = managedTestPrincipal(token);
+    const published = await publishNew(server.baseUrl, token, {
+      content: "<h1>asset actions page</h1>",
+      idempotencyKey: `asset-actions-page-${randomUUID()}`,
+      name: "Asset actions page",
+    });
+    expect(published.response.status).toBe(201);
+    const {artifact, version} = published.body;
+    const chart = {
+      bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 5, 6, 7, 8]),
+      mediaType: "image/png",
+      name: "chart.png",
+    };
+    const assetActions = async () => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        token,
+        `/api/v1/artifacts/${artifact.id}/actions?limit=100`,
+      );
+      expect(response.status).toBe(200);
+      return artifactActionsSchema.parse(await response.json()).actions
+        .filter((action) => action.action.startsWith("asset_"))
+        .map((action) => ({
+          action: action.action,
+          authorizedByPrincipalId: action["authorizedByPrincipalId"],
+          idempotencyKey: action.idempotencyKey,
+          principalId: action["principalId"],
+          versionId: action.versionId,
+        }))
+        .toSorted((left, right) => left.idempotencyKey.localeCompare(right.idempotencyKey));
+    };
+    const recorded = (action: string, assetId: string) => ({
+      action,
+      authorizedByPrincipalId: principal.authorizedByPrincipalId,
+      idempotencyKey: `asset:${assetId}:${action}`,
+      principalId: principal.principalId,
+      versionId: version.id,
+    });
+    const plannedUpload = async () => {
+      const planned = await planAsset(server, token, artifact.id, chart);
+      expect(planned.status).toBe(201);
+      const plan = assetPlanSchema.parse(await planned.json());
+      expect((await putAssetBytes(plan.file.uploadUrl, token, chart.bytes)).status).toBe(200);
+      return plan;
+    };
+    const copy = (sourceAssetId: string, idempotencyKey: string) => {
+      const headers = bearerHeaders(token);
+      headers.set("Content-Type", "application/json");
+      headers.set("Idempotency-Key", idempotencyKey);
+      return fetch(`${server.baseUrl}/api/v1/artifacts/${artifact.id}/assets/copies`, {
+        body: JSON.stringify({sourceArtifactId: artifact.id, sourceAssetId}),
+        headers,
+        method: "POST",
+      });
+    };
+    const liveAssetIds = async () =>
+      (await listAssets(server, token, artifact.id)).assets.map((asset) => asset.id);
+    const suffix = randomUUID().replaceAll("-", "");
+    const refusal = `refuse_asset_actions_${suffix}`;
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    try {
+      const plan = await plannedUpload();
+      const commitKey = `asset-actions-commit-${randomUUID()}`;
+      const first = await commitAsset(plan, token, commitKey);
+      expect(first.status).toBe(201);
+      const added = committedAssetSchema.parse(await first.json()).asset;
+      const replay = await commitAsset(plan, token, commitKey);
+      expect(replay.status).toBe(200);
+      await replay.arrayBuffer();
+      const copied = await copy(added.id, `asset-actions-copy-${randomUUID()}`);
+      expect(copied.status).toBe(201);
+      const copiedAsset = committedAssetSchema.parse(await copied.json()).asset;
+      expect((await deleteAsset(server, token, artifact.id, added.id)).status).toBe(200);
+      const repeated = await deleteAsset(server, token, artifact.id, added.id);
+      expect(repeated.status).toBe(404);
+      await repeated.arrayBuffer();
+      const expected = [
+        recorded("asset_added", added.id),
+        recorded("asset_deleted", added.id),
+        recorded("asset_added", copiedAsset.id),
+      ].toSorted((left, right) => left.idempotencyKey.localeCompare(right.idempotencyKey));
+      expect(await assetActions()).toEqual(expected);
+
+      // A commit that reaches the transaction after another commit wrote its
+      // key replays that asset and records no second action.
+      const repository = await PostgresArtifactRepository.open(
+        database,
+        identity.installationId,
+      );
+      const ids = new SystemIdGenerator();
+      const command = {
+        authorizedByPrincipalId: principal.authorizedByPrincipalId,
+        idempotencyKey: `asset-actions-direct-${randomUUID()}`,
+        inputDigest: "same-direct-asset-input",
+        quota: defaultAssetQuota,
+        upload: null,
+      };
+      const direct = (id: string) => repository.commitAsset({
+        ...command,
+        asset: {
+          artifactId: artifact.id,
+          createdAt: new Date().toISOString(),
+          createdByDisplayName: principal.displayName,
+          createdByPrincipalId: principal.principalId,
+          id,
+          mediaType: "image/png",
+          name: "direct.png",
+          projectId: artifact.projectId,
+          sha256: sha256(chart.bytes),
+          size: chart.bytes.byteLength,
+        },
+      });
+      const directFirst = await direct(ids.assetId());
+      expect(await direct(ids.assetId())).toEqual({asset: directFirst.asset, replayed: true});
+      const withDirect = [...expected, recorded("asset_added", directFirst.asset.id)]
+        .toSorted((left, right) => left.idempotencyKey.localeCompare(right.idempotencyKey));
+      expect(await assetActions()).toEqual(withDirect);
+
+      // With the action insert refused for this installation only, a commit,
+      // a copy, and a delete each fail and leave the assets and actions alone.
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`CREATE FUNCTION ${refusal}() RETURNS trigger
+          LANGUAGE plpgsql AS $$
+          BEGIN
+            RAISE EXCEPTION 'the action ledger refused the write';
+          END
+          $$`);
+        yield* sql.unsafe(`CREATE TRIGGER ${refusal}
+          BEFORE INSERT ON actions
+          FOR EACH ROW
+          WHEN (NEW.installation_id = '${identity.installationId}')
+          EXECUTE FUNCTION ${refusal}()`);
+      }));
+      const liveBefore = await liveAssetIds();
+      const refusedPlan = await plannedUpload();
+      const refusedKey = `asset-actions-refused-${randomUUID()}`;
+      const refusedCommit = await commitAsset(refusedPlan, token, refusedKey);
+      expect(refusedCommit.status).toBe(500);
+      await refusedCommit.arrayBuffer();
+      const refusedCopy = await copy(copiedAsset.id, `asset-actions-refused-copy-${randomUUID()}`);
+      expect(refusedCopy.status).toBe(500);
+      await refusedCopy.arrayBuffer();
+      const refusedDelete = await deleteAsset(server, token, artifact.id, copiedAsset.id);
+      expect(refusedDelete.status).toBe(500);
+      await refusedDelete.arrayBuffer();
+      expect(await liveAssetIds()).toEqual(liveBefore);
+      expect(await assetActions()).toEqual(withDirect);
+
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`DROP TRIGGER ${refusal} ON actions`);
+      }));
+      // The refused commit left its upload open, so the same key commits now.
+      const retried = await commitAsset(refusedPlan, token, refusedKey);
+      expect(retried.status).toBe(201);
+      await retried.arrayBuffer();
+      expect((await deleteAsset(server, token, artifact.id, copiedAsset.id)).status).toBe(200);
+      expect((await assetActions()).filter((action) =>
+        action.idempotencyKey === `asset:${copiedAsset.id}:asset_deleted`
+      )).toEqual([recorded("asset_deleted", copiedAsset.id)]);
+    } finally {
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`DROP TRIGGER IF EXISTS ${refusal} ON actions`);
+        yield* sql.unsafe(`DROP FUNCTION IF EXISTS ${refusal}()`);
+      }));
       await database.close();
       await server.stop();
     }

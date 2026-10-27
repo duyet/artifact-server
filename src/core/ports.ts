@@ -673,6 +673,8 @@ export interface ArtifactRepository {
 /** Write one new asset row once its blob is stored. */
 export interface CommitAsset {
   readonly asset: AssetRecord;
+  /** The human who authorized the asset's creator, or null. */
+  readonly authorizedByPrincipalId: string | null;
   readonly idempotencyKey: string;
   readonly inputDigest: string;
   readonly quota: AssetQuota;
@@ -686,6 +688,16 @@ export interface StagedUploadClaim {
   readonly expiresAt: string;
   readonly id: string;
   readonly principalId: string;
+}
+
+/** Tombstone one live asset of one artifact. */
+export interface DeleteAsset {
+  readonly artifactId: string;
+  readonly assetId: string;
+  readonly authorizedByPrincipalId: string | null;
+  readonly deletedAt: string;
+  readonly principalId: string;
+  readonly projectId: string;
 }
 
 /** One asset row together with whether an idempotent retry returned it. */
@@ -710,15 +722,16 @@ export interface ArtifactAssetRepository {
    * expiry cleanup reclaims its staging bytes. Throws AssetLimitExceeded,
    * ArtifactNotFound, IdempotencyConflict, UploadClosed when the upload is no
    * longer open, or AssetNotFound for a replayed key whose asset was deleted.
+   * A new asset records an asset_added action against the artifact's current
+   * version in the same transaction; a replay records nothing.
    */
   commitAsset(command: CommitAsset): Promise<CommittedAsset>;
-  /** Tombstone one live asset and return it. Throws AssetNotFound. */
-  deleteAsset(
-    projectId: string,
-    artifactId: string,
-    assetId: string,
-    deletedAt: string,
-  ): Promise<AssetRecord>;
+  /**
+   * Tombstone one live asset of a live artifact, record an asset_deleted
+   * action in the same transaction, and return the asset. Throws
+   * AssetNotFound.
+   */
+  deleteAsset(command: DeleteAsset): Promise<AssetRecord>;
   /** The asset an earlier commit with this key wrote, or null when none did. */
   findIdempotentAsset(
     projectId: string,

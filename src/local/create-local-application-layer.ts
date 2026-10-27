@@ -918,10 +918,9 @@ export function createApplicationLayer(
               ? cause
               : repositoryFailure("commitAsset", cause),
         }),
-      deleteAsset: (projectId, artifactId, assetId, deletedAt) =>
+      deleteAsset: (command) =>
         Effect.tryPromise({
-          try: () =>
-            adapters.repository.deleteAsset(projectId, artifactId, assetId, deletedAt),
+          try: () => adapters.repository.deleteAsset(command),
           catch: (cause) =>
             cause instanceof AssetNotFound
               ? cause
