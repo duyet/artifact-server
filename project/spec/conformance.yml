@@ -4334,7 +4334,7 @@ requirements:
       failure: {id: FRK-011-F, description: "A deleted artifact leaves every total, the series, and the ranking, its own report is 404, an artifact read through another project is 404, an empty project reports zeros, and a key without artifact read access is 403 on both reports."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server. The Postgres and D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server. The external-storage suite now runs the Postgres aggregate queries through a pinned-clock in-process server and reads the same totals, sparse series, today counts, average, ranking, one artifact's windows, a deleted artifact leaving every count, and its 404. That suite runs only in CI with Docker, and it does not run the foreign-project 404, the empty project, or the 403 key on Postgres. The D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
     depends_on: [FRK-008, FRK-010]
     evidence: []
 
@@ -4488,7 +4488,7 @@ requirements:
       failure: {id: FRK-027-F, description: "An anonymous read never lists a private or unlisted artifact, never names an owner whose display name is an email, and carries no manage handle or viewer; a malformed, expired, or revoked session reads as anonymous with 200; the response is private and varies on Cookie; a key on the owner's own principal that may only read sees its artifacts as its own with no handle and is refused by the access API; and anonymous rows, and another member's rows, show no row menu in the browser."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The server half is proved locally against SQLite over a real server with member, administrator, read-only, and comment-only sessions, and the owner-or-administrator rule through member, administrator, and owner read-only key sessions. The Postgres catalog read runs only in CI with Docker and has no member-scope case there, the browser sparkline tooltip, sort, Mine filter, and row menu run only in the CI browser job, and no deployed run exists.
+    proof_gap: The server half is proved locally against SQLite over a real server with member, administrator, read-only, and comment-only sessions, and the owner-or-administrator rule through member, administrator, and owner read-only key sessions. The external-storage suite now runs the Postgres catalog read for an anonymous viewer, two member sessions, and an administrator session, and reads every live artifact including another member's private and unlisted ones, mine only on the member's own, a manage handle only where the owner-or-administrator rule allows, and a private response that varies on Cookie; it runs only in CI with Docker and does not cover a visibility change through a handle and the access or tags API, the member-only collapsed folders, the match with the authenticated artifact listing, expired, revoked, read-only, or comment-only sessions, an email owner name, or owner read-only keys on Postgres. The browser sparkline tooltip, sort, Mine filter, and row menu run only in the CI browser job, and no deployed run exists.
     depends_on: [FRK-009]
     evidence: []
 
