@@ -740,7 +740,8 @@ function parseMilliseconds(
   field: string,
   fallback: number,
 ): Effect.Effect<number, RuntimeConfigurationError> {
-  const value = environment[field] ?? String(fallback);
+  const value = environment[field];
+  if (value === undefined || value === "") return Effect.succeed(fallback);
   const milliseconds = Number(value);
   if (!/^\d+$/u.test(value) || milliseconds > maximumTimerMilliseconds) {
     return invalidValue(
@@ -951,11 +952,15 @@ function parseHostname(
   return parseRequiredEnvironment("ARTIFACT_SERVER_HOST", value, hostnameSchema);
 }
 
+const defaultPort = 8787;
+
+/** An empty value means unset; an explicit 0 asks the OS for a free port. */
 function parsePort(
   value: string,
 ): Effect.Effect<number, RuntimeConfigurationError> {
+  if (value === "") return Effect.succeed(defaultPort);
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+  if (!/^\d+$/u.test(value) || port > 65_535) {
     return invalidValue(
       "ARTIFACT_SERVER_PORT",
       "The port must be an integer between 0 and 65535.",

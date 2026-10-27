@@ -404,12 +404,12 @@ describe("Artifact Server lifecycle CLI", () => {
     });
   });
 
-  test("foundation: timer settings refuse values Node would silently change", async () => {
-    const parse = (overrides: NodeJS.ProcessEnv) => Effect.runPromise(
+  test("foundation: timer and port settings refuse values Node would silently change", async () => {
+    const parse = (overrides: NodeJS.ProcessEnv, port = "8787") => Effect.runPromise(
       parseExternalStorageRuntimeConfiguration({
         environment: {...externalConfigurationEnvironment(), ...overrides},
         hostname: "127.0.0.1",
-        port: "8787",
+        port,
       }),
     );
     const timerFields = [
@@ -417,13 +417,28 @@ describe("Artifact Server lifecycle CLI", () => {
       "ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS",
     ];
     await Promise.all(timerFields.flatMap((field) =>
-      ["2147483648", "3000000000", "1e3"].map((value) =>
+      ["2147483648", "3000000000", "1e3", " "].map((value) =>
         expect(parse({[field]: value})).rejects.toMatchObject({
           field,
           reason: "invalid_value",
         }))));
     await expect(parse({ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: "2147483647"}))
       .resolves.toMatchObject({shutdownDeadlineMilliseconds: 2_147_483_647});
+
+    // An empty variable, as a template or env file often leaves it, means unset.
+    await expect(parse({
+      ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "",
+      ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: "",
+    }, "")).resolves.toMatchObject({
+      port: 8787,
+      readinessWithdrawalMilliseconds: 1_000,
+      shutdownDeadlineMilliseconds: 10_000,
+    });
+    await Promise.all(["65536", "-1", " ", "80.5"].map((port) =>
+      expect(parse({}, port)).rejects.toMatchObject({
+        field: "ARTIFACT_SERVER_PORT",
+        reason: "invalid_value",
+      })));
   });
 
   test("foundation: compact serving withdraws readiness and integrity scans real committed bytes", async () => {
