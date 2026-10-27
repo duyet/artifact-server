@@ -404,6 +404,28 @@ describe("Artifact Server lifecycle CLI", () => {
     });
   });
 
+  test("foundation: timer settings refuse values Node would silently change", async () => {
+    const parse = (overrides: NodeJS.ProcessEnv) => Effect.runPromise(
+      parseExternalStorageRuntimeConfiguration({
+        environment: {...externalConfigurationEnvironment(), ...overrides},
+        hostname: "127.0.0.1",
+        port: "8787",
+      }),
+    );
+    const timerFields = [
+      "ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS",
+      "ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS",
+    ];
+    await Promise.all(timerFields.flatMap((field) =>
+      ["2147483648", "3000000000", "1e3"].map((value) =>
+        expect(parse({[field]: value})).rejects.toMatchObject({
+          field,
+          reason: "invalid_value",
+        }))));
+    await expect(parse({ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: "2147483647"}))
+      .resolves.toMatchObject({shutdownDeadlineMilliseconds: 2_147_483_647});
+  });
+
   test("foundation: compact serving withdraws readiness and integrity scans real committed bytes", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "artifact-server-drain-"));
     const dataDirectory = path.join(parent, "data");

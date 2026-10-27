@@ -732,6 +732,9 @@ function parseSampleRate(
   );
 }
 
+/** Node fires any longer timer after 1 ms instead of waiting. */
+const maximumTimerMilliseconds = 2_147_483_647;
+
 function parseMilliseconds(
   environment: NodeJS.ProcessEnv,
   field: string,
@@ -739,10 +742,10 @@ function parseMilliseconds(
 ): Effect.Effect<number, RuntimeConfigurationError> {
   const value = environment[field] ?? String(fallback);
   const milliseconds = Number(value);
-  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+  if (!/^\d+$/u.test(value) || milliseconds > maximumTimerMilliseconds) {
     return invalidValue(
       field,
-      `${field} must be a non-negative integer number of milliseconds.`,
+      `${field} must be a whole number of milliseconds from 0 through ${maximumTimerMilliseconds}.`,
     );
   }
   return Effect.succeed(milliseconds);
