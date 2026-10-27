@@ -7,7 +7,7 @@ export type ResolvedTheme = "light" | "dark";
 
 const storedPreferenceSchema = z.enum(themePreferences).catch("system");
 
-/** Shared by the home page and Workbench, so a choice in one carries to the other. */
+/** Shared by the home page and Console, so a choice in one carries to the other. */
 const storageKey = "artifact-server-theme";
 const systemDarkQuery = "(prefers-color-scheme: dark)";
 
