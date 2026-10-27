@@ -159,9 +159,10 @@ jobs:
 
   portable:
     name: macOS portability
-    # A full-tier dispatch reruns a commit whose pull request run already
-    # covers macOS, and hosted macOS runners are often short of capacity.
-    if: inputs.tier != 'release' && inputs.tier != 'full'
+    # Hosted macOS runners are often unavailable, which cancels the job with
+    # no steps run and turns every pull request and main push red; it runs
+    # daily and on a manual pr-tier dispatch instead.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'pr')
     runs-on: macos-14
     timeout-minutes: 12
     steps:
