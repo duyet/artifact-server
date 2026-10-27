@@ -57,7 +57,7 @@ describe("authenticated CLI profiles and remote publication", () => {
     await writeFile(fixture, "<h1>Recover this exact publication</h1>");
     const port = await availablePort();
     const server = startServer(serverData, port);
-    let proxy: LostCommitResponseProxy | null = null;
+    let proxy: FaultProxy | null = null;
     try {
       await waitForReady(server, port);
       const token = (await readFile(
@@ -65,7 +65,7 @@ describe("authenticated CLI profiles and remote publication", () => {
         "utf8",
       )).trim();
       const serverOrigin = `http://127.0.0.1:${port}`;
-      proxy = await startLostCommitResponseProxy(serverOrigin);
+      proxy = await startFaultProxy(serverOrigin);
       const environment = {
         ...process.env,
         ARTIFACT_SERVER_API_TOKEN: token,
@@ -81,11 +81,12 @@ describe("authenticated CLI profiles and remote publication", () => {
         "--public",
       ];
 
+      proxy.arm("drop_commit_response");
       const lost = await runCli(publicationArguments, environment);
       expect(proxy.errors()).toEqual([]);
       expect(lost.exitCode).not.toBe(0);
       expect(lost.stderr).toContain("Artifact Server could not be reached");
-      expect(proxy.droppedResponses()).toBe(1);
+      expect(proxy.injectedFaults()).toBe(1);
       const operationDirectory = path.join(profileData, "publication-operations");
       const pendingOperations = await readdir(operationDirectory);
       expect(pendingOperations).toHaveLength(1);
@@ -106,6 +107,15 @@ describe("authenticated CLI profiles and remote publication", () => {
       expect(await readdir(operationDirectory)).toHaveLength(1);
       await writeFile(fixture, "<h1>Recover this exact publication</h1>");
 
+      // The lost attempt may have committed, so a later refusal at upload
+      // says nothing about it and must keep its identity.
+      proxy.arm("alter_upload");
+      const resumedRefusal = await runCli(publicationArguments, environment);
+      expect(proxy.injectedFaults()).toBe(2);
+      expect(resumedRefusal.exitCode).not.toBe(0);
+      expect(resumedRefusal.stderr).toContain("(HTTP 422)");
+      expect(await readdir(operationDirectory)).toEqual(pendingOperations);
+
       const recovered = await runCli(publicationArguments, environment);
       expect({exitCode: recovered.exitCode, stderr: recovered.stderr}).toEqual({
         exitCode: 0,
@@ -123,6 +133,28 @@ describe("authenticated CLI profiles and remote publication", () => {
       expect(z.object({artifacts: z.array(z.unknown())}).parse(
         await listed.json(),
       ).artifacts).toHaveLength(1);
+
+      // A refusal of a fresh attempt resolves it, so the edited input
+      // publishes instead of waiting behind it.
+      const draft = path.join(temporaryDirectory, "draft.html");
+      await writeFile(draft, "<h1>First draft</h1>");
+      const draftArguments = ["publish", draft, "--profile-data", profileData];
+      proxy.arm("alter_upload");
+      const rejected = await runCli(draftArguments, environment);
+      expect(proxy.errors()).toEqual([]);
+      expect(proxy.injectedFaults()).toBe(3);
+      expect(rejected.exitCode).not.toBe(0);
+      expect(rejected.stderr).toContain("(HTTP 422)");
+      expect(await readdir(operationDirectory)).toHaveLength(0);
+
+      await writeFile(draft, "<h1>Second draft</h1>");
+      const edited = await runCli(draftArguments, environment);
+      expect({exitCode: edited.exitCode, stderr: edited.stderr}).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+      expect(publicationSchema.parse(JSON.parse(edited.stdout)).version.number).toBe(1);
+      expect(await readdir(operationDirectory)).toHaveLength(0);
     } finally {
       if (proxy !== null) await proxy.stop();
       await stopProcess(server);
@@ -439,23 +471,32 @@ interface ProcessResult {
   readonly stdout: string;
 }
 
-interface LostCommitResponseProxy {
+type ProxyFault = "alter_upload" | "drop_commit_response";
+
+interface FaultProxy {
   readonly origin: string;
-  droppedResponses(): number;
+  /** Inject this fault into the next request it matches, once. */
+  arm(fault: ProxyFault): void;
+  injectedFaults(): number;
   errors(): readonly string[];
   stop(): Promise<void>;
 }
 
-async function startLostCommitResponseProxy(
-  upstreamOrigin: string,
-): Promise<LostCommitResponseProxy> {
+async function startFaultProxy(upstreamOrigin: string): Promise<FaultProxy> {
   let origin = "";
-  let droppedResponses = 0;
+  let armed: ProxyFault | null = null;
+  let injectedFaults = 0;
   const errors: string[] = [];
   const server = createHttpServer(async (request, response) => {
     try {
       const target = new URL(request.url ?? "/", upstreamOrigin);
-      const requestBody = await readTextBody(request);
+      const receivedBody = await readTextBody(request);
+      const alterUpload = armed === "alter_upload" && request.method === "PUT";
+      if (alterUpload) {
+        armed = null;
+        injectedFaults += 1;
+      }
+      const requestBody = alterUpload ? "x".repeat(receivedBody.length) : receivedBody;
       const headers = new Headers();
       for (const [name, value] of Object.entries(request.headers)) {
         if (
@@ -473,11 +514,12 @@ async function startLostCommitResponseProxy(
       const upstream = await fetch(target, requestInit);
       const body = await upstream.text();
       if (
-        request.method === "POST"
+        armed === "drop_commit_response"
+        && request.method === "POST"
         && target.pathname.endsWith("/commit")
-        && droppedResponses === 0
       ) {
-        droppedResponses += 1;
+        armed = null;
+        injectedFaults += 1;
         response.destroy();
         return;
       }
@@ -507,7 +549,10 @@ async function startLostCommitResponseProxy(
   const address = assignedAddressSchema.parse(server.address());
   origin = `http://127.0.0.1:${address.port}`;
   return {
-    droppedResponses: () => droppedResponses,
+    arm: (fault) => {
+      armed = fault;
+    },
+    injectedFaults: () => injectedFaults,
     errors: () => errors,
     origin,
     stop: () => closeHttp(server),

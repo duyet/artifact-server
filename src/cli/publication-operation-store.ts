@@ -25,6 +25,8 @@ const publicationOperationSchema = z.object({
 export interface PublicationOperation {
   readonly complete: () => Promise<void>;
   readonly idempotencyKey: string;
+  /** An earlier process created this record, so its attempt may have committed. */
+  readonly resumed: boolean;
 }
 
 /**
@@ -53,7 +55,7 @@ export async function resumePublicationOperation(
         "The publication input changed while an earlier attempt is still pending. Restore the original input and retry so Artifact Server can reconcile it without creating a duplicate version.",
       );
     }
-    return operation(existing.idempotencyKey, operationPath);
+    return operation(existing.idempotencyKey, operationPath, true);
   }
 
   const created = publicationOperationSchema.parse({
@@ -70,7 +72,7 @@ export async function resumePublicationOperation(
   await writeSyncedPrivateFile(temporary, `${JSON.stringify(created, null, 2)}\n`);
   try {
     await link(temporary, operationPath);
-    return operation(created.idempotencyKey, operationPath);
+    return operation(created.idempotencyKey, operationPath, false);
   } catch (error) {
     const parsed = systemErrorSchema.safeParse(error);
     if (!parsed.success || parsed.data.code !== "EEXIST") throw error;
@@ -86,7 +88,7 @@ export async function resumePublicationOperation(
         {cause: error},
       );
     }
-    return operation(raced.idempotencyKey, operationPath);
+    return operation(raced.idempotencyKey, operationPath, true);
   } finally {
     await rm(temporary, {force: true});
   }
@@ -109,10 +111,12 @@ async function writeSyncedPrivateFile(
 function operation(
   idempotencyKey: string,
   operationPath: string,
+  resumed: boolean,
 ): PublicationOperation {
   return {
     complete: () => rm(operationPath, {force: true}),
     idempotencyKey,
+    resumed,
   };
 }
 
