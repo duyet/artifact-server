@@ -11,6 +11,10 @@ description: Pick and run the checks a change to this repository needs before it
 4. If the change touches a hot path (publish, read, list, or staging), also run `pnpm perf:baseline` before and after the change on the same machine.
 5. Before you hand off a branch, run `pnpm verify:iteration` or the CI full gate. To run the full gate on a branch, use `gh workflow run ci.yml --ref <branch> -f tier=full`. Pull-request CI skips it.
 
+## Before committing
+
+- Running `pnpm test` or the external-storage suite rewrites the reports in `project/evidence/`. Restore them with `git checkout origin/main -- project/evidence` unless you mean to attach that run as evidence. The ledger refuses a report that records any failed test, and a local run under load often contains a timeout.
+
 ## Reading failures
 
 - A test that fails only in a full parallel run and passes alone is load or timing. Confirm by running it alone three times before you blame the change.
