@@ -8,6 +8,7 @@ import {
   type RunningTestServer,
   type TestInstallation,
 } from "../support/runtime-harness.js";
+import {issueApiKey, signInAdministrator} from "../support/agent-dispatch.js";
 import {publishSite} from "../support/same-host-site.js";
 
 const today = "2026-10-17";
@@ -137,6 +138,26 @@ describe("public info of the artifact a readable URL serves", () => {
     const text = await (await readInfo("/2026/10/agent-console/")).text();
     expect(text).not.toContain(ownerId);
     expect(text).not.toContain("@");
+
+    // An OIDC member admitted without name claims is named by their email.
+    const administrator = await signInAdministrator(server, installation);
+    const emailNamedKey = await issueApiKey(
+      server,
+      administrator,
+      ["artifact:create", "artifact:read"],
+      "ada@example.test",
+    );
+    const emailNamed = await publishSite(server, {...installation, apiToken: emailNamedKey}, {
+      accessSetting: "public_link",
+      name: "Email named owner",
+      path: "2026/10/email-named-owner",
+    });
+    expect(emailNamed.artifact.owner.displayName).toBe("ada@example.test");
+    const emailNamedInfo = await readInfo("/2026/10/email-named-owner/");
+    expect(emailNamedInfo.status).toBe(200);
+    const emailNamedText = await emailNamedInfo.text();
+    expect(publicInfoSchema.parse(JSON.parse(emailNamedText)).owner).toEqual({displayName: null});
+    expect(emailNamedText).not.toContain("@");
 
     await server.stop();
     server = await startTestServer(installation, {contentDomain: "localhost"});

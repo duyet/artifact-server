@@ -89,7 +89,7 @@ Before this change, any direct human member could change any artifact's access, 
 }
 ```
 
-- `owner.displayName` is the name stored when the artifact was created, or null for an artifact created before names were recorded. The response never carries the owner's principal ID or an email.
+- `owner.displayName` is the name stored when the artifact was created. It is null for an artifact created before names were recorded, and for a name that holds an email address, such as an OIDC member admitted without name claims. The response never carries the owner's principal ID or an email.
 - `version` and `updatedAt` describe the current version. `updatedAt` is that version's creation time, the same value the home page tree calls `updatedAt`.
 - `views.daily` is the sparse series of `readArtifactActivity`, ascending, with only the days that have views. The popover fills the missing days with zero to draw 30 bars that end today.
 - `canManage` is `canManageArtifact` for the reader. The popover offers the visibility control only when it is true, and Share's access screen turns read-only when it is false. The info read also reads views, so while it loads or after it fails Share keeps its access controls and the server decides; a refused change shows that only the owner or an administrator can make it.

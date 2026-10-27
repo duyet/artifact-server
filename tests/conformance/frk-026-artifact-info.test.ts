@@ -448,6 +448,19 @@ describe("artifact info and the visibility permission", () => {
     expect(ownRead.text).not.toContain(member.memberId);
     expect(keyRead.text).not.toContain(theirs.artifact.owner.principalId);
     expect(keyRead.text).not.toContain("administrator@example.test");
+
+    // A display name that is an email is withheld, even from its own owner.
+    const emailNamedKey = await issueMemberKey(
+      member.administrator,
+      member.memberId,
+      ["artifact:create", "artifact:read"],
+      "member@example.test",
+    );
+    const emailNamed = await publishAs(emailNamedKey, "Email named notes");
+    expect(emailNamed.artifact.owner.displayName).toBe("member@example.test");
+    const emailNamedRead = await info(memberKey, emailNamed.artifact.id);
+    expect(emailNamedRead.body.owner).toEqual({displayName: null});
+    expect(emailNamedRead.text).not.toContain("@");
   }, 60_000);
 
   async function callTool(

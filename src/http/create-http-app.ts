@@ -177,6 +177,7 @@ import {
   portableDownloadFilename,
 } from "./content-disposition.js";
 import {
+  ownerName,
   PublicArtifactCatalogService,
   publicCatalogLimit,
 } from "../application/public-artifact-catalog.js";
@@ -3299,15 +3300,16 @@ function publishResponse(
 }
 
 /**
- * The viewer's info popover. The owner appears by stored display name only:
- * the owner's principal ID and any email stay out of this response.
+ * The viewer's info popover. The owner appears by stored display name only,
+ * withheld when it holds an email: the owner's principal ID and any email
+ * stay out of this response.
  */
 function artifactInfoResponse(info: ArtifactInfo) {
   return {
     artifactId: info.artifact.id,
     canManage: info.canManage,
     name: info.artifact.name,
-    owner: {displayName: info.artifact.owner.displayName},
+    owner: {displayName: ownerName(info.artifact.owner.displayName)},
     updatedAt: info.current.createdAt,
     version: {id: info.current.id, number: info.current.number},
     views: {
