@@ -6,7 +6,7 @@ Do not use a public issue for a suspected security vulnerability. Read the [secu
 
 ## Before you start
 
-Search the [open issues](https://github.com/plannotator/artifact-server/issues) before you start work.
+Search the [open issues](https://github.com/duyet/artifact-server/issues) before you start work.
 
 Open an issue before a large feature or architecture change. Describe the user problem, the proposed behavior, and the affected deployment modes.
 
@@ -17,7 +17,7 @@ Small bug fixes and documentation corrections do not require an issue.
 Install Node.js 24.12 or newer and pnpm 10.34.3.
 
 ```sh
-git clone https://github.com/plannotator/artifact-server.git
+git clone https://github.com/duyet/artifact-server.git
 cd artifact-server
 pnpm install
 pnpm dev

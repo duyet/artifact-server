@@ -2,157 +2,153 @@
 
 # Artifact Server
 
-**The open-source, self-hostable alternative to Claude Code artifacts.**
+Artifact Server is a self-hosted server where agents publish versioned HTML artifacts and people review, comment on, and share them. Agents publish through the built-in MCP server or the `artifactserver` CLI. People open an exact version in Review, comment on it, and share a stable link that follows the current version.
 
-Artifact Server gives people and agents one place to publish, review, comment on, version, and share the artifacts they create while building products. Its built-in MCP server gives agents direct access to the same work.
+This repository is a fork of [plannotator/artifact-server](https://github.com/plannotator/artifact-server). It targets one deployment shape: a private team server on one host, where readers open shared links without signing in and agents publish with API keys. Upstream parity is not a goal.
 
-Run it on a laptop for one developer. Deploy it for a private team on one server or Kubernetes.
+## What this fork adds
 
-<p align="center">
-  <a href="https://github.com/backnotprop/plannotator"><img src="./docs/images/star-plannotator.svg" alt="Artifact Server is created with Plannotator" width="395"></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://plannotator.ai/workspaces"><img src="./docs/images/plannotator-workspaces.svg" alt="Plannotator Workspaces is the planning layer for your software factory" width="395"></a>
-</p>
+- **Path mode.** Without `ARTIFACT_SERVER_CONTENT_DOMAIN`, the server serves artifacts from the application host under a CSP sandbox, so one host name and one TLS certificate are enough. See [DESIGN.md](./docs/fork/DESIGN.md).
+- **Readable paths.** `artifactserver publish --path 2026/10/release-checklist` gives an artifact the link `/2026/10/release-checklist/`, and new versions keep it. See [the CLI guide](./docs/cli.md#choose-a-readable-path).
+- **Reading without login.** On a team server, new artifacts default to public links, and people sign in to Review with an API key. See [DESIGN.md section 5](./docs/fork/DESIGN.md#5-no-login-mode).
+- **OpenID Connect sign-in.** Set `ARTIFACT_SERVER_OIDC_ISSUER`, and Review shows **Sign in with SSO** next to the API-key form. The provider must send a verified `email` claim that matches a member's email. See [the runbook](./docs/fork/RUNBOOK.md#sign-in-with-oidc).
+- **Public home page.** `/` lists public artifacts as a folder tree with view counts, sparklines, and a daily chart. An owner can make a folder start collapsed. See [HOMEPAGE.md](./docs/fork/HOMEPAGE.md).
+- **Viewer bar.** A bar above each artifact shows your logo, the artifact name, an info popover with views and visibility, and an actions menu. It appears in Review and at readable URLs. See [VIEWER.md](./docs/fork/VIEWER.md).
+- **Asset store.** Each artifact holds images, data files, and other media outside its versions, served at `/_blob/<id>`. See [ASSETS.md](./docs/fork/ASSETS.md).
+- **Broken reference check.** Each publish counts the references that the version's own files cannot satisfy, and `artifactserver assets check` lists them. See [the MCP guide](./docs/mcp.md#check-a-published-folder-for-broken-references).
+- **Per-person keys.** `artifactserver admin issue-key --role member` gives each person their own key, and the key's name is the author of each write it makes. See [the runbook](./docs/fork/RUNBOOK.md#give-each-person-a-key).
+- **Review app changes.** Rename, duplicate, and edit one text file of an artifact, read project analytics, search with a command palette, and switch between light, dark, and system themes.
+- **Releases on GHCR.** A `vX.Y.Z` tag publishes the container image and the Helm chart. See [the runbook](./docs/fork/RUNBOOK.md#release).
 
-## Contents
+The fork also removes upstream parts that it does not run: the Cloudflare and Pulumi deployments, the Azure Blob and Google Cloud Storage adapters, upstream's hosted sign-in, Git history, linked artifacts, the Docker Compose and npm launcher packages, and the docs site. [SIMPLIFY.md](./docs/fork/SIMPLIFY.md) proposes more deletions. Nothing in it is done yet.
 
-- [Why Artifact Server](#why-artifact-server)
-- [Built for AI agents and team collaboration](#built-for-ai-agents-and-team-collaboration)
-- [Deploy it for a team](#deploy-it-for-a-team)
-- [Run it locally](#run-it-locally)
-- [Usage](#usage)
-- [Security model](#security-model)
-- [Development and project records](#development-and-project-records)
+## Quick start
 
-## Why Artifact Server
+Running from source needs Node.js 24.12 or newer and pnpm 10.34.3.
 
-Teams now use HTML, images, and video for plans, mockups, prototypes, code reviews, and other work created during product development. That work quickly becomes disorganized, and providers try to lock it inside their platforms.
+1. Clone the repository and start a local server.
 
-Artifact Server gives teams a self-hosted place to organize and collaborate on that work. Store artifacts by project, share them, comment on them, and keep control of the files and data.
+   ```sh
+   git clone https://github.com/duyet/artifact-server.git
+   cd artifact-server
+   pnpm install
+   pnpm dev
+   ```
 
-## Built for AI agents and team collaboration
+   The server listens on `http://localhost:8787`. Open the printed URL.
 
-<p>
-  <img src="./apps/web/src/review/assets/agents/claude.svg" alt="Claude" width="30" height="30">
-  &nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./apps/web/src/review/assets/agents/codex-dark.svg">
-    <img src="./apps/web/src/review/assets/agents/codex-light.svg" alt="Codex" width="30" height="30">
-  </picture>
-  &nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./apps/web/src/review/assets/agents/cursor-dark.svg">
-    <img src="./apps/web/src/review/assets/agents/cursor-light.svg" alt="Cursor" width="27" height="30">
-  </picture>
-  &nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./apps/web/src/review/assets/agents/copilot-dark.svg">
-    <img src="./apps/web/src/review/assets/agents/copilot-light.svg" alt="GitHub Copilot" width="37" height="30">
-  </picture>
-  &nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./apps/web/src/review/assets/agents/pi.svg">
-    <img src="./apps/web/src/review/assets/agents/pi-light.svg" alt="Pi" width="30" height="30">
-  </picture>
-  &nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./apps/web/src/review/assets/agents/opencode-dark.svg">
-    <img src="./apps/web/src/review/assets/agents/opencode-light.svg" alt="OpenCode" width="24" height="30">
-  </picture>
-</p>
+2. Create an API key under **Settings › API keys**, then connect your agent. For Claude Code:
 
-<p align="center">
-  <a href="./docs/mcp.md"><img src="./docs/assets/agent-native-mcp.svg" alt="AI agents connect to Artifact Server through its built-in MCP server" width="395"></a>
-  &nbsp;&nbsp;
-  <img src="./docs/assets/team-collaboration.svg" alt="Team members add comments to exact artifact versions" width="395">
-</p>
+   ```sh
+   claude mcp add --transport http artifact-server http://localhost:8787/mcp --header "Authorization: Bearer <key>"
+   ```
 
-Artifact Server includes a built-in MCP server and a portable Agent Skill. Agents publish and update versioned artifacts. Teams review, comment on, and share the same work.
+   For Codex, Cursor, and VS Code, add `http://localhost:8787/mcp` as a remote HTTP MCP server with the header `Authorization: Bearer <key>`. The [MCP guide](./docs/mcp.md) covers team servers and the supported operations.
 
-Start the server with `artifactserver start`, connect the agent to `http://localhost:8787/mcp` with an API key from Settings › API keys (the [MCP guide](./docs/mcp.md) has the client commands), then install the skill:
+3. Install the agent skill.
+
+   ```sh
+   npx skills add duyet/artifact-server
+   ```
+
+4. Ask the agent to publish something.
+
+   ```text
+   /artifact-server upload that HTML design doc
+   ```
+
+   The agent returns the Review link first.
+
+The local server is for one developer on loopback. Path mode, readable paths, reading without login, and OIDC sign-in need a team server.
+
+### Run a team server from the image
+
+Compact mode keeps SQLite metadata and files in one data directory. The image runs as user `node` and is built for `linux/amd64`. Pick a version from the [tags](https://github.com/duyet/artifact-server/tags), then initialize the data directory and start the server.
 
 ```sh
-npx skills add duyet/artifact-server
+docker run --rm --volume artifact-data:/var/lib/artifact-server \
+  ghcr.io/duyet/artifact-server:<version> \
+  init --admin-email admin@example.com --data /var/lib/artifact-server/data
+
+docker run --detach --name artifact-server --publish 8787:8787 \
+  --volume artifact-data:/var/lib/artifact-server \
+  --env ARTIFACT_SERVER_ORIGIN=https://artifacts.example.com \
+  ghcr.io/duyet/artifact-server:<version> \
+  start-compact --data /var/lib/artifact-server/data --host 0.0.0.0 --port 8787
 ```
 
-Then ask:
+`ARTIFACT_SERVER_ORIGIN` must be an `https://` origin, so put a TLS proxy in front of port 8787. `init` writes the bootstrap API key to `data/secrets/api-token` in the volume. That key publishes but cannot administer. To create an administrator key, follow [Recover administrator access](./docs/fork/RUNBOOK.md#recover-administrator-access).
 
-```text
-/artifact-server upload that HTML design doc
-```
+## Configuration
 
-The agent returns the full-screen review link first. [Read the MCP guide](./docs/mcp.md) for source checkouts, remote servers, permissions, and supported operations.
+The server reads its settings from environment variables. These are the ones that the fork adds or that most deployments set.
 
-Live session delivery is available from source for Pi and Claude Code Channels. Claude Channels require its research-preview development flag and, on managed plans, the organization policy. The OpenCode adapter is not release-qualified; live-host verification and contributions are welcome.
-
-<p align="center">
-  <a href="./integrations/pi/README.md"><img src="./docs/assets/pi-live-feedback.svg" alt="Artifact Server has native Pi support for live integrated feedback" width="268"></a>
-  <a href="./integrations/claude-channel/README.md"><img src="./docs/assets/claude-channel-feedback.svg" alt="Artifact Server supports live feedback through the Claude Code Channels research preview" width="268"></a>
-  <a href="./integrations/opencode/README.md"><img src="./docs/assets/opencode-plugin-wanted.svg" alt="OpenCode live-host verification, features, and pull requests are welcome" width="268"></a>
-</p>
-
-## Deploy it for a team
-
-Every remote deployment uses one trusted application origin and one isolated wildcard content domain.
-
-| Deployment | Data layer | Guide |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| Kubernetes | PostgreSQL and object storage | [Helm guide](./packaging/helm/artifact-server/README.md) |
+| `ARTIFACT_SERVER_ORIGIN` | required | The application's `https://` origin, without a path. |
+| `ARTIFACT_SERVER_CONTENT_DOMAIN` | unset | Unset serves artifacts from the application host (path mode). Set it to a separate registrable domain to give each version its own origin, as upstream does. |
+| `ARTIFACT_SERVER_OIDC_ISSUER` | unset (off) | The `https://` issuer URL of an OpenID Connect provider. Setting it turns on OIDC sign-in. |
+| `ARTIFACT_SERVER_OIDC_CLIENT_ID` | required with an issuer | The client ID registered for this server. |
+| `ARTIFACT_SERVER_OIDC_CLIENT_SECRET` | required with an issuer | The client secret. |
+| `ARTIFACT_SERVER_OIDC_SCOPES` | `openid email profile` | Space-separated scopes that include `openid`. |
+| `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS` | `reject` | `reject` a verified email that names no member, or `admit` it as a new member. |
+| `ARTIFACT_SERVER_LOGO` | unset | The viewer bar logo: an `https://` URL, or an absolute path to an image file of at most 256 KiB. |
+| `ARTIFACT_SERVER_LOGO_ALT` | required with a logo | The logo's alternative text, 1 to 100 characters. |
+| `ARTIFACT_SERVER_LOGO_LINK` | unset | Where the logo links: an `https://` URL or a path such as `/`. |
+| `ARTIFACT_SERVER_HELP_URL` | unset | Adds a **Help** item to the account menu: an `https://` URL or a path that starts with one `/`. |
+| `ARTIFACT_SERVER_ASSET_QUOTA_COUNT` | `500` | The maximum number of assets for each artifact. |
+| `ARTIFACT_SERVER_ASSET_QUOTA_BYTES` | `536870912` (512 MiB) | The maximum asset bytes for each artifact. |
 
-[Read the runbook](./docs/fork/RUNBOOK.md) for the Helm install against PostgreSQL and S3-compatible storage.
+External-storage mode (Postgres and S3) also reads `ARTIFACT_SERVER_DATABASE_URL`, `ARTIFACT_SERVER_INSTALLATION_ID`, `ARTIFACT_SERVER_API_TOKEN`, `ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL`, and the `ARTIFACT_SERVER_S3_*` variables. The Helm chart sets those from its values. Each secret also accepts a `_FILE` variant, such as `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE`, that names a file holding the value. Setting both forms fails at startup.
 
-## Run it locally
+The Helm chart has no values for the OIDC, logo, help, or asset quota variables. To use them on Kubernetes, add them to the Deployment in your own manifests.
 
-Local mode stores metadata in SQLite and files on disk. It grants owner access only from the same loopback origin. Running from source requires Node.js 24.12 or newer and pnpm 10.34.3.
+Run `artifactserver config check` to see the parsed configuration before a rollout. The output names each secret's source and never its value.
+
+## Deploy on Kubernetes
+
+Each `vX.Y.Z` tag publishes two public packages:
+
+- The image `ghcr.io/duyet/artifact-server:X.Y.Z` for `linux/amd64`, with provenance and SBOM attestations.
+- The chart `oci://ghcr.io/duyet/charts/artifact-server` at version `X.Y.Z`. Its `values.yaml` pins the image by digest.
+
+The chart runs external-storage mode against your Postgres database and S3-compatible bucket. The release workflow summary lists the chart digest. Install by that digest, so one pin fixes both the chart and the image:
 
 ```sh
-git clone https://github.com/plannotator/artifact-server.git
-cd artifact-server
-pnpm install
-pnpm dev
+helm upgrade --install artifact-server \
+  oci://ghcr.io/duyet/charts/artifact-server@sha256:<chart digest> \
+  --namespace artifact-server \
+  --values artifact-server-values.yaml \
+  --rollback-on-failure --wait
 ```
 
-Open the printed URL.
-
-## Usage
-
-Most artifacts are published by an agent through the [Artifact Server Skill](./skills/artifact-server/SKILL.md) or [MCP](./docs/mcp.md). For direct access, use the `artifactserver` CLI to publish files and directories, connect to remote servers, and create new versions. [Read the CLI guide](./docs/cli.md).
+The [runbook](./docs/fork/RUNBOOK.md) covers the bucket, the database role, the runtime Secret, the values file, the ingress annotations that uploads need, backup and restore, and upgrades. The [chart README](./packaging/helm/artifact-server/README.md) lists every value.
 
 ## Security model
 
-Artifact Server serves untrusted artifact content from isolated version hosts, separate from the trusted application origin used for authentication, review, comments, API, and MCP. Private content uses version-scoped browser sessions, and untrusted paths cannot select storage locations.
+With a content domain, the server keeps upstream's isolation: each version gets its own origin on a separate registrable domain. In path mode, artifacts share the application's origin, and a CSP `sandbox` without `allow-same-origin` is the one layer between artifact code and the application. Artifact code then cannot read cookies, call the API with the viewer's session, or use `localStorage`. [DESIGN.md section 4](./docs/fork/DESIGN.md#4-isolation-on-one-origin) lists what breaks for artifacts and the risk that remains.
 
-Read the [security model](./project/spec/decisions/0002-shared-identity-and-private-content.md) or [report a vulnerability](./SECURITY.md).
+Read the [security policy](./SECURITY.md) before you report a vulnerability.
 
-## Development and project records
+## Development
 
-Install dependencies and run the focused development checks:
+Install dependencies once with `pnpm install`. Every pull request to `main` must pass five checks. To run a check locally, run its commands:
 
-```sh
-pnpm install
-pnpm check
-pnpm test:web
-```
+| Check | Commands |
+| --- | --- |
+| PR / Build and static policy | `pnpm check:ci`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm conformance:validate`, `pnpm conformance:tests` |
+| PR / Unit and conformance behavior | `pnpm build`, then `pnpm test` |
+| PR / Browser behavior | `pnpm build`, `pnpm exec playwright install --with-deps chromium`, then `pnpm test:web:prebuilt` |
+| Helm chart static checks | `pnpm verify:helm-static` |
+| Versity S3 gateway | `pnpm test:storage-versity` (needs Docker) |
 
-Run the complete iteration gate before a handoff:
+The conformance checks need Ruby. `pnpm verify:changed` picks the checks that match the paths you changed.
 
-```sh
-pnpm verify:iteration
-```
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md) before you open a pull request, and search the [open issues](https://github.com/duyet/artifact-server/issues) first. The [`project`](./project) directory holds the specifications, the [conformance ledger](./project/spec/conformance.yml), and the test evidence. The [documentation index](./docs/README.md) lists the other guides, including the upstream live-feedback integrations for Pi, Claude Code Channels, and OpenCode under [`integrations`](./integrations).
 
-Repository engineering rules live in [AGENTS.md](./AGENTS.md).
+## License and credit
 
-The [`project`](./project) directory contains specifications, conformance evidence, performance records, prototypes, and research. Start with:
-
-- [Product specification](./project/spec/artifact-server-product-spec.html)
-- [Conformance ledger](./project/spec/conformance.yml)
-- [MCP baseline](./project/spec/artifact-server-mcp-baseline.md)
-- [Performance findings](./project/performance/FINDINGS.md)
-- [Project records index](./project/README.md)
-
-Public guides live in the [documentation index](./docs/README.md).
-
-## License
+Artifact Server was created by [backnotprop](https://x.com/backnotprop) as part of [Plannotator](https://github.com/backnotprop/plannotator). This fork builds on [plannotator/artifact-server](https://github.com/plannotator/artifact-server) and keeps its license.
 
 Artifact Server is dual-licensed under either of
 
@@ -165,15 +161,3 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in this project by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
-
----
-
-<p align="center">
-  <a href="https://github.com/backnotprop/plannotator"><img src="./docs/images/star-plannotator.svg" alt="Artifact Server is created with Plannotator" width="395"></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://plannotator.ai/workspaces"><img src="./docs/images/plannotator-workspaces.svg" alt="Plannotator Workspaces is the planning layer for your software factory" width="395"></a>
-</p>
-
-<p align="center">
-  created by <a href="https://x.com/backnotprop">backnotprop</a>
-</p>
