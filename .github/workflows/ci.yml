@@ -119,7 +119,8 @@ jobs:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'pr')
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Installing Chromium with its system packages has taken up to 9 minutes.
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
