@@ -78,6 +78,7 @@ const publishResponseSchema = z.object({
     currentVersionId: z.string(),
     id: z.string(),
     name: z.string(),
+    path: z.string().nullable(),
     projectId: z.string(),
   }),
   links: z.object({artifact: z.url(), version: z.url()}),
@@ -303,6 +304,30 @@ const artifactInfoSchema = z.object({
   }).strict(),
   visibility: z.enum(["private", "public", "unlisted"]),
   windowDays: z.literal(30),
+}).strict();
+
+const artifactStateSchema = z.object({
+  artifact: z.object({id: z.string(), name: z.string()}).loose(),
+  replayed: z.boolean(),
+  version: z.object({id: z.string()}).loose(),
+}).loose();
+
+const artifactActionsSchema = z.object({
+  actions: z.array(z.object({
+    action: z.string(),
+    idempotencyKey: z.string(),
+    versionId: z.string(),
+  }).loose()),
+}).loose();
+
+const folderTreeSchema = z.object({
+  artifacts: z.array(z.object({name: z.string()}).loose()),
+  collapsedFolders: z.array(z.string()),
+}).loose();
+
+const folderDefaultSchema = z.object({
+  defaultState: z.enum(["collapsed", "expanded"]),
+  path: z.string(),
 }).strict();
 
 const sessionPrincipalSchema = z.object({
@@ -3433,6 +3458,347 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     expect((await readInfo(alice, "art_00000000-0000-4000-8000-000000000000")).status)
       .toBe(404);
   });
+
+  test("external-storage foundation: Postgres renames over HTTP and MCP, replays the name a key set, and refuses a stale version or a reused key without changing anything", async () => {
+    const identity = {
+      apiToken: managedTestKey("artifact-rename"),
+      installationId: `artifact-rename-${randomUUID()}`,
+    };
+    // Each action a minute after the last, so newest first is fixed.
+    const clock = new MutableClock();
+    const server = await startInProcessExternalStorageServer(environment, identity, {clock});
+    const rename = async (
+      artifactId: string,
+      idempotencyKey: string,
+      body: {readonly expectedCurrentVersionId: string; readonly name: string},
+    ) => {
+      const response = await mutateArtifact(
+        server.baseUrl,
+        identity.apiToken,
+        `/api/v1/artifacts/${artifactId}/name`,
+        "PATCH",
+        idempotencyKey,
+        body,
+      );
+      clock.advance(60_000);
+      return response;
+    };
+    const searchNames = async (search: string) => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        identity.apiToken,
+        `/api/v1/artifacts?search=${encodeURIComponent(search)}`,
+      );
+      expect(response.status).toBe(200);
+      return artifactListSchema.parse(await response.json()).artifacts
+        .map((item) => item.artifact.name);
+    };
+    const renamedActions = async (artifactId: string) => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        identity.apiToken,
+        `/api/v1/artifacts/${artifactId}/actions?limit=100`,
+      );
+      expect(response.status).toBe(200);
+      return artifactActionsSchema.parse(await response.json()).actions
+        .filter((action) => action.action === "renamed")
+        .map(({idempotencyKey, versionId}) => ({idempotencyKey, versionId}));
+    };
+    const publish = async (name: string) => {
+      const published = await publishNew(server.baseUrl, identity.apiToken, {
+        accessSetting: "account_required",
+        content: `<!doctype html><title>${name}</title>`,
+        idempotencyKey: `artifact-rename-publish-${randomUUID()}`,
+        name,
+      });
+      expect(published.response.status).toBe(201);
+      clock.advance(60_000);
+      return published.body;
+    };
+
+    const draft = await publish("Quarterly draft");
+    const firstKey = `artifact-rename-first-${randomUUID()}`;
+    const renamed = await rename(draft.artifact.id, firstKey, {
+      expectedCurrentVersionId: draft.version.id,
+      name: "  Quarterly report  ",
+    });
+    expect(renamed.status).toBe(200);
+    expect(artifactStateSchema.parse(await renamed.json())).toMatchObject({
+      artifact: {id: draft.artifact.id, name: "Quarterly report"},
+      replayed: false,
+      // A rename saves no version.
+      version: {id: draft.version.id},
+    });
+    expect(await searchNames("quarterly report")).toEqual(["Quarterly report"]);
+    expect(await searchNames("draft")).toEqual([]);
+
+    const mcpKey = `artifact-rename-mcp-${randomUUID()}`;
+    const viaMcp = await externalStorageMcpRequest(
+      server.baseUrl,
+      identity.apiToken,
+      "tools/call",
+      {
+        arguments: {
+          artifactId: draft.artifact.id,
+          expectedCurrentVersionId: draft.version.id,
+          idempotencyKey: mcpKey,
+          name: "Quarterly report (final)",
+        },
+        name: "artifact_rename",
+      },
+      "artifact_rename",
+    );
+    clock.advance(60_000);
+    expect(viaMcp.status).toBe(200);
+    const mcpResult = mcpToolResultSchema.parse(await viaMcp.json()).result;
+    expect(mcpResult.isError).not.toBe(true);
+    expect(artifactStateSchema.parse(mcpResult.structuredContent).artifact.name)
+      .toBe("Quarterly report (final)");
+    expect(await searchNames("final")).toEqual(["Quarterly report (final)"]);
+
+    // The first key replays the name it set, not the name the artifact has now.
+    const replayed = await rename(draft.artifact.id, firstKey, {
+      expectedCurrentVersionId: draft.version.id,
+      name: "  Quarterly report  ",
+    });
+    expect(replayed.status).toBe(200);
+    expect(artifactStateSchema.parse(await replayed.json())).toMatchObject({
+      artifact: {name: "Quarterly report"},
+      replayed: true,
+      version: {id: draft.version.id},
+    });
+    const [current] = (await listArtifacts(server.baseUrl, identity.apiToken)).body.artifacts;
+    expect(current?.artifact).toMatchObject({
+      currentVersionId: draft.version.id,
+      name: "Quarterly report (final)",
+    });
+    expect(await renamedActions(draft.artifact.id)).toEqual([
+      {idempotencyKey: mcpKey, versionId: draft.version.id},
+      {idempotencyKey: firstKey, versionId: draft.version.id},
+    ]);
+
+    const roadmap = await publish("Roadmap");
+    const second = await publishVersion(server.baseUrl, identity.apiToken, {
+      artifactId: roadmap.artifact.id,
+      content: "<!doctype html><title>Roadmap two</title>",
+      expectedCurrentVersionId: roadmap.version.id,
+      idempotencyKey: `artifact-rename-roadmap-second-${randomUUID()}`,
+    });
+    expect(second.response.status).toBe(201);
+    const secondVersionId = publishResponseSchema.parse(second.body).version.id;
+
+    const stale = await rename(roadmap.artifact.id, `artifact-rename-stale-${randomUUID()}`, {
+      expectedCurrentVersionId: roadmap.version.id,
+      name: "Stale roadmap",
+    });
+    expect(stale.status).toBe(409);
+    expect(commentFailureSchema.parse(await stale.json()).error.code)
+      .toBe("ARTIFACT_MUTATION_CONFLICT");
+    expect(await searchNames("roadmap")).toEqual(["Roadmap"]);
+
+    const acceptedKey = `artifact-rename-accepted-${randomUUID()}`;
+    const accepted = await rename(roadmap.artifact.id, acceptedKey, {
+      expectedCurrentVersionId: secondVersionId,
+      name: "Roadmap 2027",
+    });
+    expect(accepted.status).toBe(200);
+    const reused = await rename(roadmap.artifact.id, acceptedKey, {
+      expectedCurrentVersionId: secondVersionId,
+      name: "Roadmap 2028",
+    });
+    expect(reused.status).toBe(409);
+    expect(commentFailureSchema.parse(await reused.json()).error.code)
+      .toBe("IDEMPOTENCY_CONFLICT");
+    expect(await searchNames("roadmap")).toEqual(["Roadmap 2027"]);
+    expect(await renamedActions(roadmap.artifact.id)).toEqual([
+      {idempotencyKey: acceptedKey, versionId: secondVersionId},
+    ]);
+  });
+
+  test("external-storage foundation: Postgres stores collapsed folders, names only those the public tree lists, and refuses a key that may not manage them", async () => {
+    const identity = {
+      apiToken: managedTestKey("collapsed-folders"),
+      installationId: `collapsed-folders-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const readTree = async () => {
+      const response = await fetch(`${server.baseUrl}/api/v1/public/tree`);
+      expect(response.status).toBe(200);
+      return folderTreeSchema.parse(await response.json());
+    };
+    const setFolder = (
+      body: {readonly defaultState: "collapsed" | "expanded"; readonly path: string},
+      token = identity.apiToken,
+    ) => fetch(`${server.baseUrl}/api/v1/folder-defaults`, {
+      body: JSON.stringify(body),
+      headers: {Authorization: `Bearer ${token}`, "Content-Type": "application/json"},
+      method: "PUT",
+    });
+    const publish = async (
+      name: string,
+      artifactPath: string,
+      accessSetting: "account_required" | "public_link" = "public_link",
+    ) => {
+      const published = await publishNew(server.baseUrl, identity.apiToken, {
+        accessSetting,
+        content: `<!doctype html><title>${name}</title>`,
+        idempotencyKey: `collapsed-folders-${randomUUID()}`,
+        name,
+        path: artifactPath,
+      });
+      expect(published.response.status).toBe(201);
+      expect(published.body.artifact.path).toBe(artifactPath);
+    };
+
+    await publish("Old report", "team/archive/old-report");
+    await publish("Q1 notes", "team/archive/2025/q1-notes");
+    await publish("Agent console", "2026/10/agent-console");
+    expect((await readTree()).collapsedFolders).toEqual([]);
+
+    const collapsed = await setFolder({defaultState: "collapsed", path: "/team/archive/"});
+    expect(collapsed.status).toBe(200);
+    expect(folderDefaultSchema.parse(await collapsed.json()))
+      .toEqual({defaultState: "collapsed", path: "team/archive"});
+    // A repeated set is the same stored state, not a second row or a conflict.
+    expect((await setFolder({defaultState: "collapsed", path: "team/archive"})).status)
+      .toBe(200);
+    expect((await setFolder({defaultState: "collapsed", path: "team/archive/2025"})).status)
+      .toBe(200);
+    const tree = await readTree();
+    expect(tree.collapsedFolders).toEqual(["team/archive", "team/archive/2025"]);
+    expect(tree.artifacts.map((artifact) => artifact.name).toSorted())
+      .toEqual(["Agent console", "Old report", "Q1 notes"]);
+
+    const expanded = await externalStorageMcpRequest(
+      server.baseUrl,
+      identity.apiToken,
+      "tools/call",
+      {
+        arguments: {defaultState: "expanded", path: "team/archive"},
+        name: "folder_set_default",
+      },
+      "folder_set_default",
+    );
+    expect(expanded.status).toBe(200);
+    const expandedResult = mcpToolResultSchema.parse(await expanded.json()).result;
+    expect(expandedResult.isError).not.toBe(true);
+    expect(folderDefaultSchema.parse(expandedResult.structuredContent))
+      .toEqual({defaultState: "expanded", path: "team/archive"});
+    expect((await readTree()).collapsedFolders).toEqual(["team/archive/2025"]);
+
+    // A member key creates and reads its own work but does not manage
+    // artifact settings, so it cannot change how a shared folder starts.
+    const administrator = await seedAdministratorSession(environment, identity.installationId);
+    const issued = await fetch(`${server.baseUrl}/api/v1/api-keys`, {
+      body: JSON.stringify({
+        capabilities: ["artifact:create", "artifact:read"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        name: "Member laptop",
+      }),
+      headers: browserMutationHeaders("https://artifacts.example.com", administrator),
+      method: "POST",
+    });
+    expect(issued.status).toBe(201);
+    const memberKey = issuedKeySchema.parse(await issued.json()).token;
+    const refused = await setFolder({defaultState: "collapsed", path: "2026/10"}, memberKey);
+    expect(refused.status).toBe(403);
+    expect(commentFailureSchema.parse(await refused.json()).error.code)
+      .toBe("AUTHORIZATION_DENIED");
+    expect((await readTree()).collapsedFolders).toEqual(["team/archive/2025"]);
+
+    // A folder that holds only a private artifact stays unnamed, and the
+    // stored setting applies as soon as a public artifact lands there.
+    await publish("Payroll", "team/private/payroll", "account_required");
+    expect((await setFolder({defaultState: "collapsed", path: "team/private"})).status)
+      .toBe(200);
+    expect((await readTree()).collapsedFolders).toEqual(["team/archive/2025"]);
+    await publish("Handbook", "team/private/handbook");
+    expect((await readTree()).collapsedFolders)
+      .toEqual(["team/archive/2025", "team/private"]);
+  });
+
+  test("external-storage foundation: Postgres refuses an equal, ancestor, or descendant artifact path, and a deleted artifact frees its path", async () => {
+    const identity = {
+      apiToken: managedTestKey("artifact-paths"),
+      installationId: `artifact-paths-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const claim = async (artifactPath: string) => {
+      const upload = await stageExternalStorageFile(
+        server.baseUrl,
+        identity.apiToken,
+        `<h1>${artifactPath}</h1>`,
+      );
+      const response = await fetch(upload.commitUrl, {
+        body: JSON.stringify({target: {
+          accessSetting: "public_link",
+          kind: "new_artifact",
+          name: `Path claim ${randomUUID()}`,
+          path: artifactPath,
+        }}),
+        headers: mutationHeaders(identity.apiToken, `artifact-paths-${randomUUID()}`),
+        method: "POST",
+      });
+      const body: unknown = await response.json();
+      return {body, status: response.status};
+    };
+    const refusal = (attempt: {readonly body: unknown; readonly status: number}) => ({
+      ...commentFailureSchema.parse(attempt.body).error,
+      status: attempt.status,
+    });
+
+    const held = await claim("2026/10/agent-console");
+    expect(held.status).toBe(201);
+    const holder = publishResponseSchema.parse(held.body);
+    expect(holder.artifact.path).toBe("2026/10/agent-console");
+
+    // Each message names the live path the overlap query found, so a refusal
+    // proves that query and not some other conflict.
+    expect(refusal(await claim("2026/10/agent-console"))).toEqual({
+      code: "ARTIFACT_PATH_TAKEN",
+      message: 'The path "2026/10/agent-console" already belongs to another artifact.',
+      status: 409,
+    });
+    expect(refusal(await claim("2026/10"))).toEqual({
+      code: "ARTIFACT_PATH_TAKEN",
+      message: 'The path "2026/10" overlaps the existing artifact path "2026/10/agent-console".',
+      status: 409,
+    });
+    expect(refusal(await claim("2026/10/agent-console/shots"))).toEqual({
+      code: "ARTIFACT_PATH_TAKEN",
+      message: 'The path "2026/10/agent-console/shots" overlaps the existing artifact path "2026/10/agent-console".',
+      status: 409,
+    });
+
+    const deleted = await mutateArtifact(
+      server.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${holder.artifact.id}`,
+      "DELETE",
+      `artifact-paths-delete-${randomUUID()}`,
+      {expectedCurrentVersionId: holder.version.id},
+    );
+    expect(deleted.status).toBe(200);
+    await deleted.arrayBuffer();
+    const reclaimed = await claim("2026/10/agent-console");
+    expect(reclaimed.status).toBe(201);
+    const reclaimer = publishResponseSchema.parse(reclaimed.body);
+    expect(reclaimer.artifact.id).not.toBe(holder.artifact.id);
+    expect(reclaimer.artifact.path).toBe("2026/10/agent-console");
+    // The new holder claims the path as fully as the deleted one did.
+    expect(refusal(await claim("2026/10/agent-console/shots"))).toMatchObject({
+      code: "ARTIFACT_PATH_TAKEN",
+      status: 409,
+    });
+  });
 });
 
 type PublicArtifactTree = z.infer<typeof publicArtifactTreeSchema>;
@@ -3647,6 +4013,7 @@ async function publishNew(
     readonly content: string;
     readonly idempotencyKey: string;
     readonly name: string;
+    readonly path?: string;
     readonly projectId?: string;
     readonly routingMode?: "spa" | "static";
   },
@@ -3663,6 +4030,7 @@ async function publishNew(
       accessSetting: input.accessSetting ?? "public_link",
       kind: "new_artifact",
       name: input.name,
+      path: input.path,
       tags: ["external-storage-runtime"],
     }}),
     headers: mutationHeaders(token, input.idempotencyKey),
@@ -3926,6 +4294,10 @@ type ArtifactMutationBody =
   | {
     readonly expectedCurrentVersionId: string;
     readonly versionId: string;
+  }
+  | {
+    readonly expectedCurrentVersionId: string;
+    readonly name: string;
   };
 
 function mutateArtifact(
