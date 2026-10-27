@@ -159,7 +159,9 @@ jobs:
 
   portable:
     name: macOS portability
-    if: inputs.tier != 'release'
+    # A full-tier dispatch reruns a commit whose pull request run already
+    # covers macOS, and hosted macOS runners are often short of capacity.
+    if: inputs.tier != 'release' && inputs.tier != 'full'
     runs-on: macos-14
     timeout-minutes: 12
     steps:
