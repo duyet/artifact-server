@@ -790,7 +790,8 @@ requirements:
       behavior: {id: AUD-001-B, description: "Perform every mutation, including comment creates, replies, edits, resolves, reopens, and deletes, through human and agent principals and inspect complete immutable action records."}
       failure: {id: AUD-001-F, description: "A mutation cannot commit without a valid actor and action record."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: AUD-001-B and AUD-001-F run only locally against a real SQLite server. They cover publish, new version, edit, restore, access change, tags, rename, artifact deletion, and comment create, reply, update, resolve, reopen, reply delete, and thread delete, as a signed-in human (no authorizer) and as a service key that human issued (the human as authorizer), read back through the artifact action history. AUD-001-F refuses every action insert with a SQLite trigger and proves publish, new version, edit, restore, access, tags, rename, and delete each roll back, then retries with the same keys. Comment clear and the administrator's bulk make-private are not exercised, although make-private runs the same access change. Asset uploads, copies, and deletions (FRK-019) record no action, and deleteAsset receives no principal at all. Project create, rename, and archive, agent registration and dispatch, and member and API-key changes also record no action, because the actions table requires an artifact and version. No connection-change surface exists, because this fork ships no Plannotator connection. Opening an older fork SQLite database rewrites link and capture actions to publish and deletes relink actions, so history from before that upgrade is not immutable. Postgres (single_server, kubernetes) has no run, and no evidence report is attached.
     depends_on: []
     evidence: []
 
