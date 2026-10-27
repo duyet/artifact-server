@@ -60,7 +60,7 @@ export function AccountMenuItems({account, afterSignOut, helpUrl}: AccountMenuPr
         </DropdownMenuItem>
         <DropdownMenuItem render={<a href="/review" />}>
           <IconLayoutDashboard />
-          Workbench
+          Console
         </DropdownMenuItem>
         {helpUrl === null ? null : (
           <DropdownMenuItem render={<a href={helpUrl} rel="noreferrer" target="_blank" />}>

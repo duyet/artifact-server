@@ -63,9 +63,9 @@ test.describe("home page account menu", () => {
       const menu = page.getByRole("menu");
       await expect(menu).toBeVisible();
       await expect(menu.getByText("alice@example.com")).toBeVisible();
-      await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Workbench", "Help", "Sign out"]);
+      await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Console", "Help", "Sign out"]);
       await expect(menu.getByRole("menuitem", {name: "My artifacts"})).toHaveAttribute("href", "/?mine=1");
-      await expect(menu.getByRole("menuitem", {name: "Workbench"})).toHaveAttribute("href", "/review");
+      await expect(menu.getByRole("menuitem", {name: "Console"})).toHaveAttribute("href", "/review");
       await expect(menu.getByRole("menuitem", {name: "Help"})).toHaveAttribute("href", helpUrl);
       await page.keyboard.press("Escape");
       await expect(menu).toHaveCount(0);

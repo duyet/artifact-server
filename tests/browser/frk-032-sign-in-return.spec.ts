@@ -107,7 +107,7 @@ test.describe("FRK-032 sign-in returns to the page it started from", () => {
       const menu = page.getByRole("menu");
       await expect(menu.getByText("carol@example.com")).toBeVisible();
       // No ARTIFACT_SERVER_HELP_URL, so no Help item.
-      await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Workbench", "Sign out"]);
+      await expect(menu.getByRole("menuitem")).toHaveText(["My artifacts", "Console", "Sign out"]);
       await settled(page);
       await page.screenshot({path: "test-results/browser/screenshots/frk-032-bar-account-light.png"});
       await page.keyboard.press("Escape");
