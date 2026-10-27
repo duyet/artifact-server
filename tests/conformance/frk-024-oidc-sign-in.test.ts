@@ -10,6 +10,7 @@ import {
   browserLoginKinds,
   privateTeamBrowserAccess,
 } from "../../src/core/browser-access.js";
+import {installationOperatorActor} from "../../src/core/installation-identity.js";
 import {
   type UnknownOidcUserPolicy,
   unknownOidcUserPolicies,
@@ -113,13 +114,19 @@ describe("OIDC browser sign-in", () => {
     try {
       await repository.admitMember({
         ...member,
+        actor: installationOperatorActor,
         createdAt: "2026-10-26T00:00:00.000Z",
         displayName: member.email,
         installationId: "local",
         role: "member",
       });
       if (deactivated) {
-        await repository.deactivateMember("local", member.id, "2026-10-26T00:00:01.000Z");
+        await repository.deactivateMember(
+          "local",
+          member.id,
+          "2026-10-26T00:00:01.000Z",
+          installationOperatorActor,
+        );
       }
     } finally {
       repository.close();

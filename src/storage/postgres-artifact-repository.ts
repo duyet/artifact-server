@@ -28,6 +28,7 @@ import {
   agentBeaconStates,
   agentDispatchStates,
   artifactActionKinds,
+  installationActionKinds,
   commentThreadStates,
   dispatchHoldsCommentThread,
   dispatchedThreadFilters,
@@ -163,6 +164,7 @@ import {
   withArtifactOwner,
 } from "./artifact-owner-row.js";
 import {createManifest} from "../manifest/create-manifest.js";
+import {insertPostgresInstallationAction} from "./postgres-installation-actions.js";
 import type {PostgresDatabase} from "./postgres-database.js";
 import type {
   ListPublicLinks,
@@ -570,22 +572,32 @@ export class PostgresArtifactRepository implements
 
   async createProject(command: CreateProject): Promise<ProjectRecord> {
     const installationId = this.#installationId;
-    const rows = await this.#database.run(Effect.gen(function*() {
+    return this.#database.run(Effect.gen(function*() {
       const sql = yield* SqlClient;
-      return yield* sql`INSERT INTO projects (
-          installation_id, id, name, created_at, archived_at
-        ) VALUES (
-          ${installationId}, ${command.id}, ${command.name},
-          ${command.createdAt}, ${command.archivedAt}
-        ) ON CONFLICT (installation_id, id) DO NOTHING
-        RETURNING installation_id AS "installationId", id, name,
-          created_at AS "createdAt", archived_at AS "archivedAt"`;
+      return yield* sql.withTransaction(Effect.gen(function*() {
+        const rows = yield* sql`INSERT INTO projects (
+            installation_id, id, name, created_at, archived_at
+          ) VALUES (
+            ${installationId}, ${command.id}, ${command.name},
+            ${command.createdAt}, ${command.archivedAt}
+          ) ON CONFLICT (installation_id, id) DO NOTHING
+          RETURNING installation_id AS "installationId", id, name,
+            created_at AS "createdAt", archived_at AS "archivedAt"`;
+        const project = projectRowSchema.nullable().parse(rows[0] ?? null);
+        if (project === null) {
+          return yield* new ProjectConflict({
+            message: "The project identity is already in use.",
+          });
+        }
+        yield* insertPostgresInstallationAction(installationId, {
+          actor: command.actor,
+          createdAt: command.createdAt,
+          kind: installationActionKinds.projectCreated,
+          subjectId: command.id,
+        });
+        return project;
+      }));
     }));
-    const project = projectRowSchema.nullable().parse(rows[0] ?? null);
-    if (project === null) {
-      throw new ProjectConflict({message: "The project identity is already in use."});
-    }
-    return project;
   }
 
   async findProject(projectId: string): Promise<ProjectRecord | null> {
@@ -610,34 +622,52 @@ export class PostgresArtifactRepository implements
 
   async renameProject(command: RenameProject): Promise<ProjectRecord> {
     const installationId = this.#installationId;
-    const rows = await this.#database.run(Effect.gen(function*() {
+    return this.#database.run(Effect.gen(function*() {
       const sql = yield* SqlClient;
-      return yield* sql`UPDATE projects SET name = ${command.name}
-        WHERE installation_id = ${installationId} AND id = ${command.projectId}
-        RETURNING installation_id AS "installationId", id, name,
-          created_at AS "createdAt", archived_at AS "archivedAt"`;
+      return yield* sql.withTransaction(Effect.gen(function*() {
+        const rows = yield* sql`UPDATE projects SET name = ${command.name}
+          WHERE installation_id = ${installationId} AND id = ${command.projectId}
+          RETURNING installation_id AS "installationId", id, name,
+            created_at AS "createdAt", archived_at AS "archivedAt"`;
+        const project = projectRowSchema.nullable().parse(rows[0] ?? null);
+        if (project === null) {
+          return yield* new ProjectNotFound({message: "The project does not exist."});
+        }
+        yield* insertPostgresInstallationAction(installationId, {
+          actor: command.actor,
+          createdAt: command.changedAt,
+          kind: installationActionKinds.projectRenamed,
+          subjectId: command.projectId,
+        });
+        return project;
+      }));
     }));
-    const project = projectRowSchema.nullable().parse(rows[0] ?? null);
-    if (project === null) {
-      throw new ProjectNotFound({message: "The project does not exist."});
-    }
-    return project;
   }
 
   async setProjectArchive(command: SetProjectArchive): Promise<ProjectRecord> {
     const installationId = this.#installationId;
-    const rows = await this.#database.run(Effect.gen(function*() {
+    return this.#database.run(Effect.gen(function*() {
       const sql = yield* SqlClient;
-      return yield* sql`UPDATE projects SET archived_at = ${command.archivedAt}
-        WHERE installation_id = ${installationId} AND id = ${command.projectId}
-        RETURNING installation_id AS "installationId", id, name,
-          created_at AS "createdAt", archived_at AS "archivedAt"`;
+      return yield* sql.withTransaction(Effect.gen(function*() {
+        const rows = yield* sql`UPDATE projects SET archived_at = ${command.archivedAt}
+          WHERE installation_id = ${installationId} AND id = ${command.projectId}
+          RETURNING installation_id AS "installationId", id, name,
+            created_at AS "createdAt", archived_at AS "archivedAt"`;
+        const project = projectRowSchema.nullable().parse(rows[0] ?? null);
+        if (project === null) {
+          return yield* new ProjectNotFound({message: "The project does not exist."});
+        }
+        yield* insertPostgresInstallationAction(installationId, {
+          actor: command.actor,
+          createdAt: command.changedAt,
+          kind: command.archivedAt === null
+            ? installationActionKinds.projectUnarchived
+            : installationActionKinds.projectArchived,
+          subjectId: command.projectId,
+        });
+        return project;
+      }));
     }));
-    const project = projectRowSchema.nullable().parse(rows[0] ?? null);
-    if (project === null) {
-      throw new ProjectNotFound({message: "The project does not exist."});
-    }
-    return project;
   }
 
   /** The owning Postgres database closes the process pool. */

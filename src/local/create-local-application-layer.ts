@@ -729,9 +729,9 @@ export function createApplicationLayer(
         "admitMember",
         () => identityRepository.admitMember(command),
       ),
-      createApiKey: (key) => identityEffect(
+      createApiKey: (key, actor) => identityEffect(
         "createApiKey",
-        () => identityRepository.createApiKey(key),
+        () => identityRepository.createApiKey(key, actor),
       ),
       createApplicationSession: (command) => identityEffect(
         "createApplicationSession",
@@ -750,13 +750,14 @@ export function createApplicationLayer(
         "createLoginAttempt",
         () => identityRepository.createLoginAttempt(attempt),
       ),
-      deactivateMember: (installationId, memberId, updatedAt) =>
+      deactivateMember: (installationId, memberId, updatedAt, actor) =>
         identityEffectWithConflictOrNotFound(
           "deactivateMember",
           () => identityRepository.deactivateMember(
             installationId,
             memberId,
             updatedAt,
+            actor,
           ),
         ),
       findActiveMemberByEmail: (installationId, email) => identityEffect(
@@ -788,14 +789,19 @@ export function createApplicationLayer(
         "listApiKeys",
         () => identityRepository.listApiKeys(installationId),
       ),
+      listInstallationActions: (command) => identityEffect(
+        "listInstallationActions",
+        () => identityRepository.listInstallationActions(command),
+      ),
       listMembers: (installationId) => identityEffect(
         "listMembers",
         () => identityRepository.listMembers(installationId),
       ),
-      revokeApiKey: (installationId, keyId, revokedAt) => identityEffectWithNotFound(
-        "revokeApiKey",
-        () => identityRepository.revokeApiKey(installationId, keyId, revokedAt),
-      ),
+      revokeApiKey: (installationId, keyId, revokedAt, actor) =>
+        identityEffectWithNotFound(
+          "revokeApiKey",
+          () => identityRepository.revokeApiKey(installationId, keyId, revokedAt, actor),
+        ),
       revokeApplicationSession: (installationId, tokenDigest, revokedAt) =>
         identityEffect(
           "revokeApplicationSession",
@@ -805,7 +811,7 @@ export function createApplicationLayer(
             revokedAt,
           ),
         ),
-      rotateApiKey: (installationId, previousKeyId, replacement, revokedAt) =>
+      rotateApiKey: (installationId, previousKeyId, replacement, revokedAt, actor) =>
         identityEffectWithConflictOrNotFound(
           "rotateApiKey",
           () => identityRepository.rotateApiKey(
@@ -813,6 +819,7 @@ export function createApplicationLayer(
             previousKeyId,
             replacement,
             revokedAt,
+            actor,
           ),
         ),
     },

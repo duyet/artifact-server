@@ -12,10 +12,18 @@ import {
   principalCapabilities,
   principalKinds,
 } from "../core/identity.js";
+import type {InstallationActor} from "../core/model.js";
 import {identitySecretsEqual} from "./installation-access.js";
 
 const bootstrapKeyExpiration = "9999-12-31T23:59:59.999Z";
 const bootstrapCapabilities = Object.values(principalCapabilities).toSorted();
+const bootstrapPrincipalId = "installation-bootstrap";
+// The bootstrap key's issue is recorded under the same authority its row names.
+const bootstrapActor: InstallationActor = {
+  authorizedByPrincipalId: null,
+  principalDisplayName: "Installation bootstrap",
+  principalId: bootstrapPrincipalId,
+};
 
 /**
  * Persist the first private-team machine credential as a normal managed key.
@@ -40,7 +48,7 @@ export async function ensureBootstrapManagedApiKey(input: {
   const keyId = parsed[1];
   const secretDigest = createHash("sha256").update(credential).digest("hex");
   const stored: StoredManagedApiKey = {
-    authorizedByPrincipalId: "installation-bootstrap",
+    authorizedByPrincipalId: bootstrapPrincipalId,
     capabilities: bootstrapCapabilities,
     createdAt: input.now.toISOString(),
     expiresAt: bootstrapKeyExpiration,
@@ -54,7 +62,10 @@ export async function ensureBootstrapManagedApiKey(input: {
     rotatedFromId: null,
     secretDigest,
   };
-  const persisted = await input.repository.initializeBootstrapApiKey(stored);
+  const persisted = await input.repository.initializeBootstrapApiKey(
+    stored,
+    bootstrapActor,
+  );
   assertMatchingBootstrapKey(persisted, secretDigest);
 }
 

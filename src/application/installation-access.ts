@@ -13,12 +13,17 @@ import {
   AuthorizationDenied,
   IdentityConflict,
   IdentityNotFound,
+  InvalidPagination,
 } from "../core/errors.js";
 import type {
   IdentityRepositoryFailure,
   LoginAttemptRejected,
 } from "../core/errors.js";
-import type {CreateApplicationSessionRecord} from "../core/identity-ports.js";
+import type {
+  AdmitMemberRecord,
+  CreateApplicationSessionRecord,
+  ListInstallationActions,
+} from "../core/identity-ports.js";
 import {
   unknownOidcUserPolicies,
   type UnknownOidcUserPolicy,
@@ -28,6 +33,8 @@ import {
   type InstallationMember,
   type IssuedApplicationSession,
   type IssuedManagedApiKey,
+  installationActorOf,
+  installationOperatorActor,
   installationOperatorPrincipalId,
   type LoginAttempt,
   managedApiKeyCredentialPattern,
@@ -45,6 +52,11 @@ import {
   type Principal,
   type PrincipalCapability,
 } from "../core/identity.js";
+import type {
+  InstallationActionPage,
+  InstallationActor,
+  PageCursor,
+} from "../core/model.js";
 
 const allCapabilities = Object.values(principalCapabilities);
 // A member key creates and republishes its own artifacts and comments; it
@@ -59,20 +71,15 @@ const operatorKeyCapabilities = {
   ],
 } satisfies Record<MembershipRole, readonly PrincipalCapability[]>;
 const localBrowserLoginProvider = "artifact-server-local";
+const maximumActionPageSize = 100;
 
 export interface InstallationIdentityRepository {
   readonly admitMember: (
-    command: {
-      readonly createdAt: string;
-      readonly displayName: string;
-      readonly email: string;
-      readonly id: string;
-      readonly installationId: string;
-      readonly role: MembershipRole;
-    },
+    command: AdmitMemberRecord,
   ) => Effect.Effect<InstallationMember, IdentityConflict | IdentityRepositoryFailure>;
   readonly createApiKey: (
     key: StoredManagedApiKey,
+    actor: InstallationActor,
   ) => Effect.Effect<ManagedApiKey, IdentityRepositoryFailure>;
   readonly createApplicationSession: (
     command: CreateApplicationSessionRecord,
@@ -92,6 +99,7 @@ export interface InstallationIdentityRepository {
     installationId: string,
     memberId: string,
     updatedAt: string,
+    actor: InstallationActor,
   ) => Effect.Effect<
     InstallationMember,
     IdentityConflict | IdentityNotFound | IdentityRepositoryFailure
@@ -119,6 +127,9 @@ export interface InstallationIdentityRepository {
   readonly listApiKeys: (
     installationId: string,
   ) => Effect.Effect<readonly ManagedApiKey[], IdentityRepositoryFailure>;
+  readonly listInstallationActions: (
+    command: ListInstallationActions,
+  ) => Effect.Effect<InstallationActionPage, IdentityRepositoryFailure>;
   readonly listMembers: (
     installationId: string,
   ) => Effect.Effect<readonly InstallationMember[], IdentityRepositoryFailure>;
@@ -126,6 +137,7 @@ export interface InstallationIdentityRepository {
     installationId: string,
     keyId: string,
     revokedAt: string,
+    actor: InstallationActor,
   ) => Effect.Effect<ManagedApiKey, IdentityNotFound | IdentityRepositoryFailure>;
   readonly revokeApplicationSession: (
     installationId: string,
@@ -137,6 +149,7 @@ export interface InstallationIdentityRepository {
     previousKeyId: string,
     replacement: StoredManagedApiKey,
     revokedAt: string,
+    actor: InstallationActor,
   ) => Effect.Effect<
     ManagedApiKey,
     IdentityConflict | IdentityNotFound | IdentityRepositoryFailure
@@ -200,6 +213,13 @@ export interface IssuedOperatorKey {
   readonly member: InstallationMember;
 }
 
+/** Input for reading one page of the installation action history. */
+export interface ListInstallationActionsCommand {
+  readonly cursor: PageCursor | null;
+  readonly limit: number;
+  readonly principal: Principal;
+}
+
 export interface IssueApiKeyCommand {
   readonly capabilities: readonly PrincipalCapability[];
   readonly expiresAt: string;
@@ -256,6 +276,13 @@ export interface InstallationAccessOperations {
   readonly listApiKeys: (
     principal: Principal,
   ) => Effect.Effect<readonly ManagedApiKey[], AuthorizationDenied | IdentityRepositoryFailure>;
+  /** Project, member, and API-key changes, newest first, for an administrator. */
+  readonly listInstallationActions: (
+    command: ListInstallationActionsCommand,
+  ) => Effect.Effect<
+    InstallationActionPage,
+    AuthorizationDenied | IdentityRepositoryFailure | InvalidPagination
+  >;
   readonly listMembers: (
     principal: Principal,
   ) => Effect.Effect<
@@ -453,14 +480,14 @@ function makeInstallationAccessService(
           message: "The configured local administrator is not an active member.",
         }));
       }
-      member = yield* dependencies.repository.admitMember({
+      member = yield* dependencies.repository.admitMember(selfAdmission({
         createdAt: dependencies.clock.now().toISOString(),
         displayName: "Local administrator",
         email,
         id: dependencies.ids.memberId(),
         installationId: dependencies.installationId,
         role: membershipRoles.administrator,
-      });
+      }));
     }
     if (member.role !== membershipRoles.administrator) {
       return yield* Effect.fail(new IdentityConflict({
@@ -592,14 +619,14 @@ function makeInstallationAccessService(
     if (member === null && unknownUsers === unknownOidcUserPolicies.admit) {
       // A deactivated member's email conflicts, and so does a concurrent
       // admission; the second lookup then finds only an active member.
-      member = yield* dependencies.repository.admitMember({
+      member = yield* dependencies.repository.admitMember(selfAdmission({
         createdAt: dependencies.clock.now().toISOString(),
         displayName: displayName ?? email,
         email,
         id: dependencies.ids.memberId(),
         installationId: dependencies.installationId,
         role: membershipRoles.member,
-      }).pipe(
+      })).pipe(
         Effect.catchTag("IdentityConflict", () => findMember()),
       );
     }
@@ -614,6 +641,7 @@ function makeInstallationAccessService(
     const displayName = yield* requireText(command.displayName, "display name");
     const email = yield* normalizeEmail(command.email);
     return yield* dependencies.repository.admitMember({
+      actor: installationActorOf(command.principal),
       createdAt: dependencies.clock.now().toISOString(),
       displayName,
       email,
@@ -670,6 +698,7 @@ function makeInstallationAccessService(
       dependencies.installationId,
       memberId,
       dependencies.clock.now().toISOString(),
+      installationActorOf(principal),
     );
     // Session entries are keyed by token digest, not member, so this rare
     // administrative mutation clears the whole cache instead of indexing it.
@@ -717,7 +746,10 @@ function makeInstallationAccessService(
       rotatedFromId: null,
       secretDigest: dependencies.secrets.digest(token),
     };
-    const apiKey = yield* dependencies.repository.createApiKey(key);
+    const apiKey = yield* dependencies.repository.createApiKey(
+      key,
+      installationActorOf(command.principal),
+    );
     return {apiKey, token};
   });
 
@@ -734,6 +766,7 @@ function makeInstallationAccessService(
       email,
     );
     const member = existing ?? (yield* dependencies.repository.admitMember({
+      actor: installationOperatorActor,
       createdAt: now.toISOString(),
       displayName,
       email,
@@ -763,7 +796,7 @@ function makeInstallationAccessService(
       revokedAt: null,
       rotatedFromId: null,
       secretDigest: dependencies.secrets.digest(token),
-    });
+    }, installationOperatorActor);
     // Revoking after the new key exists means a failed re-issue never leaves
     // a machine without a working key.
     const replaced = (yield* dependencies.repository.listApiKeys(
@@ -777,6 +810,7 @@ function makeInstallationAccessService(
         dependencies.installationId,
         key.id,
         now.toISOString(),
+        installationOperatorActor,
       );
     }
     if (replaced.length > 0) {
@@ -819,6 +853,25 @@ function makeInstallationAccessService(
     return yield* dependencies.repository.listApiKeys(dependencies.installationId);
   });
 
+  const listInstallationActions = Effect.fn(
+    "InstallationAccessService.listInstallationActions",
+  )(function*(command: ListInstallationActionsCommand) {
+    yield* requireAdministrator(command.principal, dependencies.installationId);
+    if (
+      !Number.isSafeInteger(command.limit) || command.limit < 1 ||
+      command.limit > maximumActionPageSize
+    ) {
+      return yield* new InvalidPagination({
+        message: `An action page must contain between 1 and ${maximumActionPageSize} records.`,
+      });
+    }
+    return yield* dependencies.repository.listInstallationActions({
+      cursor: command.cursor,
+      installationId: dependencies.installationId,
+      limit: command.limit,
+    });
+  });
+
   const revokeApiKey = Effect.fn(
     "InstallationAccessService.revokeApiKey",
   )(function*(principal: Principal, keyId: string) {
@@ -827,6 +880,7 @@ function makeInstallationAccessService(
       dependencies.installationId,
       keyId,
       dependencies.clock.now().toISOString(),
+      installationActorOf(principal),
     );
     // Key and key-session entries are keyed by credential digest, not key
     // id, so this rare administrative mutation clears both caches.
@@ -871,6 +925,7 @@ function makeInstallationAccessService(
       previous.id,
       replacement,
       now.toISOString(),
+      installationActorOf(principal),
     );
     apiKeyCache?.clear();
     sessionCache?.clear();
@@ -899,6 +954,7 @@ function makeInstallationAccessService(
     issueOperatorKey,
     loginAsLocalOwner,
     listApiKeys,
+    listInstallationActions,
     listMembers,
     loginWithApiKey,
     loginWithVerifiedEmail,
@@ -908,6 +964,20 @@ function makeInstallationAccessService(
     revokeSession,
     rotateApiKey,
   });
+}
+
+/** A member admitted by their own sign-in is recorded as admitting themselves. */
+function selfAdmission(
+  member: Omit<AdmitMemberRecord, "actor">,
+): AdmitMemberRecord {
+  return {
+    ...member,
+    actor: {
+      authorizedByPrincipalId: null,
+      principalDisplayName: member.displayName,
+      principalId: member.id,
+    },
+  };
 }
 
 function apiKeyPrincipal(key: ManagedApiKey): Principal {

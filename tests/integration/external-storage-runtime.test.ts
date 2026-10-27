@@ -65,8 +65,10 @@ import {PostgresIdentityRepository} from "../../src/storage/postgres-identity-re
 import {defaultProjectId} from "../../src/core/model.js";
 import {defaultAssetQuota} from "../../src/core/asset-policy.js";
 import {SystemIdGenerator} from "../../src/core/system.js";
-import {managedApiKeyCredentialPattern} from
-  "../../src/core/installation-identity.js";
+import {
+  installationOperatorActor,
+  managedApiKeyCredentialPattern,
+} from "../../src/core/installation-identity.js";
 import {
   browserLoginKinds,
   privateTeamBrowserAccess,
@@ -593,6 +595,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           // Every table a later migration created is dropped, so the rewind
           // really is the v1 schema and each migration finds its own work
           // undone rather than a relation it already made.
+          "DROP TABLE installation_actions",
           "DROP TABLE collapsed_folders",
           "DROP TABLE assets",
           "DROP TABLE api_key_sessions",
@@ -1313,6 +1316,308 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     }
   });
 
+  test("external-storage foundation: Postgres records each project, member, and API-key change as one attributed installation action in the change's own transaction", async () => {
+    const token = managedTestKey("installation-actions");
+    const identity = {
+      apiToken: token,
+      installationId: `installation-actions-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(environment, identity);
+    const administrator = await seedAdministratorSession(environment, identity.installationId);
+    const origin = "https://artifacts.example.com";
+    const asAdministrator = (method: string, routePath: string, body?: InstallationChangeBody) =>
+      fetch(`${server.baseUrl}${routePath}`, body === undefined
+        ? {headers: browserMutationHeaders(origin, administrator), method}
+        : {
+          body: JSON.stringify(body),
+          headers: browserMutationHeaders(origin, administrator),
+          method,
+        });
+    const asBearer = (bearer: string, method: string, routePath: string, body?: InstallationChangeBody) => {
+      const headers = bearerHeaders(bearer);
+      headers.set("Content-Type", "application/json");
+      return fetch(`${server.baseUrl}${routePath}`, body === undefined
+        ? {headers, method}
+        : {body: JSON.stringify(body), headers, method});
+    };
+    const actionPageSchema = z.object({
+      actions: z.array(installationActionSchema),
+      nextCursor: z.string().nullable(),
+    }).strict();
+    const projectRecordSchema = z.object({
+      archivedAt: z.string().nullable(),
+      id: z.string(),
+      name: z.string(),
+    }).loose();
+    const projectSchema = z.object({project: projectRecordSchema}).loose();
+    const memberRecordSchema = z.object({id: z.string(), status: z.string()}).loose();
+    const memberSchema = z.object({member: memberRecordSchema}).loose();
+    const keyListSchema = z.object({
+      apiKeys: z.array(z.object({id: z.string(), revokedAt: z.string().nullable()}).loose()),
+    }).loose();
+    const readActions = async () =>
+      (await json(
+        asAdministrator("GET", "/api/v1/administration/actions?limit=100"),
+        200,
+        actionPageSchema,
+      )).actions;
+    const readState = async () => ({
+      actions: await readActions(),
+      keys: await json(asAdministrator("GET", "/api/v1/api-keys"), 200, keyListSchema),
+      members: await json(
+        asAdministrator("GET", "/api/v1/members"),
+        200,
+        z.object({members: z.array(memberRecordSchema)}).loose(),
+      ),
+      projects: await json(
+        asAdministrator("GET", "/api/v1/projects"),
+        200,
+        z.object({projects: z.array(projectRecordSchema)}).loose(),
+      ),
+    });
+    const issueKey = (capabilities: readonly string[], name: string) =>
+      json(asAdministrator("POST", "/api/v1/api-keys", {
+        capabilities,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        name,
+      }), 201, issuedKeySchema);
+    const suffix = randomUUID().replaceAll("-", "");
+    const refusal = `refuse_installation_actions_${suffix}`;
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    try {
+      const administratorId = (await json(
+        fetch(`${server.baseUrl}/api/v1/session`, {headers: {Cookie: administrator.header}}),
+        200,
+        z.object({principal: z.object({id: z.string()}).loose()}).loose(),
+      )).principal.id;
+      const bootstrapKeyId = managedApiKeyCredentialPattern.exec(token)?.[1] ?? "";
+      const denied = await asBearer(token, "GET", "/api/v1/administration/actions");
+      expect(denied.status).toBe(403);
+      await denied.arrayBuffer();
+
+      const byAdministrator = (kind: string, subjectId: string) => ({
+        authorizedByPrincipalId: null,
+        kind,
+        principalDisplayName: "Team administrator",
+        principalId: administratorId,
+        subjectId,
+      });
+      const bootstrapIssue = {
+        authorizedByPrincipalId: null,
+        kind: "api_key_issued",
+        principalDisplayName: "Installation bootstrap",
+        principalId: "installation-bootstrap",
+        subjectId: bootstrapKeyId,
+      };
+      expect(summarize(await readActions())).toEqual(summarize([
+        bootstrapIssue,
+        byOperator("member_admitted", administratorId),
+      ]));
+
+      const stewardKey = await issueKey(["project:manage"], "Project steward");
+      const project = (await json(
+        asAdministrator("POST", "/api/v1/projects", {name: "Audited project"}),
+        201,
+        projectSchema,
+      )).project;
+      await json(asBearer(stewardKey.token, "PATCH", `/api/v1/projects/${project.id}`, {
+        name: "Audited project, renamed",
+      }), 200, projectSchema);
+      await json(
+        asAdministrator("POST", `/api/v1/projects/${project.id}/archive`),
+        200,
+        projectSchema,
+      );
+      await json(
+        asBearer(stewardKey.token, "POST", `/api/v1/projects/${project.id}/unarchive`),
+        200,
+        projectSchema,
+      );
+      const memberEmail = `audited-${suffix}@example.test`;
+      const member = (await json(asAdministrator("POST", "/api/v1/members", {
+        displayName: "Audited member",
+        email: memberEmail,
+      }), 201, memberSchema)).member;
+      await json(
+        asAdministrator("POST", `/api/v1/members/${member.id}/deactivate`),
+        200,
+        memberSchema,
+      );
+      const rotatedKey = await issueKey(["artifact:read"], "Rotated reader");
+      const replacementKey = await json(
+        asAdministrator("POST", `/api/v1/api-keys/${rotatedKey.apiKey.id}/rotate`),
+        201,
+        issuedKeySchema,
+      );
+      const revoked = await asAdministrator(
+        "POST",
+        `/api/v1/api-keys/${replacementKey.apiKey.id}/revoke`,
+      );
+      expect(revoked.status).toBe(200);
+      await revoked.arrayBuffer();
+
+      const answered = await asAdministrator("GET", "/api/v1/administration/actions?limit=100");
+      const body: unknown = await answered.json();
+      expect(answered.status).toBe(200);
+      const serialized = JSON.stringify(body);
+      for (const secret of [
+        token,
+        stewardKey.token,
+        rotatedKey.token,
+        replacementKey.token,
+        memberEmail,
+      ]) {
+        expect(serialized).not.toContain(secret);
+      }
+      const recorded = actionPageSchema.parse(body).actions;
+      const createdTimes = recorded.map((action) => action.createdAt);
+      expect(createdTimes).toEqual(createdTimes.toSorted().toReversed());
+      const bySteward = (kind: string) => ({
+        authorizedByPrincipalId: administratorId,
+        kind,
+        principalDisplayName: "Project steward",
+        principalId: stewardKey.apiKey.principalId,
+        subjectId: project.id,
+      });
+      expect(summarize(recorded)).toEqual(summarize([
+        bootstrapIssue,
+        byOperator("member_admitted", administratorId),
+        byAdministrator("api_key_issued", stewardKey.apiKey.id),
+        byAdministrator("project_created", project.id),
+        bySteward("project_renamed"),
+        byAdministrator("project_archived", project.id),
+        bySteward("project_unarchived"),
+        byAdministrator("member_admitted", member.id),
+        byAdministrator("member_deactivated", member.id),
+        byAdministrator("api_key_issued", rotatedKey.apiKey.id),
+        byAdministrator("api_key_revoked", rotatedKey.apiKey.id),
+        byAdministrator("api_key_issued", replacementKey.apiKey.id),
+        byAdministrator("api_key_revoked", replacementKey.apiKey.id),
+      ]));
+      const pageOne = await json(
+        asAdministrator("GET", "/api/v1/administration/actions?limit=10"),
+        200,
+        actionPageSchema,
+      );
+      expect(pageOne.nextCursor).not.toBeNull();
+      const pageTwo = await json(
+        asAdministrator(
+          "GET",
+          `/api/v1/administration/actions?limit=10&cursor=${pageOne.nextCursor ?? ""}`,
+        ),
+        200,
+        actionPageSchema,
+      );
+      expect([...pageOne.actions, ...pageTwo.actions]).toEqual(recorded);
+      expect(pageTwo.nextCursor).toBeNull();
+
+      // With installation actions refused for this installation only, every
+      // change fails and leaves projects, members, keys, and actions alone.
+      const archived = (await json(
+        asAdministrator("POST", "/api/v1/projects", {name: "Archived project"}),
+        201,
+        projectSchema,
+      )).project;
+      await json(
+        asAdministrator("POST", `/api/v1/projects/${archived.id}/archive`),
+        200,
+        projectSchema,
+      );
+      const keptMember = (await json(asAdministrator("POST", "/api/v1/members", {
+        displayName: "Kept member",
+        email: `kept-${suffix}@example.test`,
+      }), 201, memberSchema)).member;
+      const keptKey = await issueKey(["artifact:read"], "Kept reader");
+      const before = await readState();
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`CREATE FUNCTION ${refusal}() RETURNS trigger
+          LANGUAGE plpgsql AS $$
+          BEGIN
+            RAISE EXCEPTION 'the installation action history refused the write';
+          END
+          $$`);
+        yield* sql.unsafe(`CREATE TRIGGER ${refusal}
+          BEFORE INSERT ON installation_actions
+          FOR EACH ROW
+          WHEN (NEW.installation_id = '${identity.installationId}')
+          EXECUTE FUNCTION ${refusal}()`);
+      }));
+      const refusals: readonly (readonly [string, () => Promise<Response>])[] = [
+        ["project create", () =>
+          asAdministrator("POST", "/api/v1/projects", {name: "Never created"})],
+        ["project rename", () =>
+          asAdministrator("PATCH", `/api/v1/projects/${project.id}`, {name: "Never renamed"})],
+        ["project archive", () =>
+          asAdministrator("POST", `/api/v1/projects/${project.id}/archive`)],
+        ["project unarchive", () =>
+          asAdministrator("POST", `/api/v1/projects/${archived.id}/unarchive`)],
+        ["member admit", () => asAdministrator("POST", "/api/v1/members", {
+          displayName: "Never admitted",
+          email: `never-${suffix}@example.test`,
+        })],
+        ["member deactivate", () =>
+          asAdministrator("POST", `/api/v1/members/${keptMember.id}/deactivate`)],
+        ["key issue", () => asAdministrator("POST", "/api/v1/api-keys", {
+          capabilities: ["artifact:read"],
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          name: "Never issued",
+        })],
+        ["key revoke", () =>
+          asAdministrator("POST", `/api/v1/api-keys/${keptKey.apiKey.id}/revoke`)],
+        ["key rotate", () =>
+          asAdministrator("POST", `/api/v1/api-keys/${keptKey.apiKey.id}/rotate`)],
+      ];
+      for (const [label, attempt] of refusals) {
+        // eslint-disable-next-line no-await-in-loop
+        const response = await attempt();
+        expect({label, status: response.status}).toEqual({label, status: 500});
+        // eslint-disable-next-line no-await-in-loop
+        await response.arrayBuffer();
+      }
+      expect(await readState()).toEqual(before);
+      const stillValid = await asBearer(keptKey.token, "GET", "/api/v1/projects");
+      expect(stillValid.status).toBe(200);
+      await stillValid.arrayBuffer();
+
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`DROP TRIGGER ${refusal} ON installation_actions`);
+      }));
+      // Each change runs twice in a row; only the first is recorded.
+      for (const routePath of [
+        `/api/v1/members/${keptMember.id}/deactivate`,
+        `/api/v1/members/${keptMember.id}/deactivate`,
+        `/api/v1/api-keys/${keptKey.apiKey.id}/revoke`,
+        `/api/v1/api-keys/${keptKey.apiKey.id}/revoke`,
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        const response = await asAdministrator("POST", routePath);
+        expect({routePath, status: response.status}).toEqual({routePath, status: 200});
+        // eslint-disable-next-line no-await-in-loop
+        await response.arrayBuffer();
+      }
+      const afterReplays = await readActions();
+      const added = afterReplays.slice(0, afterReplays.length - before.actions.length);
+      expect(afterReplays.slice(added.length)).toEqual(before.actions);
+      expect(summarize(added)).toEqual(summarize([
+        byAdministrator("member_deactivated", keptMember.id),
+        byAdministrator("api_key_revoked", keptKey.apiKey.id),
+      ]));
+    } finally {
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`DROP TRIGGER IF EXISTS ${refusal} ON installation_actions`);
+        yield* sql.unsafe(`DROP FUNCTION IF EXISTS ${refusal}()`);
+      }));
+      await database.close();
+      await server.stop();
+    }
+  });
+
   test("external-storage foundation: a Postgres version commit whose staged files are not all verified fails as UploadIncomplete inside the transaction", async () => {
     const token = managedTestKey("version-readiness-race-installation");
     const identity = {apiToken: token, installationId: `version-readiness-race-${randomUUID()}`};
@@ -1601,6 +1906,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       const createdAt = "2026-08-13T15:00:00.000Z";
       await Promise.all([
         repository.admitMember({
+          actor: installationOperatorActor,
           createdAt,
           displayName: "Administrator A",
           email: "administrator-a@example.test",
@@ -1609,6 +1915,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           role: "administrator",
         }),
         repository.admitMember({
+          actor: installationOperatorActor,
           createdAt,
           displayName: "Administrator B",
           email: "administrator-b@example.test",
@@ -1622,11 +1929,13 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           scopedInstallation,
           "administrator-a",
           "2026-08-13T15:01:00.000Z",
+          installationOperatorActor,
         ),
         repository.deactivateMember(
           scopedInstallation,
           "administrator-b",
           "2026-08-13T15:01:00.000Z",
+          installationOperatorActor,
         ),
       ]);
       expect(results.map(({status}) => status).toSorted((left, right) =>
@@ -3711,6 +4020,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       const members = new PostgresIdentityRepository(database, identity.installationId);
       try {
         const dave = await members.admitMember({
+          actor: installationOperatorActor,
           createdAt: new Date().toISOString(),
           displayName: "Dave Example",
           email: "dave@example.test",
@@ -3722,6 +4032,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
           identity.installationId,
           dave.id,
           new Date().toISOString(),
+          installationOperatorActor,
         );
         const signIn = async (person: FakeOidcPerson) => {
           const started = await fetch(`${server.baseUrl}/auth/oidc/start`, {redirect: "manual"});
@@ -5546,6 +5857,58 @@ function mutateArtifact(
   });
 }
 
+const installationActionSchema = z.object({
+  authorizedByPrincipalId: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  id: z.string(),
+  kind: z.string(),
+  principalDisplayName: z.string(),
+  principalId: z.string(),
+  subjectId: z.string(),
+}).strict();
+type InstallationActionSummary =
+  Omit<z.infer<typeof installationActionSchema>, "createdAt" | "id">;
+
+// Actions written in the same millisecond have no defined order, so
+// comparisons sort by what each action changed.
+function summarize(
+  actions: readonly InstallationActionSummary[],
+): readonly InstallationActionSummary[] {
+  return actions.map((action) => ({
+    authorizedByPrincipalId: action.authorizedByPrincipalId,
+    kind: action.kind,
+    principalDisplayName: action.principalDisplayName,
+    principalId: action.principalId,
+    subjectId: action.subjectId,
+  })).toSorted((left, right) =>
+    `${left.kind}:${left.subjectId}`.localeCompare(`${right.kind}:${right.subjectId}`)
+  );
+}
+
+async function json<T>(
+  response: Promise<Response>,
+  status: number,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  const answered = await response;
+  const body: unknown = await answered.json();
+  expect({body, status: answered.status}).toMatchObject({status});
+  return schema.parse(body);
+}
+
+function byOperator(kind: string, subjectId: string): InstallationActionSummary {
+  return {
+    authorizedByPrincipalId: null,
+    kind,
+    principalDisplayName: "Installation operator",
+    principalId: "installation-operator",
+    subjectId,
+  };
+}
+
+/** The JSON body of one project, member, or API-key change request. */
+type InstallationChangeBody = Readonly<Record<string, string | readonly string[]>>;
+
 interface ApplicationCookies {
   readonly csrf: string;
   readonly header: string;
@@ -5569,6 +5932,7 @@ async function seedAdministratorSession(
       database,
       scopedInstallationId,
     ).admitMember({
+      actor: installationOperatorActor,
       createdAt: new Date().toISOString(),
       displayName: "Team administrator",
       email: administratorEmail,

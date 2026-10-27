@@ -52,6 +52,46 @@ export const artifactActionKinds = {
 export type ArtifactActionKind =
   (typeof artifactActionKinds)[keyof typeof artifactActionKinds];
 
+/**
+ * Project, member, and API-key changes persisted in the installation action
+ * history. A rotation records the old key's revocation and the new key's issue.
+ */
+export const installationActionKinds = {
+  apiKeyIssued: "api_key_issued",
+  apiKeyRevoked: "api_key_revoked",
+  memberAdmitted: "member_admitted",
+  memberDeactivated: "member_deactivated",
+  projectArchived: "project_archived",
+  projectCreated: "project_created",
+  projectRenamed: "project_renamed",
+  projectUnarchived: "project_unarchived",
+} as const;
+
+/** One persisted installation change kind. */
+export type InstallationActionKind =
+  (typeof installationActionKinds)[keyof typeof installationActionKinds];
+
+/** The effective principal behind an installation change and its human authorizer. */
+export interface InstallationActor {
+  readonly authorizedByPrincipalId: string | null;
+  readonly principalDisplayName: string;
+  readonly principalId: string;
+}
+
+/** One recorded installation change. The subject is a project, member, or key ID. */
+export interface InstallationActionRecord extends InstallationActor {
+  readonly createdAt: string;
+  readonly id: string;
+  readonly kind: InstallationActionKind;
+  readonly subjectId: string;
+}
+
+/** One bounded page of installation changes, newest first. */
+export interface InstallationActionPage {
+  readonly items: readonly InstallationActionRecord[];
+  readonly nextCursor: PageCursor | null;
+}
+
 export const routingModes = {
   spa: "spa",
   static: "static",
