@@ -330,7 +330,7 @@ CREATE TABLE collapsed_folders (
 4. **No foreign key.** A setting can name a folder before an artifact lands there, and it stays when the folder empties.
 5. **Not a tag, not configuration.** A tag sits on one artifact, and a new artifact in the folder would not inherit it. A configuration value cannot be set over REST or MCP.
 
-SQLite keeps schema version 17, as `artifact_views` and `assets` did. Postgres needs migration 0020, which is additive and one-way: an older build refuses the newer schema.
+SQLite kept schema version 17 for this change, as `artifact_views` and `assets` did. (Schema 18 later marked the asset audit actions so an older build refuses the file.) Postgres needs migration 0020, which is additive and one-way: an older build refuses the newer schema.
 
 ### Setting it
 

@@ -343,7 +343,7 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: requiredSqliteSchemaVersion});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'artifacts_live_path'",
       ).get()).toEqual({name: "artifacts_live_path"});
@@ -443,7 +443,7 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: requiredSqliteSchemaVersion});
       const columns = upgraded.prepare("SELECT name FROM pragma_table_info('artifacts')").all()
         .map((row) => z.object({name: z.string()}).parse(row).name);
       expect(columns.filter((name) => name.startsWith("source_"))).toEqual([]);
@@ -527,7 +527,7 @@ describe("local storage migration", () => {
 
     const upgraded = new DatabaseSync(databasePath, {readOnly: true});
     try {
-      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: 17});
+      expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({user_version: requiredSqliteSchemaVersion});
       expect(upgraded.prepare(
         "SELECT name FROM sqlite_schema WHERE name LIKE 'git_history%'",
       ).all()).toEqual([]);
