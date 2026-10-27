@@ -1059,7 +1059,11 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
   test("external-storage foundation: a Postgres asset commit that reaches the transaction after another commit under its key returns the first asset as a replay", async () => {
     const token = managedTestKey("asset-replay-race-installation");
     const identity = {apiToken: token, installationId: `asset-replay-race-${randomUUID()}`};
-    const server = await startInProcessExternalStorageServer(environment, identity);
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
     const published = await publishNew(server.baseUrl, token, {
       content: "<h1>asset replay page</h1>",
       idempotencyKey: `asset-replay-page-${randomUUID()}`,
@@ -1072,7 +1076,8 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const ids = new SystemIdGenerator();
     const assetWithId = (id: string) => ({
       artifactId: artifact.id,
-      createdAt: "2026-10-27T09:00:00.000Z",
+      // The upload expires an hour after the plan, so commit at the real time.
+      createdAt: new Date().toISOString(),
       createdByDisplayName: principal.displayName,
       createdByPrincipalId: principal.principalId,
       id,
@@ -1082,11 +1087,24 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       sha256: sha256(bytes),
       size: bytes.byteLength,
     });
+    const planned = await planAsset(server, token, artifact.id, {
+      bytes,
+      mediaType: "image/png",
+      name: "chart.png",
+    });
+    expect(planned.status).toBe(201);
+    const plan = assetPlanSchema.parse(await planned.json());
+    // Both committers hold the claim they read before the first one ended
+    // the upload, as a client retrying after a lost response does.
     const command = {
       idempotencyKey: `asset-replay-race-${randomUUID()}`,
       inputDigest: "same-asset-commit-input",
       quota: defaultAssetQuota,
-      upload: null,
+      upload: {
+        expiresAt: plan.expiresAt,
+        id: plan.uploadId,
+        principalId: principal.principalId,
+      },
     };
     const database = await PostgresDatabase.open({
       maxConnections: 2,
