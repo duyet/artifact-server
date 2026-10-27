@@ -28,20 +28,28 @@ import {checkExternalStorageIntegrity} from
   "../../src/lifecycle/integrity-check.js";
 import type {ArtifactViewDrainReport} from
   "../../src/application/artifact-view-recorder.js";
-import type {Clock} from "../../src/core/ports.js";
 import {createS3ObjectStorageProviderFactory} from
   "../../src/storage/s3-object-storage.js";
 import {PostgresDatabase} from "../../src/storage/postgres-database.js";
 import {
+  assetListingSchema,
   assetPlanSchema,
+  assetSchema,
   commitAsset,
   committedAssetSchema,
   deleteAsset,
   listAssets,
   planAsset,
   putAssetBytes,
+  sha256,
 } from "../support/assets.js";
 import {MutableClock} from "../support/agent-dispatch.js";
+import {
+  type FakeOidcPerson,
+  startFakeOidcProvider,
+} from "../support/fake-oidc-provider.js";
+import {unknownOidcUserPolicies} from "../../src/core/oidc-sign-in.js";
+import {createOidcProvider} from "../../src/identity/oidc-provider.js";
 import {requiredPostgresSchemaVersion} from
   "../../src/storage/postgres-migrations.js";
 import {PostgresArtifactRepository} from "../../src/storage/postgres-artifact-repository.js";
@@ -265,6 +273,46 @@ const memberTreeSchema = z.object({
   }).loose()),
   viewer: z.object({name: z.string()}).strict().nullable(),
 }).loose();
+
+const mcpToolResultSchema = z.object({
+  result: z.object({
+    isError: z.boolean().optional(),
+    structuredContent: z.unknown().optional(),
+  }).loose(),
+});
+
+const mcpAssetPlanSchema = z.object({
+  commit: z.object({mcpTool: z.literal("asset_commit_upload"), uploadId: z.string()}),
+  file: z.object({method: z.literal("PUT"), uploadUrl: z.url()}).loose(),
+}).loose();
+
+const artifactInfoSchema = z.object({
+  artifactId: z.string(),
+  canManage: z.boolean(),
+  name: z.string(),
+  owner: z.object({displayName: z.string().nullable()}).strict(),
+  updatedAt: z.iso.datetime(),
+  version: z.object({id: z.string(), number: z.number().int().positive()}).strict(),
+  views: z.object({
+    daily: z.array(z.object({
+      day: z.string().regex(analyticsDayPattern),
+      views: z.number().int().positive(),
+    }).strict()),
+    last30Days: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+  }).strict(),
+  visibility: z.enum(["private", "public", "unlisted"]),
+  windowDays: z.literal(30),
+}).strict();
+
+const sessionPrincipalSchema = z.object({
+  principal: z.object({
+    displayName: z.string(),
+    id: z.string(),
+    kind: z.string(),
+    membershipRole: z.string(),
+  }).loose(),
+});
 
 interface IntegrationEnvironment {
   readonly accessKey: string;
@@ -3032,6 +3080,359 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       tags: ["archive", "unlisted"],
     });
   });
+
+  test("external-storage foundation: Postgres serves the asset MCP tools, so a copy replays its key and keeps serving after the original is deleted", async () => {
+    const identity = {
+      apiToken: managedTestKey("asset-mcp"),
+      installationId: `asset-mcp-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const csv = new TextEncoder().encode("day,views\n2026-10-01,3\n");
+    const callTool = async (name: string, toolArguments: McpTestParameters) => {
+      const response = await externalStorageMcpRequest(
+        server.baseUrl,
+        identity.apiToken,
+        "tools/call",
+        {arguments: toolArguments, name},
+        name,
+      );
+      expect(response.status).toBe(200);
+      const result = mcpToolResultSchema.parse(await response.json()).result;
+      expect(result.isError).not.toBe(true);
+      return result.structuredContent;
+    };
+    // The MCP request names the application host, so the URLs it returns
+    // name it too; reach them through this server.
+    const readBlob = (url: string) => fetch(replaceOrigin(url, server.baseUrl));
+    const publish = async (name: string) => {
+      const published = await publishNew(server.baseUrl, identity.apiToken, {
+        content: `<!doctype html><title>${name}</title>`,
+        idempotencyKey: `asset-mcp-${name}-${randomUUID()}`,
+        name,
+      });
+      expect(published.response.status).toBe(201);
+      return published.body.artifact.id;
+    };
+    const source = await publish("Asset MCP source");
+    const target = await publish("Asset MCP target");
+
+    const plan = mcpAssetPlanSchema.parse(await callTool("asset_create_upload", {
+      artifactId: source,
+      mediaType: "text/csv",
+      name: "views.csv",
+      sha256: sha256(csv),
+      size: csv.byteLength,
+    }));
+    expect((await putAssetBytes(
+      replaceOrigin(plan.file.uploadUrl, server.baseUrl),
+      identity.apiToken,
+      csv,
+    )).status).toBe(200);
+    const commitKey = `asset-mcp-commit-${randomUUID()}`;
+    const commit = () => callTool("asset_commit_upload", {
+      artifactId: source,
+      idempotencyKey: commitKey,
+      uploadId: plan.commit.uploadId,
+    });
+    const committed = committedAssetSchema.parse(await commit());
+    expect(committed).toMatchObject({
+      asset: {mediaType: "text/csv", name: "views.csv", size: csv.byteLength},
+      replayed: false,
+    });
+    expect(committedAssetSchema.parse(await commit()))
+      .toMatchObject({asset: {id: committed.asset.id}, replayed: true});
+    const original = await readBlob(committed.asset.url);
+    expect(original.status).toBe(200);
+    expect(await original.text()).toBe(new TextDecoder().decode(csv));
+
+    expect(assetListingSchema.parse(await callTool("asset_list", {artifactId: source})))
+      .toMatchObject({
+        assets: [{id: committed.asset.id}],
+        usage: {assetCount: 1, byteCount: csv.byteLength},
+      });
+
+    // A copy is a new row in the target over the same stored bytes, and its
+    // key replays that row rather than adding another.
+    const copyKey = `asset-mcp-copy-${randomUUID()}`;
+    const copyToTarget = () => callTool("asset_copy", {
+      artifactId: target,
+      idempotencyKey: copyKey,
+      sourceArtifactId: source,
+      sourceAssetId: committed.asset.id,
+    });
+    const copied = committedAssetSchema.parse(await copyToTarget());
+    expect(copied.replayed).toBe(false);
+    expect(copied.asset.id).not.toBe(committed.asset.id);
+    expect(copied.asset.sha256).toBe(committed.asset.sha256);
+    expect(committedAssetSchema.parse(await copyToTarget()))
+      .toMatchObject({asset: {id: copied.asset.id}, replayed: true});
+    expect(assetListingSchema.parse(await callTool("asset_list", {artifactId: target})))
+      .toMatchObject({
+        assets: [{id: copied.asset.id}],
+        usage: {assetCount: 1, byteCount: csv.byteLength},
+      });
+
+    // Deleting the original must not take the copy's shared bytes with it.
+    const deleted = z.object({asset: assetSchema}).parse(await callTool("asset_delete", {
+      artifactId: source,
+      assetId: committed.asset.id,
+    }));
+    expect(deleted.asset.id).toBe(committed.asset.id);
+    expect((await readBlob(committed.asset.url)).status).toBe(404);
+    const copy = await readBlob(copied.asset.url);
+    expect(copy.status).toBe(200);
+    expect(await copy.text()).toBe(new TextDecoder().decode(csv));
+    expect(assetListingSchema.parse(await callTool("asset_list", {artifactId: source})))
+      .toMatchObject({assets: [], usage: {assetCount: 0, byteCount: 0}});
+  });
+
+  test("external-storage foundation: Postgres finds or admits the member an OIDC sign-in names, once, and never revives a deactivated one", async () => {
+    const identity = {
+      apiToken: managedTestKey("oidc-member"),
+      installationId: `oidc-member-${randomUUID()}`,
+    };
+    const provider = await startFakeOidcProvider();
+    try {
+      const server = await startInProcessExternalStorageServer(environment, identity, {
+        browserAccess: privateTeamBrowserAccess(browserLoginKinds.none, {
+          provider: createOidcProvider({
+            clientId: provider.clientId,
+            clientSecret: Redacted.make(provider.clientSecret),
+            fetch: provider.fetch,
+            issuer: provider.issuer,
+            redirectUri: "https://artifacts.example.com/auth/oidc/callback",
+            scopes: "openid email profile",
+          }),
+          unknownUsers: unknownOidcUserPolicies.admit,
+        }),
+      });
+      const database = await PostgresDatabase.open({
+        maxConnections: 1,
+        url: Redacted.make(environment.databaseUrl),
+      }, "validate");
+      const members = new PostgresIdentityRepository(database, identity.installationId);
+      try {
+        const dave = await members.admitMember({
+          createdAt: new Date().toISOString(),
+          displayName: "Dave Example",
+          email: "dave@example.test",
+          id: `member_${randomUUID()}`,
+          installationId: identity.installationId,
+          role: "member",
+        });
+        await members.deactivateMember(
+          identity.installationId,
+          dave.id,
+          new Date().toISOString(),
+        );
+        const signIn = async (person: FakeOidcPerson) => {
+          const started = await fetch(`${server.baseUrl}/auth/oidc/start`, {redirect: "manual"});
+          expect(started.status).toBe(302);
+          const pending = hostCookiePair(started, "artifact_oidc");
+          if (pending === undefined) throw new Error("The start set no pending sign-in cookie.");
+          const redirect = new URL(provider.approve(started.headers.get("location") ?? "", person));
+          return fetch(`${server.baseUrl}/auth/oidc/callback${redirect.search}`, {
+            headers: {Cookie: pending},
+            redirect: "manual",
+          });
+        };
+        const principalOf = async (response: Response) => {
+          expect(response.status).toBe(303);
+          expect(response.headers.get("location")).toBe("/review");
+          const session = hostCookiePair(response, "artifact_session");
+          const csrf = hostCookiePair(response, "artifact_csrf");
+          if (session === undefined || csrf === undefined) {
+            throw new Error("The callback set no session.");
+          }
+          const read = await fetch(`${server.baseUrl}/api/v1/session`, {
+            headers: {Cookie: `${session}; ${csrf}`},
+          });
+          expect(read.status).toBe(200);
+          return sessionPrincipalSchema.parse(await read.json()).principal;
+        };
+        const newcomer = {
+          email: "newcomer@example.test",
+          email_verified: true,
+          name: "New Comer",
+          sub: "newcomer-subject",
+        } satisfies FakeOidcPerson;
+
+        const admitted = await principalOf(await signIn(newcomer));
+        expect(admitted).toMatchObject({
+          displayName: "New Comer",
+          kind: "human",
+          membershipRole: "member",
+        });
+        // The next sign-in, in another casing, is the same member.
+        const again = await principalOf(await signIn({...newcomer, email: "NewComer@Example.TEST"}));
+        expect(again.id).toBe(admitted.id);
+
+        // Admitting Dave's email again conflicts with his deactivated row, and
+        // the lookup that follows finds no active member, so he is refused.
+        const refused = await signIn({
+          email: "dave@example.test",
+          email_verified: true,
+          sub: "dave-subject",
+        });
+        expect(refused.status).toBe(303);
+        expect(refused.headers.get("location")).toBe("/review?sso=failed");
+        expect(hostCookiePair(refused, "artifact_session")).toBeUndefined();
+
+        expect((await members.listMembers(identity.installationId)).map((member) => ({
+          email: member.email,
+          id: member.id,
+          status: member.status,
+        })).filter((member) => member.email !== administratorEmail)).toEqual([
+          {email: "dave@example.test", id: dave.id, status: "inactive"},
+          {email: "newcomer@example.test", id: admitted.id, status: "active"},
+        ]);
+      } finally {
+        await database.close();
+      }
+    } finally {
+      await provider.stop();
+    }
+  });
+
+  test("external-storage foundation: Postgres reads the viewer bar's artifact info and lets only the owner or an administrator change visibility", async () => {
+    const identity = {
+      apiToken: managedTestKey("viewer-bar"),
+      installationId: `viewer-bar-${randomUUID()}`,
+    };
+    // Pinned at the present: managed keys and seeded sessions use the wall clock.
+    const clock = new MutableClock();
+    const server = await startInProcessExternalStorageServer(environment, identity, {clock});
+    const administrator = await seedAdministratorSession(environment, identity.installationId);
+    const admitMember = async (displayName: string, email: string) => {
+      const admitted = await fetch(`${server.baseUrl}/api/v1/members`, {
+        body: JSON.stringify({displayName, email}),
+        headers: browserMutationHeaders("https://artifacts.example.com", administrator),
+        method: "POST",
+      });
+      expect(admitted.status).toBe(201);
+      return z.object({member: z.object({id: z.string()})})
+        .parse(await admitted.json()).member.id;
+    };
+    const issueKey = async (memberId: string, capabilities: readonly string[], name: string) => {
+      const issued = await fetch(`${server.baseUrl}/api/v1/api-keys`, {
+        body: JSON.stringify({capabilities, expiresAt: "2099-01-01T00:00:00.000Z", memberId, name}),
+        headers: browserMutationHeaders("https://artifacts.example.com", administrator),
+        method: "POST",
+      });
+      expect(issued.status).toBe(201);
+      return issuedKeySchema.parse(await issued.json()).token;
+    };
+    const readInfo = (token: string, artifactId: string) =>
+      authenticatedFetch(server.baseUrl, token, `/api/v1/artifacts/${artifactId}/info`);
+    const info = async (token: string, artifactId: string) => {
+      const response = await readInfo(token, artifactId);
+      expect(response.status).toBe(200);
+      return artifactInfoSchema.parse(await response.json());
+    };
+    const changeAccess = (
+      token: string,
+      published: {readonly artifact: {readonly id: string}; readonly version: {readonly id: string}},
+      accessSetting: "account_required" | "public_link",
+    ) => mutateArtifact(
+      server.baseUrl,
+      token,
+      `/api/v1/artifacts/${published.artifact.id}/access`,
+      "PATCH",
+      `viewer-bar-access-${randomUUID()}`,
+      {accessSetting, expectedCurrentVersionId: published.version.id},
+    );
+    const changeTags = (
+      token: string,
+      published: {readonly artifact: {readonly id: string}; readonly version: {readonly id: string}},
+      tags: readonly string[],
+    ) => mutateArtifact(
+      server.baseUrl,
+      token,
+      `/api/v1/artifacts/${published.artifact.id}/tags`,
+      "PATCH",
+      `viewer-bar-tags-${randomUUID()}`,
+      {expectedCurrentVersionId: published.version.id, tags},
+    );
+    const visibilityOf = async (artifactId: string) =>
+      (await info(identity.apiToken, artifactId)).visibility;
+
+    const aliceId = await admitMember("Alice Example", "alice@example.test");
+    const alice = await issueKey(aliceId, ["artifact:create", "artifact:read"], "Alice laptop");
+    const aliceReader = await issueKey(aliceId, ["artifact:read"], "Alice reader");
+    const bobId = await admitMember("Bob Example", "bob@example.test");
+    const bob = await issueKey(bobId, ["artifact:create", "artifact:read"], "Bob laptop");
+
+    const published = await publishNew(server.baseUrl, alice, {
+      content: "<!doctype html><title>Alice notes</title>",
+      idempotencyKey: `viewer-bar-publish-${randomUUID()}`,
+      name: "Alice notes",
+    });
+    expect(published.response.status).toBe(201);
+    const notes = published.body;
+    const viewed = await Promise.all(Array.from(
+      {length: 3},
+      () => fetchContentThroughServer(server.baseUrl, notes.links.version),
+    ));
+    expect(viewed.map((response) => response.status)).toEqual([200, 200, 200]);
+    expect(await server.flushArtifactViews()).toMatchObject({failedChunks: 0});
+
+    expect(await info(alice, notes.artifact.id)).toEqual({
+      artifactId: notes.artifact.id,
+      canManage: true,
+      name: "Alice notes",
+      owner: {displayName: "Alice laptop"},
+      updatedAt: clock.now().toISOString(),
+      version: {id: notes.version.id, number: 1},
+      views: {
+        daily: [{day: clock.now().toISOString().slice(0, 10), views: 3}],
+        last30Days: 3,
+        total: 3,
+      },
+      visibility: "public",
+      windowDays: 30,
+    });
+
+    // Bob's key may read Alice's artifact but neither owns nor administers it.
+    expect((await info(bob, notes.artifact.id)).canManage).toBe(false);
+    expect((await changeAccess(bob, notes, "account_required")).status).toBe(403);
+    expect((await changeTags(bob, notes, ["external-storage-runtime", "unlisted"])).status)
+      .toBe(403);
+    // A key on Alice's own principal that may only read does not own it.
+    expect((await info(aliceReader, notes.artifact.id)).canManage).toBe(false);
+    const readerRefused = await changeAccess(aliceReader, notes, "account_required");
+    expect(readerRefused.status).toBe(403);
+    expect(z.object({error: z.object({code: z.string()})}).parse(await readerRefused.json())
+      .error.code).toBe("AUTHORIZATION_DENIED");
+    expect((await changeTags(aliceReader, notes, ["external-storage-runtime", "unlisted"]))
+      .status).toBe(403);
+    expect(await visibilityOf(notes.artifact.id)).toBe("public");
+
+    // Alice's creating key owns it and changes both halves of visibility.
+    expect((await changeTags(alice, notes, ["external-storage-runtime", "unlisted"])).status)
+      .toBe(200);
+    expect(await visibilityOf(notes.artifact.id)).toBe("unlisted");
+    expect((await changeAccess(alice, notes, "account_required")).status).toBe(200);
+    expect(await visibilityOf(notes.artifact.id)).toBe("private");
+
+    // An administrator's session changes an artifact it does not own.
+    const administratorHeaders =
+      browserMutationHeaders("https://artifacts.example.com", administrator);
+    administratorHeaders.set("Idempotency-Key", `viewer-bar-admin-${randomUUID()}`);
+    const restored = await fetch(`${server.baseUrl}/api/v1/artifacts/${notes.artifact.id}/access`, {
+      body: JSON.stringify({accessSetting: "public_link", expectedCurrentVersionId: notes.version.id}),
+      headers: administratorHeaders,
+      method: "PATCH",
+    });
+    expect(restored.status).toBe(200);
+    expect(await visibilityOf(notes.artifact.id)).toBe("unlisted");
+
+    expect((await readInfo(alice, "art_00000000-0000-4000-8000-000000000000")).status)
+      .toBe(404);
+  });
 });
 
 type PublicArtifactTree = z.infer<typeof publicArtifactTreeSchema>;
@@ -3151,9 +3552,10 @@ function runExternalCli(
 async function startInProcessExternalStorageServer(
   environment: IntegrationEnvironment,
   identity: {readonly apiToken: string; readonly installationId: string},
-  options: {
-    readonly clock?: Clock;
-  } = {},
+  options: Partial<Pick<
+    Parameters<typeof startExternalStorageServer>[0],
+    "browserAccess" | "clock" | "contentDomain"
+  >> = {},
 ): Promise<InProcessExternalStorageServer> {
   const server = await startExternalStorageServer({
     apiToken: Redacted.make(identity.apiToken),
@@ -3611,6 +4013,13 @@ async function seedMemberSession(
     csrf,
     header: `__Host-artifact_session=${token}; __Host-artifact_csrf=${csrf}`,
   };
+}
+
+/** One Set-Cookie pair; an https application origin names every cookie with __Host-. */
+function hostCookiePair(response: Response, name: string): string | undefined {
+  return response.headers.getSetCookie()
+    .map((cookie) => cookie.split(";", 1)[0] ?? "")
+    .find((pair) => pair.startsWith(`__Host-${name}=`));
 }
 
 function sha256Hex(value: string): string {
