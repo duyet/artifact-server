@@ -162,7 +162,7 @@ The path uses the same rules as an artifact path. A viewer can still open the fo
 Install the portable Agent Skill:
 
 ```sh
-npx skills add plannotator/artifact-server
+npx skills add duyet/artifact-server
 ```
 
 The skill routes artifact work and explicit server-administration work to separate internal instructions. It uses the CLI for files on the developer machine and MCP for server data and agent-held context.
