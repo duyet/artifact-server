@@ -57,7 +57,7 @@ export function useArtifactViewer({
 }: ArtifactViewerOptions): ArtifactViewer {
   const [details, setDetails] = useState<ArtifactDetails | null>(null);
   const [versions, setVersions] = useState<readonly VersionListItem[]>([]);
-  const [selectedVersion, setSelectedVersion] = useState<ArtifactVersion | null>(null);
+  const [fetchedVersion, setFetchedVersion] = useState<ArtifactVersion | null>(null);
   const [actions, setActions] = useState<readonly ArtifactAction[]>([]);
   const [actionNextCursor, setActionNextCursor] = useState<string | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
@@ -89,7 +89,6 @@ export function useArtifactViewer({
         if (!current) return;
         setDetails(null);
         setVersions([]);
-        setSelectedVersion(null);
         setError(caught instanceof Error ? caught : new Error("Artifact details failed."));
       } finally {
         if (current) setLoading(false);
@@ -108,21 +107,24 @@ export function useArtifactViewer({
     }
   }, [artifactId, loadedArtifactId, loadedCurrentVersionId, onVersionResolved, versionId]);
 
+  // Keyed on ids, not on the details object. A tags or access change replaces
+  // that object and must not read the open version again or remount its
+  // preview.
   useEffect(() => {
-    if (details === null || details.artifact.id !== artifactId || versionId === null) {
-      setSelectedVersion(null);
-      return undefined;
-    }
-    if (versionId === details.current.version.id) {
-      setSelectedVersion(details.current);
+    setFetchedVersion(null);
+    if (
+      loadedArtifactId !== artifactId
+      || loadedCurrentVersionId === null
+      || versionId === null
+      || versionId === loadedCurrentVersionId
+    ) {
       return undefined;
     }
     let current = true;
-    setSelectedVersion(null);
     void (async () => {
       try {
         const loaded = await api.version(projectId, artifactId, versionId);
-        if (current) setSelectedVersion(loaded);
+        if (current) setFetchedVersion(loaded);
       } catch (caught) {
         if (current) setError(caught instanceof Error ? caught : new Error("Version loading failed."));
       }
@@ -130,7 +132,15 @@ export function useArtifactViewer({
     return () => {
       current = false;
     };
-  }, [artifactId, details, projectId, versionId]);
+  }, [artifactId, loadedArtifactId, loadedCurrentVersionId, projectId, versionId]);
+  const currentDetails = details?.artifact.id === artifactId ? details : null;
+  const selectedVersion = currentDetails === null || versionId === null
+    ? null
+    : versionId === currentDetails.current.version.id
+      ? currentDetails.current
+      : fetchedVersion?.version.id === versionId
+        ? fetchedVersion
+        : null;
 
   const updateArtifact = useCallback((artifact: Artifact): void => {
     setDetails((current) => current?.artifact.id === artifact.id ? {...current, artifact} : current);
@@ -282,7 +292,7 @@ export function useArtifactViewer({
     comparison,
     comparisonError,
     comparisonLoading,
-    details: details?.artifact.id === artifactId ? details : null,
+    details: currentDetails,
     error,
     loadActions,
     loading,
