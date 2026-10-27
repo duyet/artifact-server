@@ -8,7 +8,7 @@ import {
   MutableClock,
   signInAdministrator,
 } from "../support/agent-dispatch.js";
-import {publishNew} from "../support/publishing.js";
+import {publishNew, publishVersion} from "../support/publishing.js";
 import {
   createTestInstallation,
   removeTestInstallation,
@@ -171,6 +171,86 @@ test.describe("Review send-all", () => {
       await expect(page.getByRole("button", {
         name: "Send all open (1) to builder",
       })).toBeVisible();
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
+  test("SND-001-F: a slow Sent load for one version never lands under the version the reader switched to", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const first = (await publishNew(fixture.server, fixture.installation, {
+        accessSetting: "account_required",
+        content: fixtureHtml,
+        idempotencyKey: "snd-001-stale-v1",
+        mediaType: "text/html; charset=utf-8",
+        name: "Stale sent fixture",
+        path: "index.html",
+      })).body;
+      const second = (await publishVersion(fixture.server, fixture.installation, {
+        artifactId: first.artifact.id,
+        content: fixtureHtml.replace("Review target", "Second target"),
+        expectedCurrentVersionId: first.version.id,
+        idempotencyKey: "snd-001-stale-v2",
+        mediaType: "text/html; charset=utf-8",
+        path: "index.html",
+      })).body;
+      const seed = (versionId: string, body: string) => createThreadOverApi(fixture, {
+        artifactId: first.artifact.id,
+        body,
+        idempotencyKey: `snd-001-stale-${body}`,
+        path: "index.html",
+        versionId,
+      });
+      const firstThreads = [
+        await seed(first.version.id, "first-version-one"),
+        await seed(first.version.id, "first-version-two"),
+      ];
+      const secondThread = await seed(second.version.id, "second-version-one");
+      const agent = await connectAgent(fixture, {key: "snd-001-stale-agent", name: "builder"});
+      const owner = new ApiClient(fixture.server, fixture.installation.apiToken);
+      const sends = await Promise.all([
+        firstThreads.map((thread) => thread.id),
+        [secondThread.id],
+      ].map((threadIds, index) => owner.sendDispatch({
+        agentId: agent.agentId,
+        idempotencyKey: `snd-001-stale-send-${index}`,
+        projectId: "prj_default",
+        threadIds,
+      })));
+      expect(sends.map((sent) => sent.ok)).toEqual([true, true]);
+
+      await localLogin(fixture);
+      const page = fixture.page;
+      const isFirstSentListing = (url: URL) =>
+        url.pathname === `/api/v1/artifacts/${first.artifact.id}/comments`
+        && url.searchParams.get("dispatched") === "only"
+        && url.searchParams.get("versionId") === first.version.id;
+      const firstRelease = Promise.withResolvers<void>();
+      await page.route(isFirstSentListing, async (route) => {
+        await firstRelease.promise;
+        await route.continue();
+      });
+      await page.goto(
+        `${fixture.server.baseUrl}/review?project=prj_default&artifact=${first.artifact.id}&version=${first.version.id}`,
+      );
+      await page.getByRole("tab", {name: "Comments"}).click();
+      await expect(page.getByRole("button", {name: "Sent (0)"})).toBeVisible();
+
+      // The top bar switches versions while the comments stay open.
+      await page.getByRole("button", {name: "Next version"}).click();
+      await expect(page.getByRole("button", {name: "Sent (1)"})).toBeVisible();
+
+      const lateListing = page.waitForResponse((response) =>
+        isFirstSentListing(new URL(response.url()))
+      );
+      firstRelease.resolve();
+      await lateListing;
+      await page.waitForLoadState("networkidle");
+      await expect(page.getByRole("button", {name: "Sent (1)"})).toBeVisible();
+      await page.getByRole("button", {name: "Sent (1)"}).click();
+      await expect(page.getByRole("article")).toHaveCount(1);
+      await expect(page.getByText("second-version-one")).toBeVisible();
     } finally {
       await stopBrowserFixture(fixture);
     }

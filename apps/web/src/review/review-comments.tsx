@@ -646,11 +646,15 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
     }
   }, []);
 
+  const sentGenerationRef = useRef(0);
   const loadSent = useCallback(async (): Promise<void> => {
+    const generation = sentGenerationRef.current + 1;
+    sentGenerationRef.current = generation;
     if (session.artifactId === null || session.projectId === "" || versionId === null) {
       setSentThreads([]);
       setSentReplies(new Map());
       setDispatchByThread(new Map());
+      setSentLoading(false);
       return;
     }
     setSentLoading(true);
@@ -667,15 +671,17 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
         loadConversations(session.projectId, session.artifactId, listed),
         loadDispatchIndex(session.projectId, listed.map((thread) => thread.id)),
       ]);
+      if (sentGenerationRef.current !== generation) return;
       setSentThreads(conversations.map(({thread}) => thread));
       setSentReplies(new Map(
         conversations.map(({replies, thread}) => [thread.id, replies]),
       ));
       setDispatchByThread(index);
     } catch (caught) {
+      if (sentGenerationRef.current !== generation) return;
       setSentError(caught instanceof Error ? caught : new Error("Sent comments failed."));
     } finally {
-      setSentLoading(false);
+      if (sentGenerationRef.current === generation) setSentLoading(false);
     }
   }, [session.artifactId, session.projectId, versionId]);
 
@@ -686,6 +692,9 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
   const dispatchUndo = useDispatchUndo(session.projectId, reloadDispatchSurface);
 
   useEffect(() => {
+    setSentThreads([]);
+    setSentReplies(new Map());
+    setDispatchByThread(new Map());
     void Promise.all([loadAgents(), loadSent()]);
   }, [loadAgents, loadSent]);
   useCommentPoll(loadAgents, session.projectId !== "");
