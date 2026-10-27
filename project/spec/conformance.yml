@@ -4278,7 +4278,7 @@ requirements:
       failure: {id: FRK-014-F, description: "A missing installation exits non-zero and creates nothing, an email that belongs to a non-administrator gets no key, and the secret appears once on standard output and never on standard error or in server logs."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved against a compact SQLite installation through the CLI and a real server. The external-storage path shares the application service but has no Postgres run.
+    proof_gap: Proved against a compact SQLite installation through the CLI and a real server. The external-storage suite now issues operator keys on Postgres and S3 through the external-storage runtime that admin issue-key opens, so two issues for one email in different case reuse the same member with a new key, the replaced first key is refused at browser sign-in with 401, the second key signs the browser in as a direct human administrator session that admits a member and issues that member a key over HTTP, the key list holds both operator keys, bearer use of the key is 403 on the member list, an administrator key for a member's email is an IdentityConflict that adds no key, and the same member then gets a named member key. It runs only in CI with Docker and does not run the admin issue-key command itself on Postgres, so the CLI output, a missing installation exiting non-zero and creating nothing, and the secret appearing once on standard output and never on standard error or in server logs are proved on SQLite only. No deployed run exists.
     depends_on: [AUTH-009, AUTH-029]
     evidence: []
 
@@ -4292,7 +4292,7 @@ requirements:
       failure: {id: FRK-015-F, description: "A member key gets 403 committing a version of, or renaming, an artifact another principal owns; re-issuing a key name makes the old token 401 while the new token and the member's other key stay valid; asking for the administrator role for a member email is an IdentityConflict."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved against a compact SQLite installation in process. The external-storage path shares the application service and repository methods but has no Postgres run.
+    proof_gap: Proved against a compact SQLite installation in process. The external-storage suite now issues one member two named keys on Postgres and S3, publishes with one key and reads its name as owner and publisher, and publishes new versions with each key, with the other key's name on its version; a member key gets 403 committing a version of, or renaming, an artifact the bootstrap key owns, which keeps its name and publisher; re-issuing a key name makes the old token 401 on a restarted server while the new token and the other key stay valid; and the administrator role for the member's email is an IdentityConflict. It runs only in CI with Docker and issues keys through the external-storage runtime rather than the admin issue-key command. No deployed run exists.
     depends_on: [FRK-010, FRK-014]
     evidence: []
 
@@ -4320,7 +4320,7 @@ requirements:
       failure: {id: FRK-017-F, description: "A version without HTML reports zero on its commit and its check, unterminated comments, strings, and url() end the scan, a file over the per-file limit is skipped and reported as truncated, an unknown version is 404, an unauthenticated read is 401, and an MCP call with an unknown field is refused."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server, the MCP endpoint, and the CLI in path mode. No content-domain, Postgres, or deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server, the MCP endpoint, and the CLI in path mode. The external-storage suite now publishes the same folder to Postgres and S3 with no content domain, reads exactly its broken references and summary over REST for the current and the exact version and over MCP, carries the counts on the HTTP commit result and on an MCP commit of a second version with its count line, keeps the first version's report unchanged after that commit, and answers an unknown version with 404. It runs only in CI with Docker and does not cover the CLI, a version without HTML, unterminated scans, the per-file limit, an unauthenticated read, or an MCP call with an unknown field on Postgres. No content-domain or deployed run exists.
     depends_on: [FRK-007]
     evidence: []
 
