@@ -1,8 +1,13 @@
 import {randomUUID} from "node:crypto";
+import {execFile} from "node:child_process";
 import {
+  chmod,
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import {createServer, type Server} from "node:http";
@@ -44,6 +49,9 @@ interface ClientFailure {
 
 type ClientOutcome = ClientFailure | ClientSuccess;
 const assignedAddressSchema = z.object({port: z.number().int().positive()});
+const savedVersionSchema = z.object({
+  manifest: z.object({entries: z.array(z.object({path: z.string()}))}),
+});
 
 describe("file publication client", () => {
   let fixtureDirectory: string;
@@ -125,32 +133,174 @@ describe("file publication client", () => {
     expect(Buffer.from(await openedVersion.arrayBuffer())).toEqual(secondReport);
   });
 
-  test("classifies unsafe filesystem inputs before it creates an upload", async () => {
+  test("MAN-004-B: publishes a directory of regular files and nested directories", async () => {
+    const sitePath = path.join(fixtureDirectory, "regular-tree");
+    await mkdir(path.join(sitePath, "assets/images"), {recursive: true});
+    await mkdir(path.join(sitePath, "empty"));
+    const contents = new Map([
+      ["assets/app.js", "document.body.dataset.tree = 'regular';"],
+      ["assets/images/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>"],
+      ["index.html", "<h1>Regular tree</h1>"],
+    ]);
+    await Promise.all([...contents].map(([filePath, body]) =>
+      writeFile(path.join(sitePath, filePath), body)
+    ));
+
+    const published = await executeClient(
+      server.baseUrl,
+      installation.apiToken,
+      newArtifactCommand(sitePath, "public_link"),
+    );
+    expect(published.success).toBe(true);
+    if (!published.success) return;
+
+    const versionResponse = await fetch(
+      `${server.baseUrl}/api/v1/artifacts/${published.result.artifact.id}/versions/${published.result.version.id}`,
+      {headers: {Authorization: `Bearer ${installation.apiToken}`}},
+    );
+    expect(versionResponse.status).toBe(200);
+    const saved = savedVersionSchema.parse(await versionResponse.json());
+    expect(saved.manifest.entries.map((entry) => entry.path)).toEqual([...contents.keys()]);
+    const served = await Promise.all([...contents.keys()].map(async (filePath) =>
+      (await fetchLoopbackContent(new URL(`/${filePath}`, published.result.links.version))).text()
+    ));
+    expect(served).toEqual([...contents.values()]);
+  });
+
+  test("MAN-004-F: rejects every special filesystem entry before the server sees an upload", {timeout: 30_000}, async () => {
+    const specialRoot = await mkdtemp(path.join("/tmp", "artifact-server-special-"));
+    const socketServers: Server[] = [];
+    const recorder = await startRecordingServer();
+    try {
+      const target = path.join(specialRoot, "target.html");
+      await writeFile(target, "<h1>Link target</h1>");
+      const listenAt = async (socketPath: string): Promise<void> => {
+        const socketServer = createServer();
+        socketServers.push(socketServer);
+        await new Promise<void>((resolve, reject) => {
+          socketServer.once("error", reject);
+          socketServer.listen(socketPath, resolve);
+        });
+      };
+      const directoryWith = async (
+        name: string,
+        create: (entryPath: string) => Promise<void>,
+      ): Promise<string> => {
+        const directory = path.join(specialRoot, name);
+        await mkdir(directory);
+        await writeFile(path.join(directory, "index.html"), "<h1>Regular file</h1>");
+        await create(path.join(directory, "special"));
+        return directory;
+      };
+      const rootEntry = async (
+        name: string,
+        create: (entryPath: string) => Promise<void>,
+      ): Promise<string> => {
+        const entryPath = path.join(specialRoot, name);
+        await create(entryPath);
+        return entryPath;
+      };
+      const cases: readonly (readonly [string, string])[] = [
+        [await directoryWith("file-link", (entry) => symlink(target, entry)), "symbolic_link"],
+        [await directoryWith("directory-link", (entry) => symlink(specialRoot, entry)), "symbolic_link"],
+        [await directoryWith("fifo", makeFifo), "unsupported_file_type"],
+        [await directoryWith("socket", listenAt), "unsupported_file_type"],
+        [await rootEntry("root-link.html", (entry) => symlink(target, entry)), "symbolic_link"],
+        [await rootEntry("root-fifo", makeFifo), "unsupported_file_type"],
+        [await rootEntry("root.sock", listenAt), "unsupported_file_type"],
+        ["/dev/null", "unsupported_file_type"],
+        [await firstBlockDevice(), "unsupported_file_type"],
+      ];
+
+      const outcomes = await Promise.all(cases.map(([inputPath]) =>
+        executeClient(recorder.origin, installation.apiToken, newArtifactCommand(inputPath))
+      ));
+      expect(outcomes.map((outcome, index) => [cases[index]?.[0], failureReason(outcome)]))
+        .toEqual(cases);
+      expect(recorder.requests()).toBe(0);
+    } finally {
+      await Promise.all(socketServers.map(closeServer));
+      await closeServer(recorder.server);
+      await rm(specialRoot, {force: true, recursive: true});
+    }
+  });
+
+  test("PUB-010-B: saves the bytes the client read, so later source changes do not alter the version", async () => {
+    const sourcePath = path.join(fixtureDirectory, "snapshot.html");
+    const savedBytes = "<h1>Bytes read at publish time</h1>";
+    await writeFile(sourcePath, savedBytes);
+
+    const published = await executeClient(
+      server.baseUrl,
+      installation.apiToken,
+      newArtifactCommand(sourcePath, "public_link"),
+    );
+    expect(published.success).toBe(true);
+    if (!published.success) return;
+    expect(JSON.stringify(published.result)).not.toContain(fixtureDirectory);
+
+    await writeFile(sourcePath, "<h1>Edited after publish</h1>");
+    const afterEdit = await fetchLoopbackContent(published.result.links.version);
+    expect(await afterEdit.text()).toBe(savedBytes);
+
+    await rm(sourcePath);
+    const afterRemoval = await fetchLoopbackContent(published.result.links.version);
+    expect(await afterRemoval.text()).toBe(savedBytes);
+  });
+
+  test("PUB-010-F: rejects unsafe paths and file types before it creates an upload", async () => {
+    expect(
+      process.getuid?.(),
+      "the permission case needs a non-root identity, because root ignores mode 000",
+    ).not.toBe(0);
     const emptyPath = path.join(fixtureDirectory, "empty");
     const missingEntryPath = path.join(fixtureDirectory, "missing-entry");
     const unsafePath = path.join(fixtureDirectory, "unsafe");
+    const linkedPath = path.join(fixtureDirectory, "linked");
+    const fifoPath = path.join(fixtureDirectory, "input-fifo");
+    const unreadableFilePath = path.join(fixtureDirectory, "unreadable-file");
+    const unreadableDirectoryPath = path.join(fixtureDirectory, "unreadable-directory");
     await Promise.all([
       mkdir(emptyPath),
       mkdir(missingEntryPath),
       mkdir(path.join(unsafePath, ".git"), {recursive: true}),
+      mkdir(linkedPath),
+      mkdir(unreadableFilePath),
+      mkdir(unreadableDirectoryPath),
+      makeFifo(fifoPath),
     ]);
     await Promise.all([
       writeFile(path.join(missingEntryPath, "page.html"), "<h1>Wrong entry</h1>"),
       writeFile(path.join(unsafePath, ".git/config"), "[core]\n"),
+      writeFile(path.join(linkedPath, "index.html"), "<h1>Linked</h1>"),
+      writeFile(path.join(unreadableFilePath, "index.html"), "<h1>Unreadable</h1>"),
+      writeFile(path.join(unreadableDirectoryPath, "index.html"), "<h1>Hidden</h1>"),
     ]);
+    await symlink(path.join(linkedPath, "index.html"), path.join(linkedPath, "alias.html"));
+    await chmod(path.join(unreadableFilePath, "index.html"), 0o000);
+    await chmod(unreadableDirectoryPath, 0o000);
 
-    const [empty, missingEntry, unsafe] = await Promise.all([
-      executeClient(server.baseUrl, installation.apiToken, newArtifactCommand(emptyPath)),
-      executeClient(
-        server.baseUrl,
-        installation.apiToken,
-        newArtifactCommand(missingEntryPath),
-      ),
-      executeClient(server.baseUrl, installation.apiToken, newArtifactCommand(unsafePath)),
-    ]);
-    expect(failureReason(empty)).toBe("empty_directory");
-    expect(failureReason(missingEntry)).toBe("invalid_entry");
-    expect(failureReason(unsafe)).toBe("invalid_path");
+    const recorder = await startRecordingServer();
+    try {
+      const cases = [
+        [emptyPath, "empty_directory"],
+        [missingEntryPath, "invalid_entry"],
+        [unsafePath, "invalid_path"],
+        [linkedPath, "symbolic_link"],
+        [fifoPath, "unsupported_file_type"],
+        [unreadableFilePath, "read_failed"],
+        [unreadableDirectoryPath, "read_failed"],
+      ] as const;
+      const outcomes = await Promise.all(cases.map(([inputPath]) =>
+        executeClient(recorder.origin, installation.apiToken, newArtifactCommand(inputPath))
+      ));
+      expect(outcomes.map((outcome, index) => [cases[index]?.[0], failureReason(outcome)]))
+        .toEqual(cases);
+      expect(recorder.requests()).toBe(0);
+    } finally {
+      await closeServer(recorder.server);
+      await chmod(unreadableDirectoryPath, 0o700);
+    }
   });
 
   test("fails closed for invalid credentials, invalid server origins, and cross-origin upload plans", async () => {
@@ -394,6 +544,42 @@ async function startResponseServer(
   }
   origin = `http://127.0.0.1:${address.data.port}`;
   return {origin, server};
+}
+
+async function startRecordingServer(): Promise<{
+  readonly origin: string;
+  readonly requests: () => number;
+  readonly server: Server;
+}> {
+  let requests = 0;
+  const recorder = await startResponseServer(() => {
+    requests += 1;
+    return "{}";
+  }, 500);
+  return {...recorder, requests: () => requests};
+}
+
+function makeFifo(fifoPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("mkfifo", [fifoPath], (error) => {
+      if (error === null) resolve();
+      else reject(error);
+    });
+  });
+}
+
+async function firstBlockDevice(): Promise<string> {
+  const names = await readdir("/dev");
+  const candidates = await Promise.all(names.map(async (name) => {
+    const devicePath = path.join("/dev", name);
+    const info = await lstat(devicePath).catch(() => null);
+    return info?.isBlockDevice() === true ? devicePath : null;
+  }));
+  const device = candidates.find((candidate) => candidate !== null);
+  if (device === undefined || device === null) {
+    throw new Error("MAN-004-F needs one block device under /dev to prove block devices are rejected.");
+  }
+  return device;
 }
 
 function closeServer(server: Server): Promise<void> {
