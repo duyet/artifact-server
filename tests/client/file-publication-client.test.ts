@@ -1,6 +1,7 @@
 import {randomUUID} from "node:crypto";
 import {execFile} from "node:child_process";
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -224,32 +225,82 @@ describe("file publication client", () => {
     }
   });
 
-  test("classifies unsafe filesystem inputs before it creates an upload", async () => {
+  test("PUB-010-B: saves the bytes the client read, so later source changes do not alter the version", async () => {
+    const sourcePath = path.join(fixtureDirectory, "snapshot.html");
+    const savedBytes = "<h1>Bytes read at publish time</h1>";
+    await writeFile(sourcePath, savedBytes);
+
+    const published = await executeClient(
+      server.baseUrl,
+      installation.apiToken,
+      newArtifactCommand(sourcePath, "public_link"),
+    );
+    expect(published.success).toBe(true);
+    if (!published.success) return;
+    expect(JSON.stringify(published.result)).not.toContain(fixtureDirectory);
+
+    await writeFile(sourcePath, "<h1>Edited after publish</h1>");
+    const afterEdit = await fetchLoopbackContent(published.result.links.version);
+    expect(await afterEdit.text()).toBe(savedBytes);
+
+    await rm(sourcePath);
+    const afterRemoval = await fetchLoopbackContent(published.result.links.version);
+    expect(await afterRemoval.text()).toBe(savedBytes);
+  });
+
+  test("PUB-010-F: rejects unsafe paths and file types before it creates an upload", async () => {
+    expect(
+      process.getuid?.(),
+      "the permission case needs a non-root identity, because root ignores mode 000",
+    ).not.toBe(0);
     const emptyPath = path.join(fixtureDirectory, "empty");
     const missingEntryPath = path.join(fixtureDirectory, "missing-entry");
     const unsafePath = path.join(fixtureDirectory, "unsafe");
+    const linkedPath = path.join(fixtureDirectory, "linked");
+    const fifoPath = path.join(fixtureDirectory, "input-fifo");
+    const unreadableFilePath = path.join(fixtureDirectory, "unreadable-file");
+    const unreadableDirectoryPath = path.join(fixtureDirectory, "unreadable-directory");
     await Promise.all([
       mkdir(emptyPath),
       mkdir(missingEntryPath),
       mkdir(path.join(unsafePath, ".git"), {recursive: true}),
+      mkdir(linkedPath),
+      mkdir(unreadableFilePath),
+      mkdir(unreadableDirectoryPath),
+      makeFifo(fifoPath),
     ]);
     await Promise.all([
       writeFile(path.join(missingEntryPath, "page.html"), "<h1>Wrong entry</h1>"),
       writeFile(path.join(unsafePath, ".git/config"), "[core]\n"),
+      writeFile(path.join(linkedPath, "index.html"), "<h1>Linked</h1>"),
+      writeFile(path.join(unreadableFilePath, "index.html"), "<h1>Unreadable</h1>"),
+      writeFile(path.join(unreadableDirectoryPath, "index.html"), "<h1>Hidden</h1>"),
     ]);
+    await symlink(path.join(linkedPath, "index.html"), path.join(linkedPath, "alias.html"));
+    await chmod(path.join(unreadableFilePath, "index.html"), 0o000);
+    await chmod(unreadableDirectoryPath, 0o000);
 
-    const [empty, missingEntry, unsafe] = await Promise.all([
-      executeClient(server.baseUrl, installation.apiToken, newArtifactCommand(emptyPath)),
-      executeClient(
-        server.baseUrl,
-        installation.apiToken,
-        newArtifactCommand(missingEntryPath),
-      ),
-      executeClient(server.baseUrl, installation.apiToken, newArtifactCommand(unsafePath)),
-    ]);
-    expect(failureReason(empty)).toBe("empty_directory");
-    expect(failureReason(missingEntry)).toBe("invalid_entry");
-    expect(failureReason(unsafe)).toBe("invalid_path");
+    const recorder = await startRecordingServer();
+    try {
+      const cases = [
+        [emptyPath, "empty_directory"],
+        [missingEntryPath, "invalid_entry"],
+        [unsafePath, "invalid_path"],
+        [linkedPath, "symbolic_link"],
+        [fifoPath, "unsupported_file_type"],
+        [unreadableFilePath, "read_failed"],
+        [unreadableDirectoryPath, "read_failed"],
+      ] as const;
+      const outcomes = await Promise.all(cases.map(([inputPath]) =>
+        executeClient(recorder.origin, installation.apiToken, newArtifactCommand(inputPath))
+      ));
+      expect(outcomes.map((outcome, index) => [cases[index]?.[0], failureReason(outcome)]))
+        .toEqual(cases);
+      expect(recorder.requests()).toBe(0);
+    } finally {
+      await closeServer(recorder.server);
+      await chmod(unreadableDirectoryPath, 0o700);
+    }
   });
 
   test("fails closed for invalid credentials, invalid server origins, and cross-origin upload plans", async () => {

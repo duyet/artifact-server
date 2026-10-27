@@ -665,7 +665,8 @@ requirements:
       behavior: {id: PUB-010-B, description: "Publish a regular local file through the client and confirm that later source changes do not change the saved version."}
       failure: {id: PUB-010-F, description: "Reject symlinks, special files, forbidden manifest paths, and paths inaccessible to the client's operating-system identity before creating an upload."}
     deployments: [local, single_server]
-    status: specified
+    status: implementing
+    proof_gap: PUB-010-B and PUB-010-F run only locally against a real SQLite server, and PUB-010-F uses a recording HTTP server that must see no request, with mode-000 files and directories under a non-root identity. PUB-010-B checks that the client path is absent from the publish response, not from raw HTTP request bodies or MCP. No single_server run exists, and no evidence report is attached.
     depends_on: [MAN-004, PUB-001]
     evidence: []
 
