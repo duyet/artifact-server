@@ -369,6 +369,23 @@ describe("AUD-001 recorded responsibility for every mutation", () => {
       byHuman("api_key_issued", replacementKey.apiKey.id),
       byHuman("api_key_revoked", replacementKey.apiKey.id),
     ]));
+    const pageOne = await expectJson(
+      await send(human, "GET", "/api/v1/administration/actions?limit=5"),
+      200,
+      installationActionPageSchema,
+    );
+    const pageTwo = await expectJson(await send(
+      human,
+      "GET",
+      `/api/v1/administration/actions?limit=5&cursor=${pageOne.nextCursor ?? ""}`,
+    ), 200, installationActionPageSchema);
+    const pageThree = await expectJson(await send(
+      human,
+      "GET",
+      `/api/v1/administration/actions?limit=5&cursor=${pageTwo.nextCursor ?? ""}`,
+    ), 200, installationActionPageSchema);
+    expect([...pageOne.actions, ...pageTwo.actions, ...pageThree.actions]).toEqual(recorded);
+    expect(pageThree.nextCursor).toBeNull();
   });
 
   test("AUD-001-F: a mutation cannot commit without a valid actor and its action record", async () => {

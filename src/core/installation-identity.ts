@@ -18,8 +18,7 @@ export const installationOperatorPrincipalId = "installation-operator";
 
 /**
  * The actor recorded for an installation change an operator makes outside the
- * application: an operator key, the private-team bootstrap key, or the keys an
- * operator key replaces.
+ * application: an operator key, its member, or the keys it replaces.
  */
 export const installationOperatorActor: InstallationActor = {
   authorizedByPrincipalId: null,

@@ -1405,8 +1405,15 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         principalId: administratorId,
         subjectId,
       });
+      const bootstrapIssue = {
+        authorizedByPrincipalId: null,
+        kind: "api_key_issued",
+        principalDisplayName: "Installation bootstrap",
+        principalId: "installation-bootstrap",
+        subjectId: bootstrapKeyId,
+      };
       expect(summarize(await readActions())).toEqual(summarize([
-        byOperator("api_key_issued", bootstrapKeyId),
+        bootstrapIssue,
         byOperator("member_admitted", administratorId),
       ]));
 
@@ -1476,7 +1483,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
         subjectId: project.id,
       });
       expect(summarize(recorded)).toEqual(summarize([
-        byOperator("api_key_issued", bootstrapKeyId),
+        bootstrapIssue,
         byOperator("member_admitted", administratorId),
         byAdministrator("api_key_issued", stewardKey.apiKey.id),
         byAdministrator("project_created", project.id),
