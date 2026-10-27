@@ -21,6 +21,19 @@ configuration:
   requestLogSampleRate: 0.01
   readinessWithdrawalMilliseconds: 1000
   shutdownDeadlineMilliseconds: 10000
+  helpUrl: ""
+  logo:
+    url: ""
+    alt: ""
+    link: ""
+  assetQuota:
+    count: null
+    bytes: null
+  oidc:
+    issuer: ""
+    clientId: ""
+    scopes: ""
+    unknownUsers: ""
   s3:
     bucket: ""
     region: ""
@@ -35,6 +48,7 @@ secret:
     databaseUrl: database-url
     s3AccessKeyId: ""
     s3SecretAccessKey: ""
+    oidcClientSecret: ""
 
 serviceAccount:
   create: true

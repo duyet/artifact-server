@@ -164,6 +164,59 @@ A team deployment signs browsers in with a managed API key (`POST /auth/api-key`
 The bootstrap key comes from the Secret key named by `secret.keys.apiToken`
 (default `api-token`).
 
+## OIDC sign-in, logo, help link, and asset quota
+
+These settings are off by default. An empty value renders no environment
+variable, so the server's own default applies.
+
+```yaml
+configuration:
+  helpUrl: https://example.com/help
+  logo:
+    url: https://example.com/logo.svg
+    alt: Example
+    link: /
+  assetQuota:
+    count: 500
+    bytes: 536870912
+  oidc:
+    issuer: https://sso.example.com
+    clientId: artifact-server
+    scopes: openid email profile
+    unknownUsers: reject
+
+secret:
+  keys:
+    oidcClientSecret: oidc-client-secret
+```
+
+| Value | Variable |
+| --- | --- |
+| `configuration.oidc.issuer` | `ARTIFACT_SERVER_OIDC_ISSUER` |
+| `configuration.oidc.clientId` | `ARTIFACT_SERVER_OIDC_CLIENT_ID` |
+| `secret.keys.oidcClientSecret` | `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE` |
+| `configuration.oidc.scopes` | `ARTIFACT_SERVER_OIDC_SCOPES` |
+| `configuration.oidc.unknownUsers` (`reject` or `admit`) | `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS` |
+| `configuration.logo.url` | `ARTIFACT_SERVER_LOGO` |
+| `configuration.logo.alt` | `ARTIFACT_SERVER_LOGO_ALT` |
+| `configuration.logo.link` | `ARTIFACT_SERVER_LOGO_LINK` |
+| `configuration.helpUrl` | `ARTIFACT_SERVER_HELP_URL` |
+| `configuration.assetQuota.count` | `ARTIFACT_SERVER_ASSET_QUOTA_COUNT` |
+| `configuration.assetQuota.bytes` | `ARTIFACT_SERVER_ASSET_QUOTA_BYTES` |
+
+The OIDC client secret is never a value. Add it as a key of the runtime Secret
+and name that key in `secret.keys.oidcClientSecret`. The chart mounts it with
+the other secrets and sets `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE`, as it does
+for the database URL. Setting an issuer requires `clientId` and the secret key.
+Setting any other OIDC value without an issuer is an error. Changing the Secret
+follows the same `secret.rolloutChecksum` rule as the other keys.
+
+The chart supports only the `https://` URL form of the logo. A file path would
+need a volume and a file in the image or a ConfigMap, which the chart does not
+provide. `logo.alt` is required with `logo.url`, and `logo.alt` and `logo.link`
+need a `logo.url`. The chart rejects an invalid shape at render time. The server
+still checks lengths and the image itself at startup.
+
 ## NetworkPolicy
 
 NetworkPolicy is disabled by default. Standard Kubernetes policies cannot allow

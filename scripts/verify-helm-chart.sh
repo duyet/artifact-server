@@ -72,6 +72,43 @@ expect_rendered_count 0 'ARTIFACT_SERVER_CONTENT_DOMAIN' "$artifactserver_same_h
 expect_rendered_count 1 'name: ARTIFACT_SERVER_S3_ENDPOINT$' "$artifactserver_same_host_deployment"
 expect_rendered_count 1 '^          enableServiceLinks: false$' "$artifactserver_same_host_cleanup"
 
+artifactserver_default_deployment=$(helm template artifact-server "$artifactserver_chart" \
+  --kube-version 1.36.0 "${artifactserver_values[@]}" --show-only templates/deployment.yaml)
+expect_rendered_count 0 'ARTIFACT_SERVER_(OIDC|LOGO|HELP_URL|ASSET_QUOTA)' "$artifactserver_default_deployment"
+expect_rendered_count 0 'oidc-client-secret' "$artifactserver_default_deployment"
+
+artifactserver_settings_values=(
+  "${artifactserver_values[@]}"
+  --set configuration.oidc.issuer=https://sso.example.test
+  --set configuration.oidc.clientId=artifact-server
+  --set "configuration.oidc.scopes=openid email"
+  --set configuration.oidc.unknownUsers=admit
+  --set secret.keys.oidcClientSecret=oidc-client-secret
+  --set configuration.logo.url=https://example.test/logo.svg
+  --set "configuration.logo.alt=Example logo"
+  --set configuration.logo.link=/
+  --set configuration.helpUrl=https://example.test/help
+  --set configuration.assetQuota.count=250
+  --set configuration.assetQuota.bytes=536870912
+)
+artifactserver_settings_deployment=$(helm template artifact-server "$artifactserver_chart" \
+  --kube-version 1.36.0 "${artifactserver_settings_values[@]}" --show-only templates/deployment.yaml)
+expect_rendered_count 1 'name: ARTIFACT_SERVER_OIDC_ISSUER$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "https://sso.example.test"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'name: ARTIFACT_SERVER_OIDC_CLIENT_ID$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "openid email"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "admit"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: /run/secrets/artifact-server/oidc-client-secret$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'path: oidc-client-secret$' "$artifactserver_settings_deployment"
+expect_rendered_count 0 'ARTIFACT_SERVER_OIDC_CLIENT_SECRET$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "https://example.test/logo.svg"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "Example logo"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'name: ARTIFACT_SERVER_LOGO_LINK$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "https://example.test/help"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'name: ARTIFACT_SERVER_ASSET_QUOTA_COUNT$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "250"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "536870912"$' "$artifactserver_settings_deployment"
+
 expect_render_failure() {
   local artifactserver_expected=$1
   shift
@@ -122,6 +159,32 @@ expect_render_failure "application origin with no path or explicit port" \
 expect_render_failure "podLabels cannot replace the chart-owned label" \
   "${artifactserver_values[@]}" \
   --set-string podLabels.app\\.kubernetes\\.io/component=other
+
+expect_render_failure "secret.keys.oidcClientSecret is required" \
+  "${artifactserver_values[@]}" \
+  --set configuration.oidc.issuer=https://sso.example.test \
+  --set configuration.oidc.clientId=artifact-server
+
+expect_render_failure "configuration.oidc.issuer is required" \
+  "${artifactserver_values[@]}" \
+  --set configuration.oidc.clientId=artifact-server
+
+expect_render_failure "must include openid" \
+  "${artifactserver_settings_values[@]}" \
+  --set configuration.oidc.scopes=email
+
+expect_render_failure "configuration.logo.alt is required" \
+  "${artifactserver_values[@]}" \
+  --set configuration.logo.url=https://example.test/logo.svg
+
+expect_render_failure "/configuration/oidc/unknownUsers" \
+  "${artifactserver_values[@]}" \
+  --set configuration.oidc.unknownUsers=allow
+
+expect_render_failure "/configuration/logo/url" \
+  "${artifactserver_values[@]}" \
+  --set configuration.logo.url=/etc/logo.png \
+  --set configuration.logo.alt=Logo
 
 mkdir -p -- "$artifactserver_repository/release"
 helm package "$artifactserver_chart" \

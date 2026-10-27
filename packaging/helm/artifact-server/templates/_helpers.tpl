@@ -60,6 +60,22 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if ne $hasAccessKey $hasSecretKey -}}
 {{- fail "secret.keys.s3AccessKeyId and secret.keys.s3SecretAccessKey must be configured together" -}}
 {{- end -}}
+{{- $oidc := .Values.configuration.oidc -}}
+{{- if $oidc.issuer -}}
+{{- $_ := required "configuration.oidc.clientId is required when configuration.oidc.issuer is set" $oidc.clientId -}}
+{{- $_ := required "secret.keys.oidcClientSecret is required when configuration.oidc.issuer is set" .Values.secret.keys.oidcClientSecret -}}
+{{- if and $oidc.scopes (not (has "openid" (splitList " " $oidc.scopes))) -}}
+{{- fail "configuration.oidc.scopes must include openid" -}}
+{{- end -}}
+{{- else if or $oidc.clientId $oidc.scopes $oidc.unknownUsers .Values.secret.keys.oidcClientSecret -}}
+{{- fail "configuration.oidc.issuer is required when other OIDC values are set" -}}
+{{- end -}}
+{{- $logo := .Values.configuration.logo -}}
+{{- if $logo.url -}}
+{{- $_ := required "configuration.logo.alt is required when configuration.logo.url is set" $logo.alt -}}
+{{- else if or $logo.alt $logo.link -}}
+{{- fail "configuration.logo.url is required when configuration.logo.alt or configuration.logo.link is set" -}}
+{{- end -}}
 {{- $drainMilliseconds := add .Values.configuration.readinessWithdrawalMilliseconds .Values.configuration.shutdownDeadlineMilliseconds -}}
 {{- if le (mul .Values.terminationGracePeriodSeconds 1000) $drainMilliseconds -}}
 {{- fail "terminationGracePeriodSeconds must be longer than readinessWithdrawalMilliseconds plus shutdownDeadlineMilliseconds" -}}
@@ -110,6 +126,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - key: {{ .Values.secret.keys.s3SecretAccessKey | quote }}
   path: s3-secret-access-key
 {{- end }}
+{{- if .Values.secret.keys.oidcClientSecret }}
+- key: {{ .Values.secret.keys.oidcClientSecret | quote }}
+  path: oidc-client-secret
+{{- end }}
 {{- end -}}
 
 {{- define "artifact-server.runtimeEnvironment" -}}
@@ -151,6 +171,44 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   value: "external"
 - name: ARTIFACT_SERVER_STAGING_CLEANUP_SETTLE_DELAY_MS
   value: {{ .Values.cleanup.settleDelayMilliseconds | quote }}
+{{- with .Values.configuration.helpUrl }}
+- name: ARTIFACT_SERVER_HELP_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.configuration.logo.url }}
+- name: ARTIFACT_SERVER_LOGO
+  value: {{ . | quote }}
+- name: ARTIFACT_SERVER_LOGO_ALT
+  value: {{ $.Values.configuration.logo.alt | quote }}
+{{- end }}
+{{- with .Values.configuration.logo.link }}
+- name: ARTIFACT_SERVER_LOGO_LINK
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.configuration.assetQuota.count }}
+- name: ARTIFACT_SERVER_ASSET_QUOTA_COUNT
+  value: {{ . | int64 | quote }}
+{{- end }}
+{{- with .Values.configuration.assetQuota.bytes }}
+- name: ARTIFACT_SERVER_ASSET_QUOTA_BYTES
+  value: {{ . | int64 | quote }}
+{{- end }}
+{{- with .Values.configuration.oidc.issuer }}
+- name: ARTIFACT_SERVER_OIDC_ISSUER
+  value: {{ . | quote }}
+- name: ARTIFACT_SERVER_OIDC_CLIENT_ID
+  value: {{ $.Values.configuration.oidc.clientId | quote }}
+- name: ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE
+  value: /run/secrets/artifact-server/oidc-client-secret
+{{- end }}
+{{- with .Values.configuration.oidc.scopes }}
+- name: ARTIFACT_SERVER_OIDC_SCOPES
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.configuration.oidc.unknownUsers }}
+- name: ARTIFACT_SERVER_OIDC_UNKNOWN_USERS
+  value: {{ . | quote }}
+{{- end }}
 {{- if .Values.configuration.s3.endpoint }}
 - name: ARTIFACT_SERVER_S3_ENDPOINT
   value: {{ .Values.configuration.s3.endpoint | quote }}

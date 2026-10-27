@@ -101,7 +101,7 @@ The server reads its settings from environment variables. These are the ones tha
 
 External-storage mode (Postgres and S3) also reads `ARTIFACT_SERVER_DATABASE_URL`, `ARTIFACT_SERVER_INSTALLATION_ID`, `ARTIFACT_SERVER_API_TOKEN`, `ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL`, and the `ARTIFACT_SERVER_S3_*` variables. The Helm chart sets those from its values. Each secret also accepts a `_FILE` variant, such as `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE`, that names a file holding the value. Setting both forms fails at startup.
 
-The Helm chart has no values for the OIDC, logo, help, or asset quota variables. To use them on Kubernetes, add them to the Deployment in your own manifests.
+The Helm chart has values for the OIDC, logo, help, and asset quota variables. The OIDC client secret comes from a key of the runtime Secret. The chart accepts only the `https://` URL form of the logo. See the [chart README](./packaging/helm/artifact-server/README.md#oidc-sign-in-logo-help-link-and-asset-quota).
 
 Run `artifactserver config check` to see the parsed configuration before a rollout. The output names each secret's source and never its value.
 
