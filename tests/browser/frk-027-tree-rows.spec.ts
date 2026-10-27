@@ -142,8 +142,18 @@ async function expectMemberRows(
     await page.getByRole("button", {name: "Actions for Alice report"}).click();
     await expect(page.getByRole("menuitemradio", {name: "Public"})).toHaveAttribute("aria-checked", "true");
     await page.screenshot({fullPage: true, path: "test-results/browser/home-tree-menu-light.png"});
+    // The change lands but the tree's reread fails. The page keeps the rows it
+    // has and says the refresh failed, and the next read catches up.
+    await page.route(isCatalogRead, (route) =>
+      route.fulfill({json: {error: {message: "Catalog read failed."}}, status: 503}));
     await page.getByRole("menuitemradio", {name: "Private"}).click();
     await expect(page.getByText("Alice report is now private.")).toBeVisible();
+    await expect(page.getByText("The catalog could not be refreshed.")).toBeVisible();
+    await expect(page.getByRole("heading", {name: "Catalog unavailable"})).toHaveCount(0);
+    await expect(rowLinks(page)).toHaveText(["Alice notes", "Alice report", "Bob plan"]);
+    await page.unroute(isCatalogRead);
+    await page.reload();
+    await expect(page.getByRole("button", {name: /^Actions for /u})).toHaveCount(2);
     const reportRow = page.locator("[data-slot=tree-row]").filter({hasText: "Alice report"});
     await expect(reportRow).toContainText("Private");
     await page.screenshot({fullPage: true, path: "test-results/browser/home-tree-member-light.png"});
@@ -233,6 +243,11 @@ async function issueMemberKey(
   } finally {
     await runtime.close();
   }
+}
+
+/** The home page's read of the public tree. */
+function isCatalogRead(url: URL): boolean {
+  return url.pathname === "/api/v1/public/tree";
 }
 
 /** The artifact links of the tree's rows, in page order. */

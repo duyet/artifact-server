@@ -85,6 +85,53 @@ test.describe("Artifact Server Review wave three", () => {
     }
   });
 
+  test("ART-010-B: saving tags while an older version is open keeps that version's preview without reading it again", async ({browser}) => {
+    const fixture = await startBrowserFixture(browser);
+    try {
+      const first = await publishNew(fixture.server, fixture.installation, {
+        accessSetting: "account_required",
+        content: "<!doctype html><html lang=\"en\"><h1>Older version stays put</h1></html>",
+        idempotencyKey: "review-older-tags-v1",
+        name: "Older tags fixture",
+      });
+      await publishVersion(fixture.server, fixture.installation, {
+        artifactId: first.body.artifact.id,
+        content: "<!doctype html><html lang=\"en\"><h1>Current version</h1></html>",
+        expectedCurrentVersionId: first.body.version.id,
+        idempotencyKey: "review-older-tags-v2",
+      });
+      await localLogin(fixture);
+      const olderVersionPath =
+        `/api/v1/artifacts/${first.body.artifact.id}/versions/${first.body.version.id}`;
+      let olderVersionReads = 0;
+      fixture.page.on("request", (request) => {
+        if (request.method() === "GET" && new URL(request.url()).pathname === olderVersionPath) {
+          olderVersionReads += 1;
+        }
+      });
+      await fixture.page.goto(reviewUrl(
+        fixture.server.baseUrl,
+        first.body.artifact.id,
+        first.body.version.id,
+      ));
+      const preview = artifactPreview(fixture.page);
+      await expect(preview.getByRole("heading", {name: "Older version stays put"})).toBeVisible();
+      expect(olderVersionReads).toBe(1);
+
+      await fixture.page.getByRole("tab", {name: "Details"}).click();
+      await fixture.page.getByRole("button", {name: "Edit tags"}).click();
+      await fixture.page.getByRole("textbox", {name: "Tags"}).fill("kept");
+      await fixture.page.getByRole("button", {name: "Save tags"}).click();
+      await expect(fixture.page.getByText("kept", {exact: true})).toBeVisible();
+      await fixture.page.waitForLoadState("networkidle");
+
+      expect(olderVersionReads).toBe(1);
+      await expect(preview.getByRole("heading", {name: "Older version stays put"})).toBeVisible();
+    } finally {
+      await stopBrowserFixture(fixture);
+    }
+  });
+
   test("CMT-019-B CMT-019-F: Review displays full conversations and creates, edits, and deletes replies", async ({browser}) => {
     const fixture = await startBrowserFixture(browser);
     try {
