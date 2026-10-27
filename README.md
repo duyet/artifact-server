@@ -72,7 +72,7 @@ Artifact Server includes a built-in MCP server and a portable Agent Skill. Agent
 Start the server with `artifactserver start`, connect the agent to `http://localhost:8787/mcp` with an API key from Settings › API keys (the [MCP guide](./docs/mcp.md) has the client commands), then install the skill:
 
 ```sh
-npx skills add plannotator/artifact-server
+npx skills add duyet/artifact-server
 ```
 
 Then ask:
