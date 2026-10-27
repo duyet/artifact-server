@@ -46,9 +46,16 @@ const entryRowSchema = Schema.Struct({
   size: Schema.Int,
   versionId: Schema.String,
 });
+const assetRowSchema = Schema.Struct({
+  artifactId: Schema.String,
+  id: Schema.String,
+  sha256: Schema.String,
+  size: Schema.Int,
+});
 const decodeArtifactRows = Schema.decodeUnknownSync(Schema.Array(artifactRowSchema));
 const decodeVersionRows = Schema.decodeUnknownSync(Schema.Array(versionRowSchema));
 const decodeEntryRows = Schema.decodeUnknownSync(Schema.Array(entryRowSchema));
+const decodeAssetRows = Schema.decodeUnknownSync(Schema.Array(assetRowSchema));
 const decodeProjectRows = Schema.decodeUnknownSync(Schema.Array(projectRowSchema));
 const decodeProjectReferenceRows = Schema.decodeUnknownSync(
   Schema.Array(projectReferenceRowSchema),
@@ -60,6 +67,8 @@ export type ArtifactRow = typeof artifactRowSchema.Type;
 export type VersionRow = typeof versionRowSchema.Type;
 /** Manifest-entry fields required by a deployment-native integrity reader. */
 export type EntryRow = typeof entryRowSchema.Type;
+/** Live asset fields required by a deployment-native integrity reader. */
+export type AssetRow = typeof assetRowSchema.Type;
 /** Project fields required by a deployment-native integrity reader. */
 export type ProjectRow = typeof projectRowSchema.Type;
 /** Project-scoped references required by a deployment-native integrity reader. */
@@ -68,6 +77,7 @@ export type ProjectReferenceRow = typeof projectReferenceRowSchema.Type;
 /** Provider-neutral catalog consumed by the shared integrity checker. */
 export interface IntegrityCatalog {
   readonly artifacts: readonly ArtifactRow[];
+  readonly assets: readonly AssetRow[];
   readonly entries: readonly EntryRow[];
   readonly projects: readonly ProjectRow[];
   readonly projectReferences: readonly ProjectReferenceRow[];
@@ -222,6 +232,12 @@ function readCompactCatalog(databasePath: string): IntegrityCatalog {
         FROM artifacts
         ORDER BY id
       `).all()),
+      assets: decodeAssetRows(database.prepare(`
+        SELECT id, artifact_id AS artifactId, sha256, size
+        FROM assets
+        WHERE deleted_at IS NULL
+        ORDER BY id
+      `).all()),
       entries: decodeEntryRows(database.prepare(`
         SELECT
           version_id AS versionId,
@@ -277,7 +293,7 @@ function readCompactCatalog(databasePath: string): IntegrityCatalog {
 function readExternalCatalog(installationId: string) {
   return Effect.gen(function*() {
     const sql = yield* SqlClient;
-    const [artifacts, versions, entries, projects, projectReferences] =
+    const [artifacts, versions, entries, assets, projects, projectReferences] =
       yield* Effect.all([
       sql<ArtifactRow>`
         SELECT id, project_id AS "projectId",
@@ -310,6 +326,13 @@ function readExternalCatalog(installationId: string) {
         WHERE installation_id = ${installationId}
         ORDER BY version_id, path
       `.withoutTransform,
+      sql<AssetRow>`
+        SELECT id, artifact_id AS "artifactId", sha256,
+          CAST(size AS DOUBLE PRECISION) AS size
+        FROM assets
+        WHERE installation_id = ${installationId} AND deleted_at IS NULL
+        ORDER BY id
+      `.withoutTransform,
       sql<ProjectRow>`
         SELECT id FROM projects
         WHERE installation_id = ${installationId}
@@ -339,6 +362,7 @@ function readExternalCatalog(installationId: string) {
     ]);
     return {
       artifacts: decodeArtifactRows(artifacts),
+      assets: decodeAssetRows(assets),
       entries: decodeEntryRows(entries),
       projects: decodeProjectRows(projects),
       projectReferences: decodeProjectReferenceRows(projectReferences),
@@ -483,42 +507,64 @@ export const checkIntegrityCatalog = Effect.fn("checkIntegrityCatalog")(function
     }
   }
 
-  const uniqueBlobs = new Map<string, EntryRow>();
-  for (const entry of catalog.entries) {
-    const existing = uniqueBlobs.get(entry.sha256);
-    if (existing !== undefined && existing.size !== entry.size) {
-      const version = versions.get(entry.versionId);
+  const blobReferences: BlobReference[] = [
+    ...catalog.entries.map((entry) => ({
+      artifactId: versions.get(entry.versionId)?.artifactId ?? "unknown",
+      assetId: null,
+      path: entry.path,
+      sha256: entry.sha256,
+      size: entry.size,
+      versionId: entry.versionId,
+    })),
+    ...catalog.assets.map((asset) => ({
+      artifactId: asset.artifactId,
+      assetId: asset.id,
+      path: null,
+      sha256: asset.sha256,
+      size: asset.size,
+      versionId: null,
+    })),
+  ];
+  const uniqueBlobs = new Map<string, BlobReference>();
+  for (const reference of blobReferences) {
+    const existing = uniqueBlobs.get(reference.sha256);
+    if (existing !== undefined && existing.size !== reference.size) {
       problems.push({
-        artifactId: version?.artifactId ?? "unknown",
+        artifactId: reference.artifactId,
         code: "blob_size_mismatch",
-        message: "The same blob fingerprint is recorded with conflicting sizes.",
-        path: entry.path,
-        versionId: entry.versionId,
+        message: blobReferenceMessage(
+          "The same blob fingerprint is recorded with conflicting sizes.",
+          reference,
+        ),
+        path: reference.path,
+        versionId: reference.versionId,
       });
     } else if (existing === undefined) {
-      uniqueBlobs.set(entry.sha256, entry);
+      uniqueBlobs.set(reference.sha256, reference);
     }
   }
   const blobVerifications = yield* Effect.forEach(
     [...uniqueBlobs.values()],
-    (entry) => Effect.promise(() => verifyBlob(blobs, entry)).pipe(
-      Effect.map((verification) => ({entry, verification})),
+    (reference) => Effect.promise(() => verifyBlob(blobs, reference)).pipe(
+      Effect.map((verification) => ({reference, verification})),
     ),
     {concurrency: 4},
   );
   let blobsChecked = 0;
   let bytesChecked = 0;
-  for (const {entry, verification} of blobVerifications) {
+  for (const {reference, verification} of blobVerifications) {
     if (verification.opened) blobsChecked += 1;
     bytesChecked += verification.bytesRead;
     if (verification.problem !== null) {
-      const version = versions.get(entry.versionId);
       problems.push({
-        artifactId: version?.artifactId ?? "unknown",
+        artifactId: reference.artifactId,
         code: verification.problem,
-        message: blobProblemMessage(verification.problem),
-        path: entry.path,
-        versionId: entry.versionId,
+        message: blobReferenceMessage(
+          blobProblemMessage(verification.problem),
+          reference,
+        ),
+        path: reference.path,
+        versionId: reference.versionId,
       });
     }
   }
@@ -533,6 +579,16 @@ export const checkIntegrityCatalog = Effect.fn("checkIntegrityCatalog")(function
   };
 });
 
+/** One stored fingerprint that a manifest entry or a live asset depends on. */
+interface BlobReference {
+  readonly artifactId: string;
+  readonly assetId: string | null;
+  readonly path: string | null;
+  readonly sha256: string;
+  readonly size: number;
+  readonly versionId: string | null;
+}
+
 interface BlobVerification {
   readonly bytesRead: number;
   readonly opened: boolean;
@@ -546,7 +602,7 @@ interface BlobVerification {
 
 async function verifyBlob(
   blobs: BlobStore,
-  entry: EntryRow,
+  entry: Pick<BlobReference, "sha256" | "size">,
 ): Promise<BlobVerification> {
   let opened: Awaited<ReturnType<BlobStore["open"]>>;
   try {
@@ -576,6 +632,12 @@ async function verifyBlob(
   } catch {
     return {bytesRead, opened: true, problem: "blob_unreadable"};
   }
+}
+
+function blobReferenceMessage(message: string, reference: BlobReference): string {
+  return reference.assetId === null
+    ? message
+    : `${message} It backs asset ${reference.assetId}.`;
 }
 
 function blobProblemMessage(

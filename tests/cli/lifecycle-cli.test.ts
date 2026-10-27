@@ -1,9 +1,9 @@
 import {spawn, type ChildProcessWithoutNullStreams} from "node:child_process";
+import {createHash} from "node:crypto";
 import {
   mkdtemp,
   chmod,
   readFile,
-  readdir,
   rm,
   stat,
   writeFile,
@@ -22,6 +22,8 @@ import {
   parseExternalStorageRuntimeConfiguration,
   summarizeRuntimeConfiguration,
 } from "../../src/lifecycle/runtime-configuration.js";
+
+import {addAsset} from "../support/assets.js";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const runningProcesses = new Set<ChildProcessWithoutNullStreams>();
@@ -418,6 +420,7 @@ describe("Artifact Server lifecycle CLI", () => {
       expect(initialized.exitCode).toBe(0);
       const port = await availablePort();
       const environment = compactEnvironment({
+        ARTIFACT_SERVER_CONTENT_DOMAIN: "",
         ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: "300",
         ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: "3000",
       });
@@ -439,7 +442,22 @@ describe("Artifact Server lifecycle CLI", () => {
         path.join(dataDirectory, "secrets/api-token"),
       ]);
       expect(publication.exitCode).toBe(0);
-      publicationSchema.parse(JSON.parse(publication.output));
+      const published = publicationSchema.parse(JSON.parse(publication.output));
+      const apiToken = (await readFile(
+        path.join(dataDirectory, "secrets/api-token"),
+        "utf8",
+      )).trim();
+      const asset = await addAsset(
+        {baseUrl: `http://127.0.0.1:${port}`},
+        apiToken,
+        published.artifact.id,
+        {
+          bytes: new TextEncoder().encode("lifecycle asset proof\n"),
+          mediaType: "text/markdown",
+          name: "notes.md",
+        },
+        "lifecycle-integrity-asset",
+      );
 
       const exited = processExit(server);
       server.kill("SIGTERM");
@@ -458,11 +476,34 @@ describe("Artifact Server lifecycle CLI", () => {
       expect(healthy.exitCode).toBe(0);
       expect(JSON.parse(healthy.output)).toMatchObject({
         artifactsChecked: 1,
-        blobsChecked: 1,
+        blobsChecked: 2,
         problems: [],
         status: "healthy",
         versionsChecked: 1,
       });
+
+      const assetBlobPath = path.join(
+        dataDirectory,
+        "blobs",
+        asset.sha256.slice(0, 2),
+        asset.sha256,
+      );
+      const assetBytes = await readFile(assetBlobPath);
+      await rm(assetBlobPath);
+      const missingAsset = await runCli([
+        "integrity",
+        "check",
+        "--mode",
+        "compact",
+        "--data",
+        dataDirectory,
+      ]);
+      expect(missingAsset.exitCode).toBe(2);
+      expect(JSON.parse(missingAsset.output)).toMatchObject({
+        problems: [{artifactId: published.artifact.id, code: "blob_missing"}],
+        status: "corrupt",
+      });
+      await writeFile(assetBlobPath, assetBytes);
 
       const databasePath = path.join(dataDirectory, "artifact-server.db");
       const database = new DatabaseSync(databasePath, {
@@ -503,7 +544,10 @@ describe("Artifact Server lifecycle CLI", () => {
         restoredDatabase.close();
       }
 
-      const blobPath = await firstBlobPath(path.join(dataDirectory, "blobs"));
+      const pageDigest = createHash("sha256")
+        .update("lifecycle integrity proof\n")
+        .digest("hex");
+      const blobPath = path.join(dataDirectory, "blobs", pageDigest.slice(0, 2), pageDigest);
       await writeFile(blobPath, "corrupted bytes\n");
       const corrupt = await runCli([
         "integrity",
@@ -515,7 +559,7 @@ describe("Artifact Server lifecycle CLI", () => {
       ]);
       expect(corrupt.exitCode).toBe(2);
       expect(JSON.parse(corrupt.output)).toMatchObject({
-        problems: [{code: "blob_size_mismatch"}],
+        problems: [{code: "blob_size_mismatch", path: "artifact.txt"}],
         status: "corrupt",
       });
     } finally {
@@ -654,17 +698,6 @@ async function stopProcess(child: ChildProcessWithoutNullStreams): Promise<void>
   const exited = processExit(child);
   child.kill("SIGTERM");
   await exited;
-}
-
-async function firstBlobPath(directory: string): Promise<string> {
-  const prefixes = await readdir(directory);
-  const prefix = prefixes[0];
-  if (prefix === undefined) throw new Error("No committed blob was found.");
-  const prefixDirectory = path.join(directory, prefix);
-  const entries = await readdir(prefixDirectory);
-  const entry = entries[0];
-  if (entry === undefined) throw new Error("No committed blob was found.");
-  return path.join(prefixDirectory, entry);
 }
 
 function availablePort(): Promise<number> {

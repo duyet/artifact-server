@@ -3481,7 +3481,7 @@ requirements:
 
   - id: OPS-004
     kind: behavior
-    behavior: An integrity check verifies every committed manifest and referenced blob without changing stored records or bytes.
+    behavior: An integrity check verifies every committed manifest, every referenced blob, and the blob behind every live asset without changing stored records or bytes.
     owner: operations
     source: {file: artifact-server-product-spec.html, anchor: implementation}
     acceptance:
@@ -3489,7 +3489,7 @@ requirements:
       failure: {id: OPS-004-F, description: "Detect missing blobs, digest mismatches, invalid paths, orphaned current pointers, and cross-installation references without repairing them silently."}
     deployments: *all
     status: implementing
-    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
+    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached. Foundation tests in the compact lifecycle CLI suite and the external-storage suite detect a missing manifest blob and a missing asset blob, but they are not attached under these IDs.
     depends_on: [MAN-001, MAN-006]
     evidence: []
 
