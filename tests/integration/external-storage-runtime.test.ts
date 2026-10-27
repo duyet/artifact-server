@@ -23,6 +23,10 @@ import {
   PROTOCOL_VERSION_META_KEY,
 } from "@modelcontextprotocol/server";
 
+import {duplicateArtifact} from
+  "../../apps/web/src/artifact-actions/duplicate-artifact.js";
+import {createBearerTransport} from
+  "../../apps/web/src/artifact-actions/transport.js";
 import {startExternalStorageServer} from "../../src/external-storage/start-external-storage-server.js";
 import type {IssueOperatorKeyCommand} from
   "../../src/application/installation-access.js";
@@ -405,6 +409,37 @@ const mcpToolTextResultSchema = z.object({
     structuredContent: z.unknown().optional(),
   }).loose(),
 });
+
+const manifestSchema = z.object({
+  digest: z.string(),
+  entries: z.array(z.object({
+    disposition: z.enum(["attachment", "inline"]),
+    mediaType: z.string(),
+    path: z.string(),
+    sha256: z.string(),
+    size: z.number().int().nonnegative(),
+  })),
+  entryPath: z.string(),
+  routingMode: z.enum(["spa", "static"]),
+});
+
+const versionManifestSchema = z.object({
+  manifest: manifestSchema,
+  version: z.object({id: z.string()}).loose(),
+}).loose();
+
+const artifactDetailsSchema = z.object({
+  artifact: z.object({
+    accessSetting: z.enum(["account_required", "public_link"]),
+    name: z.string(),
+    tags: z.array(z.string()),
+  }).loose(),
+  current: versionManifestSchema,
+}).loose();
+
+const versionListSchema = z.object({
+  versions: z.array(z.object({version: z.object({id: z.string()}).loose()}).loose()),
+}).loose();
 
 interface IntegrationEnvironment {
   readonly accessKey: string;
@@ -4251,7 +4286,331 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     );
     expect(unknownVersion.status).toBe(404);
   });
+
+  test("external-storage foundation: Postgres and S3 save an edit equal to its base except the edited file, record it as edited, replay it, and save nothing for an unknown base or an unverified upload", async () => {
+    const identity = {
+      apiToken: managedTestKey("artifact-edit"),
+      installationId: `artifact-edit-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(environment, identity);
+    const handbook = handbookFiles();
+    const published = await publishExternalStorageFiles(server.baseUrl, identity.apiToken, {
+      files: handbook,
+      idempotencyKey: `artifact-edit-publish-${randomUUID()}`,
+      name: "Handbook",
+    });
+    const read = readerFor(server.baseUrl, identity.apiToken, published.artifact.id);
+    const base = await read.version(published.version.id);
+    const edited = textFile("notes.md", "text/markdown; charset=utf-8", "# Notes\n\nSecond draft.\n");
+    const editKey = `artifact-edit-notes-${randomUUID()}`;
+    const edit = () => commitExternalStorageEdit(server.baseUrl, identity.apiToken, {
+      artifactId: published.artifact.id,
+      baseVersionId: published.version.id,
+      expectedCurrentVersionId: published.version.id,
+      file: edited,
+      idempotencyKey: editKey,
+    });
+
+    const saved = await edit();
+    expect(saved.status).toBe(201);
+    const committed = publishResponseSchema.parse(await saved.json());
+    expect(committed).toMatchObject({replayed: false, version: {number: 2}});
+    const next = await read.version(committed.version.id);
+    expect(next.manifest.entryPath).toBe(base.manifest.entryPath);
+    expect(next.manifest.routingMode).toBe(base.manifest.routingMode);
+    expect(withoutEntry(next.manifest.entries, "notes.md"))
+      .toEqual(withoutEntry(base.manifest.entries, "notes.md"));
+    expect(withoutEntry(next.manifest.entries, "notes.md")).toHaveLength(handbook.length - 1);
+    expect(next.manifest.entries.find((entry) => entry.path === "notes.md")).toEqual({
+      disposition: "inline",
+      mediaType: "text/markdown; charset=utf-8",
+      path: "notes.md",
+      sha256: createHash("sha256").update(edited.bytes).digest("hex"),
+      size: edited.bytes.byteLength,
+    });
+    // Every other file, the binary one included, is the base's bytes from S3.
+    expect(await Promise.all(handbook.map((file) => read.file(committed.version.id, file.path))))
+      .toEqual(handbook.map((file) => file.path === "notes.md" ? edited.bytes : file.bytes));
+    expect(await read.file(published.version.id, "notes.md"))
+      .toEqual(handbook.find((file) => file.path === "notes.md")?.bytes);
+
+    const replay = await edit();
+    expect(replay.status).toBe(200);
+    expect(publishResponseSchema.parse(await replay.json())).toMatchObject({
+      replayed: true,
+      version: {id: committed.version.id},
+    });
+    const actions = await authenticatedFetch(
+      server.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${published.artifact.id}/actions?limit=100`,
+    );
+    expect(actions.status).toBe(200);
+    expect(artifactActionsSchema.parse(await actions.json()).actions
+      .filter((action) => action.action === "edited")
+      .map(({action, idempotencyKey, versionId}) => ({action, idempotencyKey, versionId})))
+      .toEqual([{action: "edited", idempotencyKey: editKey, versionId: committed.version.id}]);
+
+    const unknownBase = await commitExternalStorageEdit(server.baseUrl, identity.apiToken, {
+      artifactId: published.artifact.id,
+      baseVersionId: "ver_00000000-0000-4000-8000-000000000000",
+      expectedCurrentVersionId: committed.version.id,
+      file: textFile("notes.md", "text/markdown", "# Notes\n\nFrom nowhere.\n"),
+      idempotencyKey: `artifact-edit-unknown-base-${randomUUID()}`,
+    });
+    expect(unknownBase.status).toBe(404);
+    expect(commentFailureSchema.parse(await unknownBase.json()).error.code)
+      .toBe("VERSION_NOT_FOUND");
+    const unverified = await commitExternalStorageEdit(server.baseUrl, identity.apiToken, {
+      artifactId: published.artifact.id,
+      baseVersionId: committed.version.id,
+      expectedCurrentVersionId: committed.version.id,
+      file: textFile("notes.md", "text/markdown", "# Never uploaded\n"),
+      idempotencyKey: `artifact-edit-unverified-${randomUUID()}`,
+      upload: false,
+    });
+    expect(unverified.status).toBe(409);
+    expect(await read.versionIds()).toEqual([committed.version.id, published.version.id]);
+    expect(await read.file(committed.version.id, "notes.md")).toEqual(edited.bytes);
+  });
+
+  test("external-storage foundation: Postgres and S3 keep an edit's byte order mark and CRLF endings exactly, and a stale save is the publish conflict naming the current version with nothing saved", async () => {
+    const identity = {
+      apiToken: managedTestKey("artifact-edit-bytes"),
+      installationId: `artifact-edit-bytes-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(environment, identity);
+    const handbook = handbookFiles();
+    const published = await publishExternalStorageFiles(server.baseUrl, identity.apiToken, {
+      files: handbook,
+      idempotencyKey: `artifact-edit-bytes-publish-${randomUUID()}`,
+      name: "Handbook",
+    });
+    const read = readerFor(server.baseUrl, identity.apiToken, published.artifact.id);
+    const bomCrlf: StagedTestFile = {
+      bytes: Uint8Array.from([
+        0xef, 0xbb, 0xbf,
+        ...new TextEncoder().encode("Line one\r\nLine two, changed\r\nLine three\r\n"),
+      ]),
+      mediaType: "text/plain; charset=utf-8",
+      path: "readme.txt",
+    };
+
+    const theirs = await commitExternalStorageEdit(server.baseUrl, identity.apiToken, {
+      artifactId: published.artifact.id,
+      baseVersionId: published.version.id,
+      expectedCurrentVersionId: published.version.id,
+      file: bomCrlf,
+      idempotencyKey: `artifact-edit-bytes-theirs-${randomUUID()}`,
+    });
+    expect(theirs.status).toBe(201);
+    const current = publishResponseSchema.parse(await theirs.json()).version.id;
+    expect(await read.file(current, "readme.txt")).toEqual(bomCrlf.bytes);
+    expect(await read.file(current, "notes.md"))
+      .toEqual(handbook.find((file) => file.path === "notes.md")?.bytes);
+
+    const mine = await commitExternalStorageEdit(server.baseUrl, identity.apiToken, {
+      artifactId: published.artifact.id,
+      baseVersionId: published.version.id,
+      expectedCurrentVersionId: published.version.id,
+      file: textFile("notes.md", "text/markdown", "# Notes\n\nMine.\n"),
+      idempotencyKey: `artifact-edit-bytes-stale-${randomUUID()}`,
+    });
+    expect(mine.status).toBe(409);
+    const conflict = commentFailureSchema.parse(await mine.json()).error;
+    expect(conflict.code).toBe("PUBLISH_CONFLICT");
+    expect(conflict.message).toContain(current);
+    expect(await read.versionIds()).toEqual([current, published.version.id]);
+    expect(await read.file(current, "notes.md"))
+      .toEqual(handbook.find((file) => file.path === "notes.md")?.bytes);
+  });
+
+  test("external-storage foundation: the browser helper duplicates a Postgres and S3 version byte for byte into a private copy, replays its key, and copies nothing when a source file is missing", async () => {
+    const identity = {
+      apiToken: managedTestKey("artifact-duplicate"),
+      installationId: `artifact-duplicate-${randomUUID()}`,
+    };
+    const server = await startInProcessExternalStorageServer(environment, identity);
+    const transport = createBearerTransport(server.baseUrl, identity.apiToken);
+    const handbook = handbookFiles();
+    const published = await publishExternalStorageFiles(server.baseUrl, identity.apiToken, {
+      files: handbook,
+      idempotencyKey: `artifact-duplicate-publish-${randomUUID()}`,
+      name: "Quarterly dashboard",
+      tags: ["finance", "q3"],
+    });
+    const detailsOf = async (artifactId: string) => {
+      const response = await authenticatedFetch(
+        server.baseUrl,
+        identity.apiToken,
+        `/api/v1/artifacts/${artifactId}`,
+      );
+      expect(response.status).toBe(200);
+      return artifactDetailsSchema.parse(await response.json());
+    };
+    const names = async () => (await listArtifacts(server.baseUrl, identity.apiToken))
+      .body.artifacts.map((item) => item.artifact.name).toSorted();
+    const source = await detailsOf(published.artifact.id);
+    const input = {
+      artifactId: published.artifact.id,
+      artifactName: source.artifact.name,
+      artifactTags: source.artifact.tags,
+      idempotencyKey: `artifact-duplicate-copy-${randomUUID()}`,
+      manifest: source.current.manifest,
+      projectId: published.version.projectId,
+      versionId: source.current.version.id,
+    };
+
+    const copy = await duplicateArtifact(transport, input);
+    expect(copy).toMatchObject({
+      artifact: {accessSetting: "account_required", name: "Quarterly dashboard (copy)", tags: ["finance", "q3"]},
+      replayed: false,
+      version: {number: 1},
+    });
+    expect(copy.artifact.id).not.toBe(published.artifact.id);
+    const copied = await detailsOf(copy.artifact.id);
+    expect(copied.current.manifest.entries).toEqual(source.current.manifest.entries);
+    const read = readerFor(server.baseUrl, identity.apiToken, copy.artifact.id);
+    expect(await Promise.all(handbook.map((file) => read.file(copy.version.id, file.path))))
+      .toEqual(handbook.map((file) => file.bytes));
+    const unchanged = await detailsOf(published.artifact.id);
+    expect(unchanged.current.version.id).toBe(published.version.id);
+    expect(unchanged.artifact).toMatchObject({accessSetting: "public_link", name: "Quarterly dashboard"});
+
+    const retry = await duplicateArtifact(transport, input);
+    expect(retry).toMatchObject({artifact: {id: copy.artifact.id}, replayed: true, version: {id: copy.version.id}});
+    expect(await names()).toEqual(["Quarterly dashboard", "Quarterly dashboard (copy)"]);
+
+    await expect(duplicateArtifact(transport, {
+      ...input,
+      idempotencyKey: `artifact-duplicate-missing-${randomUUID()}`,
+      manifest: {
+        ...source.current.manifest,
+        entries: [...source.current.manifest.entries, {
+          disposition: "attachment",
+          mediaType: "text/plain; charset=utf-8",
+          path: "missing/notes.txt",
+          sha256: "1".repeat(64),
+          size: 3,
+        }],
+      },
+    })).rejects.toMatchObject({status: 404});
+    expect(await names()).toEqual(["Quarterly dashboard", "Quarterly dashboard (copy)"]);
+  });
 });
+
+function withoutEntry(
+  entries: z.infer<typeof manifestSchema>["entries"],
+  filePath: string,
+): z.infer<typeof manifestSchema>["entries"] {
+  return entries.filter((entry) => entry.path !== filePath);
+}
+
+function textFile(filePath: string, mediaType: string, text: string): StagedTestFile {
+  return {bytes: new TextEncoder().encode(text), mediaType, path: filePath};
+}
+
+/** A multi-file site with a binary file, so byte identity means something. */
+function handbookFiles(): readonly StagedTestFile[] {
+  return [
+    textFile("index.html", "text/html; charset=utf-8", "<!doctype html><title>Handbook</title>\r\n"),
+    textFile("notes.md", "text/markdown; charset=utf-8", "# Notes\n\nFirst draft.\n"),
+    textFile("readme.txt", "text/plain; charset=utf-8", "Plain text.\n"),
+    {
+      bytes: Uint8Array.from({length: 256}, (_, index) => index),
+      mediaType: "application/octet-stream",
+      path: "assets/blob.bin",
+    },
+  ];
+}
+
+async function publishExternalStorageFiles(
+  baseUrl: string,
+  token: string,
+  input: {
+    readonly files: readonly StagedTestFile[];
+    readonly idempotencyKey: string;
+    readonly name: string;
+    readonly tags?: readonly string[];
+  },
+) {
+  const upload = await stageExternalStorageFiles(baseUrl, token, input.files, "index.html");
+  const response = await fetch(upload.commitUrl, {
+    body: JSON.stringify({target: {
+      accessSetting: "public_link",
+      kind: "new_artifact",
+      name: input.name,
+      tags: input.tags ?? [],
+    }}),
+    headers: mutationHeaders(token, input.idempotencyKey),
+    method: "POST",
+  });
+  expect(response.status).toBe(201);
+  return publishResponseSchema.parse(await response.json());
+}
+
+/** Stage one replacement file and commit it as an edit of `path`. */
+async function commitExternalStorageEdit(
+  baseUrl: string,
+  token: string,
+  input: {
+    readonly artifactId: string;
+    readonly baseVersionId: string;
+    readonly expectedCurrentVersionId: string;
+    readonly file: StagedTestFile;
+    readonly idempotencyKey: string;
+    readonly upload?: false;
+  },
+): Promise<Response> {
+  const upload = input.upload === false
+    ? await planExternalStorageUpload(baseUrl, token, [input.file], input.file.path)
+    : await stageExternalStorageFiles(baseUrl, token, [input.file], input.file.path);
+  return fetch(upload.commitUrl, {
+    body: JSON.stringify({target: {
+      artifactId: input.artifactId,
+      baseVersionId: input.baseVersionId,
+      expectedCurrentVersionId: input.expectedCurrentVersionId,
+      kind: "edit",
+      path: input.file.path,
+    }}),
+    headers: mutationHeaders(token, input.idempotencyKey),
+    method: "POST",
+  });
+}
+
+/** Read one artifact's versions and files back over HTTP. */
+function readerFor(baseUrl: string, token: string, artifactId: string) {
+  return {
+    async file(versionId: string, filePath: string): Promise<Uint8Array> {
+      const response = await authenticatedFetch(
+        baseUrl,
+        token,
+        `/api/v1/artifacts/${artifactId}/versions/${versionId}/file?${new URLSearchParams({path: filePath})}`,
+      );
+      expect(response.status).toBe(200);
+      return new Uint8Array(await response.arrayBuffer());
+    },
+    async version(versionId: string) {
+      const response = await authenticatedFetch(
+        baseUrl,
+        token,
+        `/api/v1/artifacts/${artifactId}/versions/${versionId}`,
+      );
+      expect(response.status).toBe(200);
+      return versionManifestSchema.parse(await response.json());
+    },
+    async versionIds(): Promise<readonly string[]> {
+      const response = await authenticatedFetch(
+        baseUrl,
+        token,
+        `/api/v1/artifacts/${artifactId}/versions`,
+      );
+      expect(response.status).toBe(200);
+      return versionListSchema.parse(await response.json()).versions
+        .map((item) => item.version.id);
+    },
+  };
+}
 
 type PublicArtifactTree = z.infer<typeof publicArtifactTreeSchema>;
 
@@ -4550,7 +4909,8 @@ interface StagedTestFile {
   readonly path: string;
 }
 
-async function stageExternalStorageFiles(
+/** Declare the files to stage without sending any of their bytes. */
+async function planExternalStorageUpload(
   baseUrl: string,
   token: string,
   stagedFiles: readonly StagedTestFile[],
@@ -4577,6 +4937,25 @@ async function stageExternalStorageFiles(
   if (upload.files.length !== stagedFiles.length) {
     throw new Error("The external-storage upload plan did not contain every declared file.");
   }
+  return upload;
+}
+
+async function stageExternalStorageFiles(
+  baseUrl: string,
+  token: string,
+  stagedFiles: readonly StagedTestFile[],
+  entryPath: string,
+  projectId?: string,
+  routingMode?: "spa" | "static",
+): Promise<z.infer<typeof uploadResponseSchema>> {
+  const upload = await planExternalStorageUpload(
+    baseUrl,
+    token,
+    stagedFiles,
+    entryPath,
+    projectId,
+    routingMode,
+  );
   await Promise.all(upload.files.map(async (plannedFile) => {
     const file = stagedFiles.find((candidate) => candidate.path === plannedFile.path);
     if (file === undefined) {
