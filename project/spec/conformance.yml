@@ -4149,7 +4149,7 @@ requirements:
     source: {file: ../../docs/fork/DESIGN.md, anchor: folder-name}
     acceptance:
       behavior: {id: FRK-003-B, description: "Publish, open the folder link, publish a new version, and observe that the same folder serves the new version."}
-      failure: {id: FRK-003-F, description: "A private artifact folder is refused, a wrong name part or a missing trailing slash redirects to the canonical folder, and no application route can match a content path."}
+      failure: {id: FRK-003-F, description: "A private artifact folder is refused, a wrong name part or a missing trailing slash redirects to the canonical folder with Cache-Control no-store, and no application route can match a content path."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Tests are not written yet; no deployed run exists.

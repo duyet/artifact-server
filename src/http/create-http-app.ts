@@ -3943,7 +3943,11 @@ async function serveArtifactFolder(
     ),
   );
   const canonical = canonicalFolderLocation(request, current.artifact);
-  if (canonical !== null) return context.redirect(canonical, 308);
+  if (canonical !== null) {
+    // A rename can bring a name back, so a browser must not keep this answer.
+    context.header("Cache-Control", "no-store");
+    return context.redirect(canonical, 308);
+  }
   return serveVersionContent(
     context,
     request.versionUrl,

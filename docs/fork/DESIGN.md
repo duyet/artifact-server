@@ -127,7 +127,7 @@ Publish does not pick or store the folder. The folder is a pure function of the 
 The content router reads only the first path segment:
 
 1. If the segment is `v`, the next segment is the token and the rest is the manifest path. The four branches of section 1 run unchanged.
-2. If the segment matches `^([a-z0-9]+(-[a-z0-9]+)*-)?<uuid>$`, it is the folder of artifact `art_<uuid>`. `resolvePublicArtifact` (`src/application/content-access.ts:409`) finds the current version, and `serveVersionContent` serves it. `/<folder>` redirects (308) to `/<folder>/`, so relative URLs resolve inside the folder. A folder with a stale or wrong name part redirects (308) to the canonical folder.
+2. If the segment matches `^([a-z0-9]+(-[a-z0-9]+)*-)?<uuid>$`, it is the folder of artifact `art_<uuid>`. `resolvePublicArtifact` (`src/application/content-access.ts:409`) finds the current version, and `serveVersionContent` serves it. `/<folder>` redirects (308) to `/<folder>/`, so relative URLs resolve inside the folder. A folder with a stale or wrong name part redirects (308) to the canonical folder. Both folder redirects carry `Cache-Control: no-store`, because a rename can bring an old name back, and a browser that kept the old redirect would loop.
 3. Anything else goes to the application routes.
 
 These application prefixes stay reserved: `/`, `/api`, `/auth`, `/mcp`, `/health`, `/ready`, `/.well-known`, `/assets`, `/review`, `/review-frame`, `/workbench`, `/projects`, `/administration`, and `/artifacts`. No application segment is `v` or ends in a UUID, so the code needs no reserved list. A test walks the Hono route table and fails if a registered first segment matches rule 1 or rule 2. A colliding upstream route then fails CI instead of hiding content.
