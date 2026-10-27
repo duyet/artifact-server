@@ -80,6 +80,49 @@
         "requestLogSampleRate": {"type": "number", "minimum": 0, "maximum": 1},
         "readinessWithdrawalMilliseconds": {"type": "integer", "minimum": 0, "maximum": 60000},
         "shutdownDeadlineMilliseconds": {"type": "integer", "minimum": 1, "maximum": 300000},
+        "helpUrl": {
+          "type": "string",
+          "oneOf": [{"const": ""}, {"pattern": "^(https://[^\\s]+|/([^/\\s][^\\s]*)?)$"}]
+        },
+        "logo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "oneOf": [{"const": ""}, {"pattern": "^https://[^/\\s@]+(/[^\\s]*)?$"}]
+            },
+            "alt": {"type": "string"},
+            "link": {
+              "type": "string",
+              "oneOf": [{"const": ""}, {"pattern": "^(https://[^\\s]+|/[^\\s]*)$"}]
+            }
+          }
+        },
+        "assetQuota": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {"type": ["integer", "null"], "minimum": 1},
+            "bytes": {"type": ["integer", "null"], "minimum": 1}
+          }
+        },
+        "oidc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "oneOf": [{"const": ""}, {"pattern": "^https://[^/\\s@?#][^\\s@?#]*$"}]
+            },
+            "clientId": {
+              "type": "string",
+              "oneOf": [{"const": ""}, {"pattern": "^[\\x21-\\x7E]{1,256}$"}]
+            },
+            "scopes": {"type": "string"},
+            "unknownUsers": {"enum": ["", "reject", "admit"]}
+          }
+        },
         "s3": {
           "type": "object",
           "additionalProperties": false,
@@ -116,7 +159,8 @@
             "apiToken": {"type": "string", "minLength": 1},
             "databaseUrl": {"type": "string", "minLength": 1},
             "s3AccessKeyId": {"type": "string"},
-            "s3SecretAccessKey": {"type": "string"}
+            "s3SecretAccessKey": {"type": "string"},
+            "oidcClientSecret": {"type": "string"}
           }
         }
       }
