@@ -1,8 +1,12 @@
 import {randomUUID} from "node:crypto";
+import {execFile} from "node:child_process";
 import {
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import {createServer, type Server} from "node:http";
@@ -44,6 +48,9 @@ interface ClientFailure {
 
 type ClientOutcome = ClientFailure | ClientSuccess;
 const assignedAddressSchema = z.object({port: z.number().int().positive()});
+const savedVersionSchema = z.object({
+  manifest: z.object({entries: z.array(z.object({path: z.string()}))}),
+});
 
 describe("file publication client", () => {
   let fixtureDirectory: string;
@@ -123,6 +130,98 @@ describe("file publication client", () => {
     expect(version.result.version).toMatchObject({number: 2});
     const openedVersion = await fetchLoopbackContent(version.result.links.version);
     expect(Buffer.from(await openedVersion.arrayBuffer())).toEqual(secondReport);
+  });
+
+  test("MAN-004-B: publishes a directory of regular files and nested directories", async () => {
+    const sitePath = path.join(fixtureDirectory, "regular-tree");
+    await mkdir(path.join(sitePath, "assets/images"), {recursive: true});
+    await mkdir(path.join(sitePath, "empty"));
+    const contents = new Map([
+      ["assets/app.js", "document.body.dataset.tree = 'regular';"],
+      ["assets/images/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>"],
+      ["index.html", "<h1>Regular tree</h1>"],
+    ]);
+    await Promise.all([...contents].map(([filePath, body]) =>
+      writeFile(path.join(sitePath, filePath), body)
+    ));
+
+    const published = await executeClient(
+      server.baseUrl,
+      installation.apiToken,
+      newArtifactCommand(sitePath, "public_link"),
+    );
+    expect(published.success).toBe(true);
+    if (!published.success) return;
+
+    const versionResponse = await fetch(
+      `${server.baseUrl}/api/v1/artifacts/${published.result.artifact.id}/versions/${published.result.version.id}`,
+      {headers: {Authorization: `Bearer ${installation.apiToken}`}},
+    );
+    expect(versionResponse.status).toBe(200);
+    const saved = savedVersionSchema.parse(await versionResponse.json());
+    expect(saved.manifest.entries.map((entry) => entry.path)).toEqual([...contents.keys()]);
+    const served = await Promise.all([...contents.keys()].map(async (filePath) =>
+      (await fetchLoopbackContent(new URL(`/${filePath}`, published.result.links.version))).text()
+    ));
+    expect(served).toEqual([...contents.values()]);
+  });
+
+  test("MAN-004-F: rejects every special filesystem entry before the server sees an upload", {timeout: 30_000}, async () => {
+    const specialRoot = await mkdtemp(path.join("/tmp", "artifact-server-special-"));
+    const socketServers: Server[] = [];
+    const recorder = await startRecordingServer();
+    try {
+      const target = path.join(specialRoot, "target.html");
+      await writeFile(target, "<h1>Link target</h1>");
+      const listenAt = async (socketPath: string): Promise<void> => {
+        const socketServer = createServer();
+        socketServers.push(socketServer);
+        await new Promise<void>((resolve, reject) => {
+          socketServer.once("error", reject);
+          socketServer.listen(socketPath, resolve);
+        });
+      };
+      const directoryWith = async (
+        name: string,
+        create: (entryPath: string) => Promise<void>,
+      ): Promise<string> => {
+        const directory = path.join(specialRoot, name);
+        await mkdir(directory);
+        await writeFile(path.join(directory, "index.html"), "<h1>Regular file</h1>");
+        await create(path.join(directory, "special"));
+        return directory;
+      };
+      const rootEntry = async (
+        name: string,
+        create: (entryPath: string) => Promise<void>,
+      ): Promise<string> => {
+        const entryPath = path.join(specialRoot, name);
+        await create(entryPath);
+        return entryPath;
+      };
+      const cases: readonly (readonly [string, string])[] = [
+        [await directoryWith("file-link", (entry) => symlink(target, entry)), "symbolic_link"],
+        [await directoryWith("directory-link", (entry) => symlink(specialRoot, entry)), "symbolic_link"],
+        [await directoryWith("fifo", makeFifo), "unsupported_file_type"],
+        [await directoryWith("socket", listenAt), "unsupported_file_type"],
+        [await rootEntry("root-link.html", (entry) => symlink(target, entry)), "symbolic_link"],
+        [await rootEntry("root-fifo", makeFifo), "unsupported_file_type"],
+        [await rootEntry("root.sock", listenAt), "unsupported_file_type"],
+        ["/dev/null", "unsupported_file_type"],
+        [await firstBlockDevice(), "unsupported_file_type"],
+      ];
+
+      const outcomes = await Promise.all(cases.map(([inputPath]) =>
+        executeClient(recorder.origin, installation.apiToken, newArtifactCommand(inputPath))
+      ));
+      expect(outcomes.map((outcome, index) => [cases[index]?.[0], failureReason(outcome)]))
+        .toEqual(cases);
+      expect(recorder.requests()).toBe(0);
+    } finally {
+      await Promise.all(socketServers.map(closeServer));
+      await closeServer(recorder.server);
+      await rm(specialRoot, {force: true, recursive: true});
+    }
   });
 
   test("classifies unsafe filesystem inputs before it creates an upload", async () => {
@@ -394,6 +493,42 @@ async function startResponseServer(
   }
   origin = `http://127.0.0.1:${address.data.port}`;
   return {origin, server};
+}
+
+async function startRecordingServer(): Promise<{
+  readonly origin: string;
+  readonly requests: () => number;
+  readonly server: Server;
+}> {
+  let requests = 0;
+  const recorder = await startResponseServer(() => {
+    requests += 1;
+    return "{}";
+  }, 500);
+  return {...recorder, requests: () => requests};
+}
+
+function makeFifo(fifoPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("mkfifo", [fifoPath], (error) => {
+      if (error === null) resolve();
+      else reject(error);
+    });
+  });
+}
+
+async function firstBlockDevice(): Promise<string> {
+  const names = await readdir("/dev");
+  const candidates = await Promise.all(names.map(async (name) => {
+    const devicePath = path.join("/dev", name);
+    const info = await lstat(devicePath).catch(() => null);
+    return info?.isBlockDevice() === true ? devicePath : null;
+  }));
+  const device = candidates.find((candidate) => candidate !== null);
+  if (device === undefined || device === null) {
+    throw new Error("MAN-004-F needs one block device under /dev to prove block devices are rejected.");
+  }
+  return device;
 }
 
 function closeServer(server: Server): Promise<void> {

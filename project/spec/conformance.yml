@@ -457,7 +457,8 @@ requirements:
       behavior: {id: MAN-004-B, description: "Publish a directory containing only regular files and directories."}
       failure: {id: MAN-004-F, description: "Attempt every supported special-file type and confirm that the publish fails before a version is committed."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: MAN-004-B and MAN-004-F run only locally, through the file publication client against a real SQLite server and a recording HTTP server that must see no request. The client is the only check, because servers receive uploaded bytes and manifest paths but never file types, so single_server and kubernetes rely on the same client and have no run of their own. Symbolic links, FIFOs, and sockets are tested inside a directory and as the input; devices are tested only as the input (/dev/null and one block device under /dev), because an unprivileged test cannot create a device node inside a directory. No evidence report is attached.
     depends_on: [MAN-003]
     evidence: []
 
