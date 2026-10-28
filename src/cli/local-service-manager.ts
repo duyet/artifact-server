@@ -5,6 +5,7 @@ import path from "node:path";
 import {z} from "zod";
 
 import type {CliInvocation} from "./current-cli-invocation.js";
+import {acquireDataDirectoryLock} from "../local/data-directory-lock.js";
 import {
   inspectLocalServiceRecord,
   type LocalServiceRecord,
@@ -79,6 +80,9 @@ export async function ensureManagedLocalService(
     const afterLock = await inspectManagedLocalService(resolvedDataDirectory);
     if (afterLock.reachable && afterLock.record !== null) return afterLock.record;
     refuseCompetingDatabaseOwner(afterLock);
+    // A server started outside open holds the directory without a service
+    // record; say so now instead of spawning one that can only fail.
+    acquireDataDirectoryLock(resolvedDataDirectory).release();
     await spawnManagedService(resolvedDataDirectory, invocation);
     return await waitForHealthyService(resolvedDataDirectory);
   } finally {
