@@ -3575,7 +3575,7 @@ export class PostgresArtifactRepository implements
         `SELECT artifact_id AS "artifactId", tag
          FROM artifact_tags
          WHERE installation_id = $1 AND artifact_id = $2
-         ORDER BY tag`,
+         ORDER BY tag COLLATE "C"`,
         [installationId, artifactId],
       );
       return z.array(artifactTagRowSchema).parse(rows).map((row) => row.tag);
@@ -3597,7 +3597,7 @@ export class PostgresArtifactRepository implements
         `SELECT artifact_id AS "artifactId", tag
          FROM artifact_tags
          WHERE installation_id = $1 AND artifact_id = ANY($2::text[])
-         ORDER BY artifact_id, tag`,
+         ORDER BY artifact_id, tag COLLATE "C"`,
         [installationId, artifacts.map(({id}) => id)],
       );
       const tagsByArtifact = new Map<string, string[]>();
