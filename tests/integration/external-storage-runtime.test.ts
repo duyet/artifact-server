@@ -6199,7 +6199,9 @@ async function waitForFreshFailure(baseUrl: string, pathname: string): Promise<s
   const deadline = Date.now() + 10_000;
   const attempt = async (): Promise<string> => {
     const refusal = await freshConnectionRefusal(baseUrl, pathname);
-    if (refusal !== null) return refusal;
+    // A connection that arrives while the listener is closing is reset rather
+    // than refused; keep asking until the closed listener refuses outright.
+    if (refusal !== null && refusal !== "ECONNRESET") return refusal;
     if (Date.now() >= deadline) {
       throw new Error(`${pathname} kept accepting new connections.`);
     }
