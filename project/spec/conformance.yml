@@ -1076,15 +1076,16 @@ requirements:
 
   - id: AUTH-003
     kind: behavior
-    behavior: Public link removes sign-in only for people who can reach the server and have the unpredictable link; it does not create a tunnel or alter network reachability.
+    behavior: A public link removes sign-in for anyone who can reach the server; the artifact's readable path URL and its current-version link open without an account, and it is listed on the public home page unless tagged unlisted. The product states that a public link is not access control; it grants no mutation rights and exposes no account-required artifact.
     owner: authorization
     source: {file: artifact-server-product-spec.html, anchor: sharing}
     acceptance:
-      behavior: {id: AUTH-003-B, description: "Open a public current-version link without an account from a network that can reach the installation."}
-      failure: {id: AUTH-003-F, description: "Enabling a public link does not open firewall rules, create a tunnel, expose an unreachable server, or make the link enumerable."}
+      behavior: {id: AUTH-003-B, description: "Open a public artifact's readable path URL and its version link without an account and find it in the anonymous public tree."}
+      failure: {id: AUTH-003-F, description: "Without an account, every mutation route on the public artifact (access, tags, name, delete, restore, new version) is refused and leaves it unchanged, and an account-required artifact beside it is neither served nor listed."}
     deployments: *all
-    status: specified
+    status: implementing
     depends_on: [CNT-004]
+    proof_gap: The tests prove anonymous reads of the path URL and version link, the anonymous tree listing, anonymous refusal of six mutation routes with the artifact left unchanged, and anonymous denial of an account-required artifact against a local SQLite server. No product copy yet says in words that a public link is not access control; the closest strings ("Anyone who can reach this server and has the link can open the current version." and "The link can be redistributed." in apps/web/src/review/review-share.tsx, and the home row menu's "Anyone with its link can open it") have no web unit test or browser assertion. Network reachability is outside what the test observes. No deployed run exists.
     evidence: []
 
   - id: AUTH-004
