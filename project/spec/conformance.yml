@@ -3242,7 +3242,7 @@ requirements:
       failure: {id: DEP-005-F, description: "The compact target rejects scaling beyond one container, an ephemeral or uninitialized data path, bad permissions, missing generated secrets, invalid domain isolation, and incomplete identity-provider configuration without reporting ready."}
     deployments: [single_server]
     status: implementing
-    proof_gap: Its passing evidence came from the deleted Docker Compose suite (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves the image target; the one-container limit in DEP-005-F was enforced by the Compose file and nothing on the start-compact path enforces it now.
+    proof_gap: "tests/release/oci-image.test.ts now holds DEP-005-B and DEP-005-F on the amd64 release image. start-compact holds an exclusive lock on the data directory, so a second container on the same volume exits non-zero, and a SIGKILL leaves no stale lock. Both tests passed against an amd64 image built locally from packaging/oci/Dockerfile, not the attested two-platform archive, and no evidence report is attached because the full pnpm verify:oci-image run has not passed yet. That run needs arm64 emulation and the provider containers. Backup and restore in DEP-005-B is a test-driven procedure: tar the stopped volume, extract into a clean volume behind the .restore-incomplete marker, then run integrity check. The product ships no backup or restore command, and docs/fork/RUNBOOK.md does not document a compact restore."
     depends_on: [OPS-003]
     evidence: []
 
@@ -3256,7 +3256,7 @@ requirements:
       failure: {id: DEP-020-F, description: "The external-storage target rejects incomplete provider configuration, unavailable or incompatible providers, and schema mismatch without reporting ready; the released service contains no application-data mount or container-local fallback."}
     deployments: [single_server]
     status: implementing
-    proof_gap: Its passing evidence came from the deleted Docker Compose suite (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves the image target; the external-storage runtime suite covers the processes but not the release image.
+    proof_gap: "The OCI external-storage test in tests/release/oci-image.test.ts now carries DEP-020-B. It compares the artifact, version, and action records across a container replacement, and it has not run since that change. This machine has no arm64 emulation for that test. No test proves DEP-020-F on the release image. The external-storage runtime suite covers the processes but not the image."
     depends_on: [OPS-003, ARC-003]
     evidence: []
 
@@ -3466,7 +3466,7 @@ requirements:
       failure: {id: OPS-003-F, description: "Missing, mismatched, cross-installation, partially restored, or mutable data makes restore fail closed and prevents the target from reporting ready."}
     deployments: *all
     status: implementing
-    proof_gap: Its passing evidence came from the Docker Compose suites that this fork deleted (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves it; it needs re-proving on the release image.
+    proof_gap: "tests/release/oci-image.test.ts holds OPS-003-B, together with DEP-005-B, and OPS-003-F for the compact image only. Both passed against a locally built amd64 image. No evidence report is attached. OPS-003-F proves three cases: an unfinished restore (the .restore-incomplete marker) never reports ready, and integrity check exits 2 on a missing or changed blob. Nothing proves the cross-installation or mutable-data cases. The deleted Compose scripts also checked the checksum, links, unsafe paths, a nonempty target, and a running target, and no shipped code replaces those checks. External-storage and Kubernetes backup and restore are unproven."
     depends_on: [ART-001, ART-004, AUD-001]
     evidence: []
 

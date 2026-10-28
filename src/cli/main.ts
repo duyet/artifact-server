@@ -15,6 +15,7 @@ import {
   removeOwnedLocalServiceRecord,
   writeLocalServiceRecord,
 } from "../local/local-service-record.js";
+import {acquireDataDirectoryLock} from "../local/data-directory-lock.js";
 import {startLocalServer} from "../local/start-local-server.js";
 import {defaultCompletedRequestLogSampleRate} from
   "../observability/application-observability.js";
@@ -92,69 +93,82 @@ function configureDirectLocalStart(programToConfigure: Command): void {
     .action(async (options: StartOptions) => {
       const port = parsePort(options.port, options.managed);
       const dataDirectory = path.resolve(options.data);
-      const apiToken = await loadOrCreateLocalCredential(
-        dataDirectory,
-        localCredentialFiles.api,
-      );
-      const browserBootstrapToken = await loadOrCreateLocalCredential(
-        dataDirectory,
-        localCredentialFiles.browser,
-      );
-      const observability = observabilityEnvironmentSchema.parse(process.env);
-      const developmentProxyCredential =
-        process.env["ARTIFACT_SERVER_DEVELOPMENT_PROXY_CREDENTIAL"];
-      const localServerConfig = {
-        apiToken,
-        bootstrapAdministratorEmail:
-          "local-administrator@artifactserver.invalid",
-        browserAccess: localOwnerBrowserAccess,
-        contentDomain: "localhost",
-        completedRequestLogSampleRate:
-          observability.ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE,
-        dataDirectory,
-        localBootstrapToken: browserBootstrapToken,
-        port,
-        serviceVersion: packageMetadata.version,
-      };
-      const server = await startLocalServer(
-        developmentProxyCredential === undefined
-          ? localServerConfig
-          : {...localServerConfig, developmentProxyCredential},
-      );
-
-      const origin = `http://localhost:${server.port}`;
-      const serviceOrigin = `http://${server.hostname}:${server.port}`;
-      let closed = false;
-      const close = async () => {
-        if (closed) return;
-        closed = true;
-        try {
-          await server.close();
-        } finally {
-          if (options.managed) {
-            await removeOwnedLocalServiceRecord(dataDirectory, process.pid);
-          }
-        }
-      };
+      const lock = acquireDataDirectoryLock(dataDirectory);
       try {
-        if (options.managed) {
-          await writeLocalServiceRecord(dataDirectory, {
-            dataDirectory,
-            origin: serviceOrigin,
-            pid: process.pid,
-            productVersion: packageMetadata.version,
-            schemaVersion: 1,
-            startedAt: new Date().toISOString(),
-          });
-        }
-        console.log(`Artifact Server: ${origin}`);
-        console.log(`Data directory: ${dataDirectory}`);
-        await waitForProcessSignal(close);
-      } catch (error) {
-        await close();
-        throw error;
+        await serveDirectLocalServer(dataDirectory, port, options.managed);
+      } finally {
+        lock.release();
       }
     });
+}
+
+async function serveDirectLocalServer(
+  dataDirectory: string,
+  port: number,
+  managed: boolean,
+): Promise<void> {
+  const apiToken = await loadOrCreateLocalCredential(
+    dataDirectory,
+    localCredentialFiles.api,
+  );
+  const browserBootstrapToken = await loadOrCreateLocalCredential(
+    dataDirectory,
+    localCredentialFiles.browser,
+  );
+  const observability = observabilityEnvironmentSchema.parse(process.env);
+  const developmentProxyCredential =
+    process.env["ARTIFACT_SERVER_DEVELOPMENT_PROXY_CREDENTIAL"];
+  const localServerConfig = {
+    apiToken,
+    bootstrapAdministratorEmail:
+      "local-administrator@artifactserver.invalid",
+    browserAccess: localOwnerBrowserAccess,
+    contentDomain: "localhost",
+    completedRequestLogSampleRate:
+      observability.ARTIFACT_SERVER_REQUEST_LOG_SAMPLE_RATE,
+    dataDirectory,
+    localBootstrapToken: browserBootstrapToken,
+    port,
+    serviceVersion: packageMetadata.version,
+  };
+  const server = await startLocalServer(
+    developmentProxyCredential === undefined
+      ? localServerConfig
+      : {...localServerConfig, developmentProxyCredential},
+  );
+
+  const origin = `http://localhost:${server.port}`;
+  const serviceOrigin = `http://${server.hostname}:${server.port}`;
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    try {
+      await server.close();
+    } finally {
+      if (managed) {
+        await removeOwnedLocalServiceRecord(dataDirectory, process.pid);
+      }
+    }
+  };
+  try {
+    if (managed) {
+      await writeLocalServiceRecord(dataDirectory, {
+        dataDirectory,
+        origin: serviceOrigin,
+        pid: process.pid,
+        productVersion: packageMetadata.version,
+        schemaVersion: 1,
+        startedAt: new Date().toISOString(),
+      });
+    }
+    console.log(`Artifact Server: ${origin}`);
+    console.log(`Data directory: ${dataDirectory}`);
+    await waitForProcessSignal(close);
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 function parsePort(value: string, allowAutomatic: boolean): number {
