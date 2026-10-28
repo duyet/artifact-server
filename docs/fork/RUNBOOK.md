@@ -323,11 +323,11 @@ A public link is not access control. Anyone who can reach the host can read a pu
 
 While it is disabled:
 
-- A publish or access change that asks for `public_link`, over HTTP, MCP, or the CLI and from any key, is refused with 403 `AUTHORIZATION_DENIED` and the message "An administrator has disabled public links on this installation."
+- A publish or access change that asks for `public_link`, over HTTP, MCP, or the CLI and from any key, is refused with `AUTHORIZATION_DENIED` (HTTP 403, or an MCP tool error) and the message "An administrator has disabled public links on this installation."
 - A publish that names no access setting gets `account_required`, even though this fork's servers have no browser login and would otherwise default to `public_link`.
 - Artifacts already set to `public_link` keep that setting but are no longer served without an account. Their path URLs, version links, and `/_blob` assets answer 401, and the anonymous home page is empty. Members still read them after signing in.
 
-Setting the variable back to `allowed` serves those artifacts publicly again. To make them private for good first, list them with `GET /api/v1/administration/public-links` and make them private with `POST /api/v1/administration/public-links/make-private`, or use **Settings, Public links** in the web app. Copies already downloaded or kept by an outside cache cannot be recalled.
+Setting the variable back to `allowed` serves those artifacts publicly again. To make them private for good first, list them with `GET /api/v1/administration/public-links` and make them private with `POST /api/v1/administration/public-links/make-private`, or use **Public links** in the web app's settings (`/review/settings/public-links`). Copies already downloaded or kept by an outside cache cannot be recalled.
 
 ## Viewer logo
 
