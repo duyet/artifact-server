@@ -78,7 +78,7 @@ Every response carries:
 
 - `Content-Type` from the allowlist, and `X-Content-Type-Options: nosniff`.
 - Two policies, which a browser enforces together: the content sandbox that every same-host content response carries, and `sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'`. An asset opened at top level, an SVG included, runs no script and loads nothing.
-- `Cache-Control: public, max-age=31536000, immutable`, because one ID always names the same bytes. A copy already cached keeps working after a delete or a visibility change.
+- `Cache-Control: public, no-cache, must-revalidate` with the SHA-256 as the `ETag`. One ID always names the same bytes, so a revalidation is a cheap `304`, but a cache still asks first: after a delete or a change to private, the next request is refused instead of served from a stale copy. Pages use the same policy.
 - `Content-Disposition: inline` for the inline types above and `attachment` for the rest.
 - `Access-Control-Allow-Origin: *`, so a sandboxed page can `fetch` its own JSON or CSV.
 
