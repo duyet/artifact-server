@@ -22,6 +22,7 @@ configuration:
   readinessWithdrawalMilliseconds: 1000
   shutdownDeadlineMilliseconds: 10000
   helpUrl: ""
+  publicLinks: ""
   logo:
     url: ""
     alt: ""

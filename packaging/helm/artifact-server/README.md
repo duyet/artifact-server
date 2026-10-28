@@ -171,6 +171,7 @@ variable, so the server's own default applies.
 
 ```yaml
 configuration:
+  publicLinks: disabled
   helpUrl: https://example.com/help
   logo:
     url: https://example.com/logo.svg
@@ -200,6 +201,7 @@ secret:
 | `configuration.logo.url` | `ARTIFACT_SERVER_LOGO` |
 | `configuration.logo.alt` | `ARTIFACT_SERVER_LOGO_ALT` |
 | `configuration.logo.link` | `ARTIFACT_SERVER_LOGO_LINK` |
+| `configuration.publicLinks` (`allowed` or `disabled`) | `ARTIFACT_SERVER_PUBLIC_LINKS` |
 | `configuration.helpUrl` | `ARTIFACT_SERVER_HELP_URL` |
 | `configuration.assetQuota.count` | `ARTIFACT_SERVER_ASSET_QUOTA_COUNT` |
 | `configuration.assetQuota.bytes` | `ARTIFACT_SERVER_ASSET_QUOTA_BYTES` |

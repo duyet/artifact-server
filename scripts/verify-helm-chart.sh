@@ -74,7 +74,7 @@ expect_rendered_count 1 '^          enableServiceLinks: false$' "$artifactserver
 
 artifactserver_default_deployment=$(helm template artifact-server "$artifactserver_chart" \
   --kube-version 1.36.0 "${artifactserver_values[@]}" --show-only templates/deployment.yaml)
-expect_rendered_count 0 'ARTIFACT_SERVER_(OIDC|LOGO|HELP_URL|ASSET_QUOTA)' "$artifactserver_default_deployment"
+expect_rendered_count 0 'ARTIFACT_SERVER_(OIDC|LOGO|HELP_URL|ASSET_QUOTA|PUBLIC_LINKS)' "$artifactserver_default_deployment"
 expect_rendered_count 0 'oidc-client-secret' "$artifactserver_default_deployment"
 
 artifactserver_settings_values=(
@@ -88,6 +88,7 @@ artifactserver_settings_values=(
   --set "configuration.logo.alt=Example logo"
   --set configuration.logo.link=/
   --set configuration.helpUrl=https://example.test/help
+  --set configuration.publicLinks=disabled
   --set configuration.assetQuota.count=250
   --set configuration.assetQuota.bytes=536870912
 )
@@ -105,6 +106,8 @@ expect_rendered_count 1 'value: "https://example.test/logo.svg"$' "$artifactserv
 expect_rendered_count 1 'value: "Example logo"$' "$artifactserver_settings_deployment"
 expect_rendered_count 1 'name: ARTIFACT_SERVER_LOGO_LINK$' "$artifactserver_settings_deployment"
 expect_rendered_count 1 'value: "https://example.test/help"$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'name: ARTIFACT_SERVER_PUBLIC_LINKS$' "$artifactserver_settings_deployment"
+expect_rendered_count 1 'value: "disabled"$' "$artifactserver_settings_deployment"
 expect_rendered_count 1 'name: ARTIFACT_SERVER_ASSET_QUOTA_COUNT$' "$artifactserver_settings_deployment"
 expect_rendered_count 1 'value: "250"$' "$artifactserver_settings_deployment"
 expect_rendered_count 1 'value: "536870912"$' "$artifactserver_settings_deployment"
@@ -193,6 +196,10 @@ expect_render_failure "configuration.logo.alt is required" \
 expect_render_failure "/configuration/oidc/unknownUsers" \
   "${artifactserver_values[@]}" \
   --set configuration.oidc.unknownUsers=allow
+
+expect_render_failure "/configuration/publicLinks" \
+  "${artifactserver_values[@]}" \
+  --set configuration.publicLinks=off
 
 expect_render_failure "/configuration/logo/url" \
   "${artifactserver_values[@]}" \
