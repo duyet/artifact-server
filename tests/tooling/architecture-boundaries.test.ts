@@ -41,6 +41,20 @@ const infrastructurePackages = [
   /^pg$/u,
 ] as const;
 
+const providerAdapterDirectory = "src/storage/";
+
+const providerAdapterExceptions: ReadonlyMap<
+  string,
+  {readonly packageName: string; readonly reason: string}
+> = new Map([
+  ["src/local/data-directory-lock.ts", {
+    packageName: "node:sqlite",
+    reason: "opens an empty SQLite file only as a kernel file lock and never reads product data",
+  }],
+]);
+
+const rawSqlPattern = /^(?!\s*\/\/).*\.prepare\s*\(/gmu;
+
 describe("architecture boundaries", () => {
   test("ARC-001-F: product core imports no infrastructure, provider, or framework module", async () => {
     const sources = await loadSources(productCoreDirectories);
@@ -84,6 +98,60 @@ describe("architecture boundaries", () => {
         'import {createManifest} from "../manifest/create-manifest.js";',
       ].join("\n"),
     )).toEqual([]);
+  });
+
+  test("ARC-002-F: only storage adapters import provider SDKs or prepare raw SQL", async () => {
+    const sources = await loadSources(["src/"]);
+    expect(sources.size).toBeGreaterThan(0);
+    expect([...sources].flatMap(([file, source]) => providerLeakViolations(file, source)))
+      .toEqual([]);
+    for (const [file, {reason}] of providerAdapterExceptions) {
+      expect(sources.has(file), `${file} is allowlisted because it ${reason}`).toBe(true);
+    }
+
+    expect([...new Map([
+      ["src/lifecycle/integrity-check.ts", [
+        'import {DatabaseSync} from "node:sqlite";',
+        'import {SqlClient} from "effect/unstable/sql/SqlClient";',
+        "import {Pool} from \"pg\";",
+        'const s3 = await import("@aws-sdk/client-s3");',
+        "const rows = database.prepare(\"PRAGMA quick_check\").all();",
+      ].join("\n")],
+      ["src/local/check-compact-integrity.ts", [
+        "import {",
+        "  PgClient,",
+        '} from "@effect/sql-pg";',
+        'import {DatabaseSync} from "node:sqlite";',
+      ].join("\n")],
+    ])].flatMap(([file, source]) => providerLeakViolations(file, source))).toEqual([
+      "src/lifecycle/integrity-check.ts: node:sqlite",
+      "src/lifecycle/integrity-check.ts: effect/unstable/sql/SqlClient",
+      "src/lifecycle/integrity-check.ts: pg",
+      "src/lifecycle/integrity-check.ts: @aws-sdk/client-s3",
+      "src/lifecycle/integrity-check.ts: .prepare(",
+      "src/local/check-compact-integrity.ts: @effect/sql-pg",
+      "src/local/check-compact-integrity.ts: node:sqlite",
+    ]);
+    expect(providerLeakViolations("src/local/data-directory-lock.ts", [
+      'import {DatabaseSync} from "node:sqlite";',
+      'import {Pool} from "pg";',
+      "database.prepare(\"SELECT 1\");",
+    ].join("\n"))).toEqual([
+      "src/local/data-directory-lock.ts: pg",
+      "src/local/data-directory-lock.ts: .prepare(",
+    ]);
+    expect([...new Map([
+      ["src/storage/sqlite-integrity-catalog.ts", [
+        'import {DatabaseSync} from "node:sqlite";',
+        "const rows = database.prepare(\"PRAGMA quick_check\").all();",
+      ].join("\n")],
+      ["src/local/data-directory-lock.ts", 'import {DatabaseSync} from "node:sqlite";'],
+      ["src/lifecycle/integrity-check.ts", [
+        '// import {DatabaseSync} from "node:sqlite";',
+        "// database.prepare(\"SELECT 1\");",
+        'import type {BlobStore} from "../core/ports.js";',
+      ].join("\n")],
+    ])].flatMap(([file, source]) => providerLeakViolations(file, source))).toEqual([]);
   });
 
   test("ARC-006-F: no import path from HTTP or MCP reaches storage, composition, or provider modules", async () => {
@@ -158,6 +226,19 @@ function productCoreViolations(relativePath: string, source: string): readonly s
       ? !productCorePackages.has(specifier)
       : !productCoreDirectories.some((directory) => target.startsWith(directory))
   );
+}
+
+function providerLeakViolations(relativePath: string, source: string): readonly string[] {
+  if (relativePath.startsWith(providerAdapterDirectory)) return [];
+  const allowedPackage = providerAdapterExceptions.get(relativePath)?.packageName;
+  return [
+    ...violatingSpecifiers(relativePath, source, (specifier, target) =>
+      target === null &&
+      specifier !== allowedPackage &&
+      infrastructurePackages.some((pattern) => pattern.test(specifier))
+    ),
+    ...[...source.matchAll(rawSqlPattern)].map(() => `${relativePath}: .prepare(`),
+  ];
 }
 
 function adapterBypassViolations(relativePath: string, source: string): readonly string[] {

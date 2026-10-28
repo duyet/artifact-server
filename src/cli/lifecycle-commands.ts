@@ -7,13 +7,11 @@ import {
   createExternalStorageRuntime,
   type ExternalStorageRuntimeConfig,
 } from "../external-storage/create-external-storage-runtime.js";
+import {checkExternalStorageIntegrity} from
+  "../external-storage/check-external-storage-integrity.js";
 import {
   startExternalStorageServer,
 } from "../external-storage/start-external-storage-server.js";
-import {
-  checkCompactIntegrity,
-  checkExternalStorageIntegrity,
-} from "../lifecycle/integrity-check.js";
 import {initializeCompactInstallation} from
   "../lifecycle/compact-installation.js";
 import {
@@ -31,6 +29,7 @@ import {
   createSupportManifest,
   type ProductBuildInformation,
 } from "../lifecycle/support-manifest.js";
+import {checkCompactIntegrity} from "../local/check-compact-integrity.js";
 import {
   createLocalRuntime,
   type LocalRuntime,
