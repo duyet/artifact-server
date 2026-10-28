@@ -1,6 +1,6 @@
 import {execFile} from "node:child_process";
 import {randomBytes, randomUUID} from "node:crypto";
-import {chmod, mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
+import {chmod, mkdir, mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
 import {request} from "node:http";
 import {tmpdir} from "node:os";
 import path from "node:path";
@@ -45,6 +45,17 @@ const imageManifestSchema = z.object({
   schemaVersion: z.literal(1),
   sourceTreeClean: z.boolean(),
   version: z.string().min(1),
+});
+const compactDataDirectory = "/var/lib/artifact-server/data";
+const commandFailureSchema = z.object({code: z.number().int()});
+const jsonValueSchema = z.json();
+const integrityStatusSchema = z.object({
+  problems: z.array(z.looseObject({code: z.string()})),
+  status: z.enum(["corrupt", "healthy"]),
+});
+const integritySchema = integrityStatusSchema.extend({
+  artifactsChecked: z.number().int().nonnegative(),
+  versionsChecked: z.number().int().nonnegative(),
 });
 const initializationSchema = z.object({
   installationId: z.string().startsWith("inst_"),
@@ -147,8 +158,8 @@ describe.sequential("production OCI image", () => {
     const firstStartedAt = performance.now();
     const firstPort = await startCompactContainer({
       containerName: firstName,
-      environment,
       network,
+      runtime: arm64Runtime(environment),
       volume,
     });
     const firstStartupMilliseconds = performance.now() - firstStartedAt;
@@ -169,8 +180,8 @@ describe.sequential("production OCI image", () => {
     const secondName = `artifact-server-oci-compact-second-${nameSuffix}`;
     const secondPort = await startCompactContainer({
       containerName: secondName,
-      environment,
       network,
+      runtime: arm64Runtime(environment),
       volume,
     });
     expect(await fetchContent(publication.links.version, secondPort))
@@ -178,7 +189,7 @@ describe.sequential("production OCI image", () => {
     expect(await stopContainer(secondName)).toBe(0);
 
     const support = await runCompactSupportManifest({
-      environment,
+      runtime: arm64Runtime(environment),
       volume,
     });
     expect(support).toMatchObject({
@@ -195,7 +206,7 @@ describe.sequential("production OCI image", () => {
     });
   });
 
-  test("OCI foundation: external-storage mode migrates, publishes, and replaces without local state", async () => {
+  test("DEP-020-B: the external-storage image migrates, publishes, and replaces its container with exact state and no local data", async () => {
     const environment = ociEnvironment();
     const providers = providerEnvironment();
     const nameSuffix = resourceSuffix();
@@ -247,6 +258,7 @@ describe.sequential("production OCI image", () => {
     });
     expect(await fetchContent(publication.links.version, firstPort))
       .toBe("external OCI bytes\n");
+    const firstSnapshot = await fetchStateSnapshot(firstPort, apiToken, [publication]);
     const firstReads = await boundedReadProbe(publication.links.version, firstPort);
     expect((await docker(["diff", firstName])).stdout.trim()).toBe("");
     expect(await stopContainer(firstName)).toBe(0);
@@ -260,6 +272,8 @@ describe.sequential("production OCI image", () => {
     });
     expect(await fetchContent(publication.links.version, secondPort))
       .toBe("external OCI bytes\n");
+    expect(await fetchStateSnapshot(secondPort, apiToken, [publication]))
+      .toEqual(firstSnapshot);
     expect(await stopContainer(secondName)).toBe(0);
 
     const supportResult = await docker([
@@ -285,7 +299,462 @@ describe.sequential("production OCI image", () => {
       startupMilliseconds: firstStartupMilliseconds,
     });
   });
+
+  test("DEP-005-B OPS-003-B: the compact image keeps exact state through restart, replacement, backup, and restore", async () => {
+    const runtime = amd64Runtime(ociEnvironment());
+    const nameSuffix = resourceSuffix();
+    const network = await createNetwork(`artifact-server-oci-state-${nameSuffix}`);
+    const sourceVolume = await createVolume(`artifact-server-oci-state-source-${nameSuffix}`);
+    const initialization = await initializeCompactVolume(runtime, sourceVolume);
+    const storedApiToken = await readCompactApiToken(runtime, sourceVolume);
+
+    const firstName = `artifact-server-oci-state-first-${nameSuffix}`;
+    const firstPort = await startCompactContainer({
+      containerName: firstName,
+      network,
+      runtime,
+      volume: sourceVolume,
+    });
+    const publishInput = {
+      apiToken: storedApiToken,
+      architecture: runtime.architecture,
+      containerImage: runtime.image,
+      network,
+      serverOrigin: `http://${firstName}:8787`,
+    };
+    const filePublication = await publishFixture({
+      ...publishInput,
+      text: "compact release file bytes\n",
+    });
+    const sitePublication = await publishFixture({
+      ...publishInput,
+      kind: "site",
+      text: "compact release site",
+    });
+    expect(await fetchContent(sitePublication.links.version, firstPort))
+      .toContain("compact release site");
+    expect(await fetchContent(
+      new URL("/assets/app.js", sitePublication.links.version).toString(),
+      firstPort,
+    )).toContain("dataset.release");
+    const secondSitePublication = await publishFixture({
+      ...publishInput,
+      kind: "site",
+      target: {
+        artifactId: sitePublication.artifact.id,
+        expectedVersionId: sitePublication.version.id,
+      },
+      text: "compact release site version two",
+    });
+    expect(secondSitePublication.artifact.id).toBe(sitePublication.artifact.id);
+    expect(secondSitePublication.version.number).toBe(2);
+    expect(await fetchContent(filePublication.links.version, firstPort))
+      .toBe("compact release file bytes\n");
+    const publications = [filePublication, sitePublication, secondSitePublication];
+    const sourceSnapshot = await fetchStateSnapshot(firstPort, storedApiToken, publications);
+
+    await docker(["restart", "--time", "8", firstName]);
+    const restartedPort = await waitForReady(firstName);
+    expect(await fetchStateSnapshot(restartedPort, storedApiToken, publications))
+      .toEqual(sourceSnapshot);
+    expect(await stopContainer(firstName)).toBe(0);
+
+    const replacementName = `artifact-server-oci-state-replacement-${nameSuffix}`;
+    const replacementPort = await startCompactContainer({
+      containerName: replacementName,
+      network,
+      runtime,
+      volume: sourceVolume,
+    });
+    expect(await fetchContent(secondSitePublication.links.version, replacementPort))
+      .toContain("compact release site version two");
+    expect(await fetchStateSnapshot(replacementPort, storedApiToken, publications))
+      .toEqual(sourceSnapshot);
+    expect(await stopContainer(replacementName)).toBe(0);
+
+    const backupDirectory = await backupCompactVolume(runtime, sourceVolume);
+    const restoredVolume = await createVolume(`artifact-server-oci-state-restored-${nameSuffix}`);
+    await restoreCompactVolume(runtime, backupDirectory, restoredVolume);
+    const restoredIntegrity = await runCompactIntegrityCheck(runtime, restoredVolume);
+    expect(restoredIntegrity.exitCode).toBe(0);
+    expect(integritySchema.parse(JSON.parse(restoredIntegrity.stdout))).toMatchObject({
+      artifactsChecked: 2,
+      problems: [],
+      status: "healthy",
+      versionsChecked: 3,
+    });
+    await runInCompactVolume(
+      runtime,
+      restoredVolume,
+      `rm ${compactDataDirectory}/.restore-incomplete`,
+    );
+
+    const restoredName = `artifact-server-oci-state-restored-${nameSuffix}`;
+    const restoredPort = await startCompactContainer({
+      containerName: restoredName,
+      network,
+      runtime,
+      volume: restoredVolume,
+    });
+    expect(await fetchContent(filePublication.links.version, restoredPort))
+      .toBe("compact release file bytes\n");
+    expect(await fetchContent(secondSitePublication.links.version, restoredPort))
+      .toContain("compact release site version two");
+    expect(await fetchStateSnapshot(restoredPort, storedApiToken, publications))
+      .toEqual(sourceSnapshot);
+    expect(await stopContainer(restoredName)).toBe(0);
+    const restoredSupport = await runCompactSupportManifest({
+      runtime,
+      volume: restoredVolume,
+    });
+    expect(restoredSupport.installationId).toBe(initialization.installationId);
+  });
+
+  test("DEP-005-F: the compact image refuses a second container, ephemeral or uninitialized data, bad permissions, missing secrets, and invalid configuration", async () => {
+    const runtime = amd64Runtime(ociEnvironment());
+    const nameSuffix = resourceSuffix();
+    const network = await createNetwork(`artifact-server-oci-refusal-${nameSuffix}`);
+    const volume = await createVolume(`artifact-server-oci-refusal-${nameSuffix}`);
+    await initializeCompactVolume(runtime, volume);
+
+    const firstName = `artifact-server-oci-refusal-first-${nameSuffix}`;
+    const firstPort = await startCompactContainer({
+      containerName: firstName,
+      network,
+      runtime,
+      volume,
+    });
+    const secondContainer = await expectStartRefused({
+      arguments: compactStartArguments(runtime, volume),
+      containerName: `artifact-server-oci-refusal-second-${nameSuffix}`,
+      network,
+      runtime,
+    });
+    expect(secondContainer).toContain("Another Artifact Server process is already serving");
+    expect(await isReady(firstPort)).toBe(true);
+    await docker(["kill", firstName]);
+    await removeContainer(firstName);
+    const afterCrashName = `artifact-server-oci-refusal-after-crash-${nameSuffix}`;
+    const afterCrashPort = await startCompactContainer({
+      containerName: afterCrashName,
+      network,
+      runtime,
+      volume,
+    });
+    expect(await isReady(afterCrashPort)).toBe(true);
+    expect(await stopContainer(afterCrashName)).toBe(0);
+
+    const ephemeralInit = await docker([
+      "run", ...hardenedRunArguments(runtime.architecture),
+      runtime.image,
+      "init", "--admin-email", "admin@example.test", "--data", compactDataDirectory,
+    ], {}, true);
+    expect(ephemeralInit.exitCode).not.toBe(0);
+    expect(ephemeralInit.stdout).not.toContain("installationId");
+    await expectStartRefused({
+      arguments: [
+        runtime.image,
+        "start-compact", "--data", "/tmp/data", "--host", "0.0.0.0", "--port", "8787",
+      ],
+      containerName: `artifact-server-oci-refusal-ephemeral-${nameSuffix}`,
+      network,
+      runtime,
+    });
+    const uninitializedVolume = await createVolume(
+      `artifact-server-oci-refusal-uninitialized-${nameSuffix}`,
+    );
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, uninitializedVolume),
+      containerName: `artifact-server-oci-refusal-uninitialized-${nameSuffix}`,
+      network,
+      runtime,
+    });
+
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, volume),
+      containerName: `artifact-server-oci-refusal-domain-${nameSuffix}`,
+      environment: {ARTIFACT_SERVER_CONTENT_DOMAIN: "content.example.com"},
+      network,
+      runtime,
+    });
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, volume),
+      containerName: `artifact-server-oci-refusal-identity-${nameSuffix}`,
+      environment: {ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test"},
+      network,
+      runtime,
+    });
+
+    const secretVolume = await createVolume(`artifact-server-oci-refusal-secret-${nameSuffix}`);
+    await initializeCompactVolume(runtime, secretVolume);
+    await runInCompactVolume(
+      runtime,
+      secretVolume,
+      `rm ${compactDataDirectory}/secrets/api-token`,
+    );
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, secretVolume),
+      containerName: `artifact-server-oci-refusal-secret-${nameSuffix}`,
+      network,
+      runtime,
+    });
+
+    const deniedVolume = await createVolume(`artifact-server-oci-refusal-denied-${nameSuffix}`);
+    await initializeCompactVolume(runtime, deniedVolume);
+    await runInCompactVolume(runtime, deniedVolume, `chmod 000 ${compactDataDirectory}`);
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, deniedVolume),
+      containerName: `artifact-server-oci-refusal-denied-${nameSuffix}`,
+      network,
+      runtime,
+    });
+  });
+
+  test("OPS-003-F: a compact restore that is unfinished, missing bytes, or holding changed bytes never reports ready", async () => {
+    const runtime = amd64Runtime(ociEnvironment());
+    const nameSuffix = resourceSuffix();
+    const network = await createNetwork(`artifact-server-oci-restore-${nameSuffix}`);
+    const sourceVolume = await createVolume(`artifact-server-oci-restore-source-${nameSuffix}`);
+    await initializeCompactVolume(runtime, sourceVolume);
+    const storedApiToken = await readCompactApiToken(runtime, sourceVolume);
+    const sourceName = `artifact-server-oci-restore-source-${nameSuffix}`;
+    await startCompactContainer({
+      containerName: sourceName,
+      network,
+      runtime,
+      volume: sourceVolume,
+    });
+    await publishFixture({
+      apiToken: storedApiToken,
+      architecture: runtime.architecture,
+      containerImage: runtime.image,
+      network,
+      serverOrigin: `http://${sourceName}:8787`,
+      text: "restore failures must stay unavailable\n",
+    });
+    expect(await stopContainer(sourceName)).toBe(0);
+    const backupDirectory = await backupCompactVolume(runtime, sourceVolume);
+
+    const unfinishedVolume = await createVolume(
+      `artifact-server-oci-restore-unfinished-${nameSuffix}`,
+    );
+    await restoreCompactVolume(runtime, backupDirectory, unfinishedVolume);
+    const unfinished = await expectStartRefused({
+      arguments: compactStartArguments(runtime, unfinishedVolume),
+      containerName: `artifact-server-oci-restore-unfinished-${nameSuffix}`,
+      network,
+      runtime,
+    });
+    expect(unfinished).toContain("incomplete restore");
+
+    const missingVolume = await createVolume(`artifact-server-oci-restore-missing-${nameSuffix}`);
+    await restoreCompactVolume(runtime, backupDirectory, missingVolume);
+    await runInCompactVolume(
+      runtime,
+      missingVolume,
+      `find ${compactDataDirectory}/blobs -type f | head -n 1 | xargs rm`,
+    );
+    const missing = await runCompactIntegrityCheck(runtime, missingVolume);
+    expect(missing.exitCode).toBe(2);
+    expect(integrityStatusSchema.parse(JSON.parse(missing.stdout))).toMatchObject({
+      problems: [{code: "blob_missing"}],
+      status: "corrupt",
+    });
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, missingVolume),
+      containerName: `artifact-server-oci-restore-missing-${nameSuffix}`,
+      network,
+      runtime,
+    });
+
+    const changedVolume = await createVolume(`artifact-server-oci-restore-changed-${nameSuffix}`);
+    await restoreCompactVolume(runtime, backupDirectory, changedVolume);
+    await runInCompactVolume(
+      runtime,
+      changedVolume,
+      `blob=$(find ${compactDataDirectory}/blobs -type f | head -n 1); printf changed > "$blob"`,
+    );
+    const changed = await runCompactIntegrityCheck(runtime, changedVolume);
+    expect(changed.exitCode).toBe(2);
+    expect(integrityStatusSchema.parse(JSON.parse(changed.stdout)).status).toBe("corrupt");
+    await expectStartRefused({
+      arguments: compactStartArguments(runtime, changedVolume),
+      containerName: `artifact-server-oci-restore-changed-${nameSuffix}`,
+      network,
+      runtime,
+    });
+  });
 });
+
+type Architecture = "amd64" | "arm64";
+
+interface ImageRuntime {
+  readonly architecture: Architecture;
+  readonly image: string;
+}
+
+function amd64Runtime(environment: OciEnvironment): ImageRuntime {
+  return {architecture: "amd64", image: environment.amd64Image};
+}
+
+function arm64Runtime(environment: OciEnvironment): ImageRuntime {
+  return {architecture: "arm64", image: environment.arm64Image};
+}
+
+async function initializeCompactVolume(
+  runtime: ImageRuntime,
+  volume: string,
+): Promise<z.infer<typeof initializationSchema>> {
+  const result = await docker([
+    "run", ...hardenedRunArguments(runtime.architecture),
+    "--volume", `${volume}:/var/lib/artifact-server`,
+    runtime.image,
+    "init", "--admin-email", "admin@example.test", "--data", compactDataDirectory,
+  ]);
+  return initializationSchema.parse(JSON.parse(result.stdout));
+}
+
+async function readCompactApiToken(runtime: ImageRuntime, volume: string): Promise<string> {
+  const token = (await runInCompactVolume(
+    runtime,
+    volume,
+    `cat ${compactDataDirectory}/secrets/api-token`,
+  )).trim();
+  registerSensitiveValue(token);
+  return token;
+}
+
+async function runInCompactVolume(
+  runtime: ImageRuntime,
+  volume: string,
+  script: string,
+): Promise<string> {
+  const result = await docker([
+    "run", ...hardenedRunArguments(runtime.architecture),
+    "--volume", `${volume}:/var/lib/artifact-server`,
+    "--entrypoint", "/bin/sh",
+    runtime.image,
+    "-c", `set -eu; ${script}`,
+  ]);
+  return result.stdout;
+}
+
+async function backupCompactVolume(runtime: ImageRuntime, volume: string): Promise<string> {
+  const backupDirectory = await temporaryDirectory("artifact-server-oci-backup-");
+  await chmod(backupDirectory, 0o777);
+  await docker([
+    "run", ...hardenedRunArguments(runtime.architecture),
+    "--volume", `${volume}:/var/lib/artifact-server:ro`,
+    "--volume", `${backupDirectory}:/backup`,
+    "--entrypoint", "/bin/tar",
+    runtime.image,
+    "-C", "/var/lib/artifact-server", "-cf", "/backup/data.tar", "data",
+  ]);
+  return backupDirectory;
+}
+
+async function restoreCompactVolume(
+  runtime: ImageRuntime,
+  backupDirectory: string,
+  volume: string,
+): Promise<void> {
+  await docker([
+    "run", ...hardenedRunArguments(runtime.architecture),
+    "--volume", `${volume}:/var/lib/artifact-server`,
+    "--volume", `${backupDirectory}:/backup:ro`,
+    "--entrypoint", "/bin/sh",
+    runtime.image,
+    "-c", [
+      "set -eu",
+      `mkdir -m 700 ${compactDataDirectory}`,
+      `printf 'Restore has not passed its integrity check.\\n' > ${compactDataDirectory}/.restore-incomplete`,
+      "tar --no-same-owner -C /var/lib/artifact-server -xf /backup/data.tar",
+    ].join("; "),
+  ]);
+}
+
+function runCompactIntegrityCheck(
+  runtime: ImageRuntime,
+  volume: string,
+): Promise<ProcessResult> {
+  return docker([
+    "run", ...hardenedRunArguments(runtime.architecture),
+    "--volume", `${volume}:/var/lib/artifact-server`,
+    runtime.image,
+    "integrity", "check", "--mode", "compact", "--data", compactDataDirectory,
+  ], {}, true);
+}
+
+async function expectStartRefused(input: {
+  readonly arguments: readonly string[];
+  readonly containerName: string;
+  readonly environment?: Readonly<Record<string, string>>;
+  readonly network: string;
+  readonly runtime: ImageRuntime;
+}): Promise<string> {
+  await startContainer({
+    architecture: input.runtime.architecture,
+    arguments: input.arguments,
+    containerName: input.containerName,
+    environment: {...compactRuntimeEnvironment(), ...input.environment},
+    network: input.network,
+  });
+  const state = await waitForExit(input.containerName, 300);
+  const logs = await docker(["logs", input.containerName], {}, true);
+  const output = redact(logs.stdout + logs.stderr);
+  await removeContainer(input.containerName);
+  expect({exitCode: state.exitCode, output}).not.toMatchObject({exitCode: 0});
+  expect(output).not.toContain('"status":"ready"');
+  return output;
+}
+
+async function waitForExit(
+  containerName: string,
+  attemptsRemaining: number,
+): Promise<{readonly exitCode: number; readonly running: boolean}> {
+  const state = await containerState(containerName);
+  if (!state.running) return state;
+  if (attemptsRemaining <= 1) {
+    throw new Error(`${containerName} kept running; it should have refused to start.`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return waitForExit(containerName, attemptsRemaining - 1);
+}
+
+async function isReady(port: number): Promise<boolean> {
+  try {
+    return (await fetch(`http://127.0.0.1:${port}/ready`)).status === 200;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchStateSnapshot(
+  port: number,
+  token: string,
+  publications: readonly z.infer<typeof publicationSchema>[],
+): Promise<readonly z.infer<typeof jsonValueSchema>[]> {
+  const resourcePaths = publications.flatMap((publication) => [
+    `/api/v1/artifacts/${publication.artifact.id}`,
+    `/api/v1/artifacts/${publication.artifact.id}/versions`,
+    `/api/v1/artifacts/${publication.artifact.id}/actions`,
+    `/api/v1/artifacts/${publication.artifact.id}/versions/${publication.version.id}`,
+  ]);
+  return Promise.all(resourcePaths.map(async (resourcePath) => {
+    const response = await fetch(`http://127.0.0.1:${port}${resourcePath}`, {
+      headers: {Authorization: `Bearer ${token}`},
+    });
+    expect({resourcePath, status: response.status}).toEqual({resourcePath, status: 200});
+    const body = (await response.text()).replaceAll(`:${port}`, ":<published-port>");
+    return jsonValueSchema.parse(JSON.parse(body));
+  }));
+}
+
+async function temporaryDirectory(prefix: string): Promise<string> {
+  const directory = await mkdtemp(path.join(tmpdir(), prefix));
+  runtimeResources.directories.add(directory);
+  return directory;
+}
 
 interface OciEnvironment {
   readonly amd64Image: string;
@@ -341,7 +810,7 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function hardenedRunArguments(architecture: "amd64" | "arm64"): string[] {
+function hardenedRunArguments(architecture: Architecture): string[] {
   return [
     "--rm",
     "--platform", `linux/${architecture}`,
@@ -435,23 +904,27 @@ function externalRuntimeEnvironment(input: {
 
 async function startCompactContainer(input: {
   readonly containerName: string;
-  readonly environment: OciEnvironment;
   readonly network: string;
+  readonly runtime: ImageRuntime;
   readonly volume: string;
 }): Promise<number> {
-  const runtimeEnvironment = compactRuntimeEnvironment();
   await startContainer({
-    arguments: [
-      "--volume", `${input.volume}:/var/lib/artifact-server`,
-      input.environment.arm64Image,
-      "start-compact", "--data", "/var/lib/artifact-server/data",
-      "--host", "0.0.0.0", "--port", "8787",
-    ],
+    architecture: input.runtime.architecture,
+    arguments: compactStartArguments(input.runtime, input.volume),
     containerName: input.containerName,
-    environment: runtimeEnvironment,
+    environment: compactRuntimeEnvironment(),
     network: input.network,
   });
   return waitForReady(input.containerName);
+}
+
+function compactStartArguments(runtime: ImageRuntime, volume: string): string[] {
+  return [
+    "--volume", `${volume}:/var/lib/artifact-server`,
+    runtime.image,
+    "start-compact", "--data", compactDataDirectory,
+    "--host", "0.0.0.0", "--port", "8787",
+  ];
 }
 
 async function startExternalContainer(input: {
@@ -461,6 +934,7 @@ async function startExternalContainer(input: {
   readonly network: string;
 }): Promise<number> {
   await startContainer({
+    architecture: "arm64",
     arguments: [
       input.environment.arm64Image,
       "start-external-storage", "--host", "0.0.0.0", "--port", "8787",
@@ -473,6 +947,7 @@ async function startExternalContainer(input: {
 }
 
 async function startContainer(input: {
+  readonly architecture: Architecture;
   readonly arguments: readonly string[];
   readonly containerName: string;
   readonly environment: Readonly<Record<string, string>>;
@@ -482,7 +957,7 @@ async function startContainer(input: {
   await docker([
     "run", "--detach",
     "--name", input.containerName,
-    "--platform", "linux/arm64",
+    "--platform", `linux/${input.architecture}`,
     "--read-only",
     "--tmpfs", "/tmp:rw,noexec,nosuid,size=32m",
     "--network", input.network,
@@ -535,23 +1010,46 @@ async function pollReadiness(
 
 async function publishFixture(input: {
   readonly apiToken: string;
+  readonly architecture?: Architecture;
   readonly containerImage: string;
+  readonly kind?: "file" | "site";
   readonly network: string;
   readonly serverOrigin: string;
+  readonly target?: {readonly artifactId: string; readonly expectedVersionId: string};
   readonly text: string;
 }): Promise<z.infer<typeof publicationSchema>> {
-  const fixtureDirectory = await mkdtemp(path.join(tmpdir(), "artifact-server-oci-fixture-"));
-  runtimeResources.directories.add(fixtureDirectory);
-  await writeFile(path.join(fixtureDirectory, "proof.txt"), input.text);
+  const fixtureDirectory = await temporaryDirectory("artifact-server-oci-fixture-");
+  let inputPath = "/input/proof.txt";
+  if (input.kind === "site") {
+    inputPath = "/input";
+    await mkdir(path.join(fixtureDirectory, "assets"));
+    await writeFile(
+      path.join(fixtureDirectory, "index.html"),
+      `<main>${input.text}</main><script src="/assets/app.js"></script>`,
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "assets/app.js"),
+      "document.body.dataset.release = 'ready';\n",
+    );
+    await chmod(path.join(fixtureDirectory, "assets"), 0o755);
+  } else {
+    await writeFile(path.join(fixtureDirectory, "proof.txt"), input.text);
+  }
   await chmod(fixtureDirectory, 0o755);
   const environment = {ARTIFACT_SERVER_API_TOKEN: input.apiToken};
+  const target = input.target === undefined
+    ? ["--public"]
+    : [
+      "--artifact", input.target.artifactId,
+      "--expected-version", input.target.expectedVersionId,
+    ];
   const result = await docker([
-    "run", ...hardenedRunArguments("arm64"),
+    "run", ...hardenedRunArguments(input.architecture ?? "arm64"),
     "--network", input.network,
     "--volume", `${fixtureDirectory}:/input:ro`,
     ...containerEnvironmentArguments(environment),
     input.containerImage,
-    "publish", "/input/proof.txt", "--server", input.serverOrigin, "--public",
+    "publish", inputPath, "--server", input.serverOrigin, ...target,
   ], environment);
   return publicationSchema.parse(JSON.parse(result.stdout));
 }
@@ -598,15 +1096,15 @@ async function boundedReadProbe(
 }
 
 async function runCompactSupportManifest(input: {
-  readonly environment: OciEnvironment;
+  readonly runtime: ImageRuntime;
   readonly volume: string;
 }): Promise<z.infer<typeof supportManifestSchema>> {
   const runtimeEnvironment = compactRuntimeEnvironment();
   const result = await docker([
-    "run", ...hardenedRunArguments("arm64"),
+    "run", ...hardenedRunArguments(input.runtime.architecture),
     "--volume", `${input.volume}:/var/lib/artifact-server`,
     ...containerEnvironmentArguments(runtimeEnvironment),
-    input.environment.arm64Image,
+    input.runtime.image,
     "support", "manifest", "--mode", "compact",
     "--data", "/var/lib/artifact-server/data",
   ], runtimeEnvironment);
@@ -687,6 +1185,7 @@ function resourceSuffix(): string {
 }
 
 interface ProcessResult {
+  readonly exitCode: number;
   readonly stderr: string;
   readonly stdout: string;
 }
@@ -706,7 +1205,9 @@ function docker(
         reject(new Error(`Docker command failed: ${redact(stderr || stdout)}`));
         return;
       }
-      resolve({stderr, stdout});
+      const failure = commandFailureSchema.safeParse(error);
+      const exitCode = error === null ? 0 : failure.success ? failure.data.code : 1;
+      resolve({exitCode, stderr, stdout});
     });
   });
 }
