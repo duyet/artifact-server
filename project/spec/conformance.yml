@@ -3195,7 +3195,7 @@ requirements:
 
   - id: DEP-002
     kind: deployment
-    behavior: Official installation surfaces are Artifact Server local commands, the release OCI image run as one container, and Helm for any supported Kubernetes cluster.
+    behavior: Official installation surfaces are Artifact Server local commands, the release OCI image run with a container runtime, and Helm for any supported Kubernetes cluster.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
@@ -3212,7 +3212,7 @@ requirements:
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
-      behavior: {id: DEP-003-B, description: "Preview, apply, inspect, and customize each complete native project while preserving the shared deployment outputs and product behavior."}
+      behavior: {id: DEP-003-B, description: "Preview, apply, inspect, and customize the release image and the Helm chart while preserving the shared deployment outputs and product behavior."}
       failure: {id: DEP-003-F, description: "The Artifact Server CLI cannot proxy an infrastructure plan, hold infrastructure state, reinterpret provider errors, or require a hidden generated project."}
     deployments: *all
     status: specified
