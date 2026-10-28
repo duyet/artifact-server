@@ -381,6 +381,55 @@ The report must say `"status": "healthy"`. An unhealthy report fails the Job, an
 
 Backing up while the application runs is a new claim. Upstream procedures stop the application first. Prove it with one restore drill before you rely on it. The pass criterion is a healthy integrity check on the restored pair.
 
+### Compact mode
+
+Compact mode keeps the SQLite database and every blob in one data directory, so that directory is the backup unit. These steps are the ones `tests/release/oci-image.test.ts` drives against the release image (`DEP-005-B OPS-003-B` and `OPS-003-F`).
+
+1. Stop the server. While a server runs it holds `server.lock` in the data directory, and a copy taken then can catch a write half done.
+
+   ```sh
+   docker stop artifact-server
+   ```
+
+2. Copy the directory with the volume mounted read-only.
+
+   ```sh
+   docker run --rm \
+     --volume artifact-data:/var/lib/artifact-server:ro \
+     --volume "$PWD":/backup \
+     --entrypoint /bin/tar \
+     ghcr.io/duyet/artifact-server:<version> \
+     -C /var/lib/artifact-server -cf /backup/data.tar data
+   ```
+
+To restore into a new, empty volume, write the `.restore-incomplete` marker before you unpack. While the marker exists the server never reports ready, so a restore that stops halfway cannot serve traffic.
+
+```sh
+docker run --rm \
+  --volume artifact-restored:/var/lib/artifact-server \
+  --volume "$PWD":/backup:ro \
+  --entrypoint /bin/sh \
+  ghcr.io/duyet/artifact-server:<version> \
+  -c 'set -eu
+      mkdir -m 700 /var/lib/artifact-server/data
+      printf "Restore has not passed its integrity check.\n" > /var/lib/artifact-server/data/.restore-incomplete
+      tar --no-same-owner -C /var/lib/artifact-server -xf /backup/data.tar'
+
+docker run --rm --volume artifact-restored:/var/lib/artifact-server \
+  ghcr.io/duyet/artifact-server:<version> \
+  integrity check --mode compact --data /var/lib/artifact-server/data
+```
+
+The integrity check must exit 0 and report `"status": "healthy"`. It exits 2 when a referenced blob is missing or its bytes changed. Only after a healthy report, remove the marker and start the server on the restored volume:
+
+```sh
+docker run --rm --volume artifact-restored:/var/lib/artifact-server \
+  --entrypoint /bin/rm ghcr.io/duyet/artifact-server:<version> \
+  /var/lib/artifact-server/data/.restore-incomplete
+```
+
+The backup carries the installation ID, so the restored server answers as the same installation with the same artifact, version, and action IDs. Restore into an empty volume. These steps do not check that the target is empty, or that the archive came from the expected installation; the deleted Compose scripts did, and nothing replaces those checks yet.
+
 ## Contract test against the real gateway
 
 Run this once before the first install.
