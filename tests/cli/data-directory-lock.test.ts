@@ -3,9 +3,12 @@ import {mkdtemp, readFile, readdir, rm} from "node:fs/promises";
 import {createServer} from "node:net";
 import {tmpdir} from "node:os";
 import path from "node:path";
+import {DatabaseSync} from "node:sqlite";
 
 import {afterEach, describe, expect, test} from "vitest";
 import {z} from "zod";
+
+import {requiredSqliteSchemaVersion} from "../../src/storage/sqlite-schema.js";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const runningProcesses = new Set<ChildProcessWithoutNullStreams>();
@@ -139,6 +142,85 @@ describe("one server per data directory", () => {
     expect(await isReady(port)).toBe(true);
   }, 60_000);
 });
+
+describe("a maintenance command alongside a running server", () => {
+  test("upgrades an older compact database only after the server that holds it stops", async () => {
+    const parent = await temporaryDirectory();
+    const dataDirectory = path.join(parent, "data");
+    const databasePath = path.join(dataDirectory, "artifact-server.db");
+    expect((await runCli([
+      "init", "--admin-email", "admin@example.test", "--data", dataDirectory,
+    ])).exitCode).toBe(0);
+    const port = await availablePort();
+    const server = startCli(compactStart(dataDirectory, port), compactEnvironment);
+    await waitForOutput(server, '"status":"ready"');
+    const issueKey = (name: string) => runCli([
+      "admin", "issue-key", "--email", `${name}@example.test`, "--name", name,
+      "--data", dataDirectory,
+    ], compactEnvironment);
+
+    const alongsideCurrent = await issueKey("alongside");
+    expect(alongsideCurrent.exitCode).toBe(0);
+    expect(await isReady(port)).toBe(true);
+
+    const olderSchemaVersion = requiredSqliteSchemaVersion - 1;
+    withDatabase(databasePath, (database) =>
+      database.exec(`PRAGMA user_version = ${olderSchemaVersion}`)
+    );
+    const keysBeforeRefusal = managedKeyCount(databasePath);
+
+    const refused = await issueKey("refused");
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.output).toContain(
+      `A running Artifact Server is using ${dataDirectory} with an older schema. Stop it before running this newer command; nothing was changed.`,
+    );
+    expect(schemaVersion(databasePath)).toBe(olderSchemaVersion);
+    expect(managedKeyCount(databasePath)).toBe(keysBeforeRefusal);
+
+    const readOnlyCommands = [
+      ["integrity", "check", "--mode", "compact", "--data", dataDirectory],
+      ["config", "check", "--mode", "compact", "--data", dataDirectory],
+      ["support", "manifest", "--mode", "compact", "--data", dataDirectory],
+    ];
+    const readOnlyResults = await Promise.all(readOnlyCommands.map(async (command) =>
+      ({command: command.join(" "), exitCode: (await runCli(command, compactEnvironment)).exitCode})
+    ));
+    expect(readOnlyResults).toEqual(readOnlyCommands.map((command) =>
+      ({command: command.join(" "), exitCode: 0})
+    ));
+    expect(schemaVersion(databasePath)).toBe(olderSchemaVersion);
+    expect(await isReady(port)).toBe(true);
+
+    await killAndWait(server, "SIGTERM");
+    const afterStop = await issueKey("after-stop");
+    expect(afterStop.exitCode).toBe(0);
+    expect(schemaVersion(databasePath)).toBe(requiredSqliteSchemaVersion);
+    expect(managedKeyCount(databasePath)).toBe(keysBeforeRefusal + 1);
+  }, 60_000);
+});
+
+function withDatabase<T>(databasePath: string, use: (database: DatabaseSync) => T): T {
+  const database = new DatabaseSync(databasePath, {timeout: 5_000});
+  try {
+    return use(database);
+  } finally {
+    database.close();
+  }
+}
+
+function schemaVersion(databasePath: string): number {
+  return withDatabase(databasePath, (database) =>
+    z.object({user_version: z.number().int()})
+      .parse(database.prepare("PRAGMA user_version").get()).user_version
+  );
+}
+
+function managedKeyCount(databasePath: string): number {
+  return withDatabase(databasePath, (database) =>
+    z.object({count: z.number().int()})
+      .parse(database.prepare("SELECT count(*) AS count FROM managed_api_keys").get()).count
+  );
+}
 
 function compactStart(dataDirectory: string, port: number): string[] {
   return ["start-compact", "--data", dataDirectory, "--port", String(port)];
