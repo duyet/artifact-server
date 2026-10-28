@@ -1703,6 +1703,177 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     }
   });
 
+  test("external-storage foundation: a Postgres publish refused at any of its writes leaves no record, and the same key then commits once", async () => {
+    const token = managedTestKey("atomic-publish-installation");
+    const identity = {apiToken: token, installationId: `atomic-publish-${randomUUID()}`};
+    const server = await startInProcessExternalStorageServer(
+      environment,
+      identity,
+      {contentDomain: null},
+    );
+    const refusal = `refuse_publication_${randomUUID().replaceAll("-", "")}`;
+    const createWrites = [
+      {event: "INSERT", table: "artifacts"},
+      {event: "INSERT", table: "artifact_tags"},
+      {event: "INSERT", table: "versions"},
+      {event: "INSERT", table: "manifest_entries"},
+      {event: "UPDATE OF current_version_id", table: "artifacts"},
+      {event: "INSERT", table: "actions"},
+      {event: "INSERT", table: "idempotency_records"},
+      {event: "UPDATE", table: "staged_uploads"},
+    ];
+    const versionWrites = createWrites.filter(({event, table}) =>
+      event !== "INSERT" || (table !== "artifacts" && table !== "artifact_tags")
+    );
+    const refusedTables = [...new Set(createWrites.map(({table}) => table))];
+    type Write = (typeof createWrites)[number];
+    type PublicationTarget =
+      | {
+        readonly accessSetting: "account_required";
+        readonly kind: "new_artifact";
+        readonly name: string;
+        readonly path: string;
+        readonly tags: readonly string[];
+      }
+      | {
+        readonly artifactId: string;
+        readonly expectedCurrentVersionId: string;
+        readonly kind: "new_version";
+      };
+    const database = await PostgresDatabase.open({
+      maxConnections: 2,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    const refuseWrite = (write: Write) => database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      yield* sql.unsafe(`CREATE TRIGGER ${refusal}
+        BEFORE ${write.event} ON ${write.table}
+        FOR EACH ROW
+        WHEN (NEW.installation_id = '${identity.installationId}')
+        EXECUTE FUNCTION ${refusal}()`);
+    }));
+    const acceptWrites = ({table}: Write) => database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      yield* sql.unsafe(`DROP TRIGGER ${refusal} ON ${table}`);
+    }));
+    const commit = (
+      upload: z.infer<typeof uploadResponseSchema>,
+      key: string,
+      target: PublicationTarget,
+    ) => fetch(upload.commitUrl, {
+      body: JSON.stringify({target}),
+      headers: mutationHeaders(token, key),
+      method: "POST",
+    });
+    const committed = async (response: Response, status: number) => {
+      const text = await response.text();
+      expect({status: response.status, text}).toMatchObject({status});
+      return publishResponseSchema.parse(JSON.parse(text));
+    };
+    const refusedThenRetried = async (
+      write: Write,
+      content: string,
+      key: string,
+      target: PublicationTarget,
+    ) => {
+      const upload = await stageExternalStorageFile(server.baseUrl, token, content);
+      const unchanged = await installationRows(environment, identity.installationId);
+      await refuseWrite(write);
+      const refused = await commit(upload, key, target);
+      await acceptWrites(write);
+      const label = `a refused ${write.event} on ${write.table}`;
+      expect(refused.status, `${label} fails the publish`).toBe(500);
+      await refused.arrayBuffer();
+      expect(
+        await installationRows(environment, identity.installationId),
+        `${label} leaves every record alone`,
+      ).toEqual(unchanged);
+      const retried = await committed(await commit(upload, key, target), 201);
+      expect(retried.replayed).toBe(false);
+      const replay = await committed(await commit(upload, key, target), 200);
+      expect(replay.version.id).toBe(retried.version.id);
+      return retried;
+    };
+    try {
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        yield* sql.unsafe(`CREATE FUNCTION ${refusal}() RETURNS trigger
+          LANGUAGE plpgsql AS $$
+          BEGIN
+            RAISE EXCEPTION 'the publication write was refused';
+          END
+          $$`);
+      }));
+      const base = await publishNew(server.baseUrl, token, {
+        content: "<h1>atomic base</h1>",
+        idempotencyKey: `atomic-base-${randomUUID()}`,
+        name: "Atomic base",
+      });
+      expect(base.response.status).toBe(201);
+
+      for (const [index, write] of createWrites.entries()) {
+        // eslint-disable-next-line no-await-in-loop
+        const created = await refusedThenRetried(
+          write,
+          `<h1>refused create ${index}</h1>`,
+          `atomic-create-${index}-${randomUUID()}`,
+          {
+            accessSetting: "account_required",
+            kind: "new_artifact",
+            name: `Atomic create ${index}`,
+            path: `atomic/create-${index}`,
+            tags: ["atomic"],
+          },
+        );
+        expect(created.version.number).toBe(1);
+        expect(created.artifact.path).toBe(`atomic/create-${index}`);
+      }
+
+      let current = base.body.version;
+      for (const [index, write] of versionWrites.entries()) {
+        // eslint-disable-next-line no-await-in-loop
+        const published = await refusedThenRetried(
+          write,
+          `<h1>refused version ${index}</h1>`,
+          `atomic-version-${index}-${randomUUID()}`,
+          {
+            artifactId: base.body.artifact.id,
+            expectedCurrentVersionId: current.id,
+            kind: "new_version",
+          },
+        );
+        expect(published.version.number).toBe(current.number + 1);
+        expect(published.artifact.currentVersionId).toBe(published.version.id);
+        current = published.version;
+      }
+
+      const staleUpload = await stageExternalStorageFile(
+        server.baseUrl,
+        token,
+        "<h1>stale version</h1>",
+      );
+      const unchanged = await installationRows(environment, identity.installationId);
+      const stale = await commit(staleUpload, `atomic-stale-${randomUUID()}`, {
+        artifactId: base.body.artifact.id,
+        expectedCurrentVersionId: base.body.version.id,
+        kind: "new_version",
+      });
+      expect(stale.status).toBe(409);
+      await stale.arrayBuffer();
+      expect(await installationRows(environment, identity.installationId)).toEqual(unchanged);
+    } finally {
+      await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        for (const table of refusedTables) {
+          yield* sql.unsafe(`DROP TRIGGER IF EXISTS ${refusal} ON ${table}`);
+        }
+        yield* sql.unsafe(`DROP FUNCTION IF EXISTS ${refusal}()`);
+      }));
+      await database.close();
+      await server.stop();
+    }
+  });
+
   test("external-storage foundation: two processes racing for one artifact path admit exactly one create and both serve it", async () => {
     expect.hasAssertions();
     const pathApiToken = managedTestKey("artifact-path-installation");
