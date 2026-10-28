@@ -34,6 +34,8 @@ import {createExternalStorageRuntime} from
   "../../src/external-storage/create-external-storage-runtime.js";
 import {checkExternalStorageIntegrity} from
   "../../src/lifecycle/integrity-check.js";
+import {defaultStagingCleanupPolicy} from
+  "../../src/lifecycle/staging-cleanup.js";
 import type {ArtifactViewDrainReport} from
   "../../src/application/artifact-view-recorder.js";
 import {createS3ObjectStorageProviderFactory} from
@@ -1851,6 +1853,455 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     }
   });
 
+  test("AUTH-017-B: each installation's processes write rows, objects, integrity scans, and cleanup jobs only under their own trusted scope", async () => {
+    const suffix = randomUUID();
+    const first = {
+      apiToken: managedTestKey(`auth-017-b-first-${suffix}`),
+      installationId: `auth-017-b-first-${suffix}`,
+    };
+    const second = {
+      apiToken: managedTestKey(`auth-017-b-second-${suffix}`),
+      installationId: `auth-017-b-second-${suffix}`,
+    };
+    const [firstServer, secondServer] = await Promise.all([
+      startExternalStorageProcess(environment, first),
+      startExternalStorageProcess(environment, second),
+    ]);
+    const firstContent = `<h1>first installation ${suffix}</h1>`;
+    const secondContent = `<h1>second installation ${suffix}</h1>`;
+    const [firstPublished, secondPublished] = await Promise.all([
+      publishNew(firstServer.baseUrl, first.apiToken, {
+        content: firstContent,
+        idempotencyKey: `auth-017-b-first-${suffix}`,
+        name: "First installation artifact",
+      }),
+      publishNew(secondServer.baseUrl, second.apiToken, {
+        content: secondContent,
+        idempotencyKey: `auth-017-b-second-${suffix}`,
+        name: "Second installation artifact",
+      }),
+    ]);
+    expect(firstPublished.response.status).toBe(201);
+    expect(secondPublished.response.status).toBe(201);
+    const openUpload = await stageExternalStorageFile(
+      firstServer.baseUrl,
+      first.apiToken,
+      `<p>uncommitted first installation upload ${suffix}</p>`,
+    );
+
+    const [firstList, secondList] = await Promise.all([
+      listArtifacts(firstServer.baseUrl, first.apiToken),
+      listArtifacts(secondServer.baseUrl, second.apiToken),
+    ]);
+    expect(firstList.body.artifacts.map(({artifact}) => artifact.id))
+      .toEqual([firstPublished.body.artifact.id]);
+    expect(secondList.body.artifacts.map(({artifact}) => artifact.id))
+      .toEqual([secondPublished.body.artifact.id]);
+
+    const database = await PostgresDatabase.open({
+      maxConnections: 1,
+      url: Redacted.make(environment.databaseUrl),
+    }, "validate");
+    try {
+      const owners = await database.run(Effect.gen(function*() {
+        const sql = yield* SqlClient;
+        return yield* sql<{
+          readonly id: string;
+          readonly installation_id: string;
+          readonly kind: string;
+        }>`
+          SELECT id, installation_id, 'artifact' AS kind FROM artifacts
+          WHERE id IN (${firstPublished.body.artifact.id}, ${secondPublished.body.artifact.id})
+          UNION ALL
+          SELECT id, installation_id, 'version' AS kind FROM versions
+          WHERE id IN (${firstPublished.body.version.id}, ${secondPublished.body.version.id})
+          UNION ALL
+          SELECT id, installation_id, 'upload' AS kind FROM staged_uploads
+          WHERE id = ${openUpload.uploadId}
+          ORDER BY kind, installation_id
+        `.withoutTransform;
+      }));
+      expect(owners).toEqual([
+        {id: firstPublished.body.artifact.id, installation_id: first.installationId, kind: "artifact"},
+        {id: secondPublished.body.artifact.id, installation_id: second.installationId, kind: "artifact"},
+        {id: openUpload.uploadId, installation_id: first.installationId, kind: "upload"},
+        {id: firstPublished.body.version.id, installation_id: first.installationId, kind: "version"},
+        {id: secondPublished.body.version.id, installation_id: second.installationId, kind: "version"},
+      ]);
+    } finally {
+      await database.close();
+    }
+
+    const firstBlob = sha256(new TextEncoder().encode(firstContent));
+    const secondBlob = sha256(new TextEncoder().encode(secondContent));
+    const [firstKeys, secondKeys] = await Promise.all([
+      installationObjectKeys(s3Client, first.installationId),
+      installationObjectKeys(s3Client, second.installationId),
+    ]);
+    expect(firstKeys.filter((key) => key.endsWith(`/${firstBlob}`))).toHaveLength(1);
+    expect(firstKeys.some((key) => key.endsWith(`/${secondBlob}`))).toBe(false);
+    expect(firstKeys.some((key) => key.includes(`/staging/${openUpload.uploadId}/`))).toBe(true);
+    expect(secondKeys.filter((key) => key.endsWith(`/${secondBlob}`))).toHaveLength(1);
+    expect(secondKeys.some((key) => key.endsWith(`/${firstBlob}`))).toBe(false);
+    expect(secondKeys.some((key) => key.includes(`/staging/${openUpload.uploadId}/`))).toBe(false);
+
+    const integrity = (scoped: typeof first) => checkExternalStorageIntegrity({
+      databaseUrl: Redacted.make(environment.databaseUrl),
+      installationId: scoped.installationId,
+      objectStorage: createS3ObjectStorageProviderFactory({
+        accessKeyId: environment.accessKey,
+        bucket,
+        endpoint: environment.endpoint,
+        forcePathStyle: true,
+        region,
+        secretAccessKey: Redacted.make(environment.secretKey),
+      }),
+    });
+    const scans = await Promise.all([integrity(first), integrity(second)]);
+    for (const scan of scans) {
+      expect(scan).toMatchObject({
+        artifactsChecked: 1,
+        problems: [],
+        status: "healthy",
+        versionsChecked: 1,
+      });
+    }
+
+    await Promise.all([firstServer.stop(), secondServer.stop()]);
+    const afterExpiry = new MutableClock(
+      new Date(Date.now() + 30 * day).toISOString(),
+    );
+    const cleanup = async (scoped: typeof first) => {
+      const runtime = await createExternalStorageRuntime({
+        apiToken: Redacted.make(scoped.apiToken),
+        applicationOrigin: "https://artifacts.example.com",
+        bootstrapAdministratorEmail: administratorEmail,
+        browserAccess: privateTeamBrowserAccess(browserLoginKinds.none),
+        clock: afterExpiry,
+        contentDomain: "content.example.net",
+        databaseUrl: Redacted.make(environment.databaseUrl),
+        installationId: scoped.installationId,
+        objectStorage: createS3ObjectStorageProviderFactory({
+          accessKeyId: environment.accessKey,
+          bucket,
+          endpoint: environment.endpoint,
+          forcePathStyle: true,
+          region,
+          secretAccessKey: Redacted.make(environment.secretKey),
+        }),
+        stagingCleanupPolicy: {...defaultStagingCleanupPolicy, schedule: "external"},
+      });
+      try {
+        return await runtime.cleanupStaging(100);
+      } finally {
+        await runtime.close();
+      }
+    };
+    expect(await cleanup(second)).toMatchObject({deleted: 0, failed: 0, selected: 0});
+    expect((await installationObjectKeys(s3Client, first.installationId))
+      .some((key) => key.includes(`/staging/${openUpload.uploadId}/`))).toBe(true);
+    expect(await cleanup(first)).toMatchObject({deleted: 1, failed: 0, selected: 1});
+    expect((await installationObjectKeys(s3Client, first.installationId))
+      .some((key) => key.includes(`/staging/${openUpload.uploadId}/`))).toBe(false);
+  });
+
+  test("AUTH-017-F: header, host, query, body, path, token, session, idempotency-key, upload, and MCP tampering on one installation's process cannot reach another installation", async () => {
+    const suffix = randomUUID();
+    const victim = {
+      apiToken: managedTestKey(`auth-017-f-victim-${suffix}`),
+      installationId: `auth-017-f-victim-${suffix}`,
+    };
+    const attacker = {
+      apiToken: managedTestKey(`auth-017-f-attacker-${suffix}`),
+      installationId: `auth-017-f-attacker-${suffix}`,
+    };
+    const [victimServer, attackerServer] = await Promise.all([
+      startExternalStorageProcess(environment, victim),
+      startExternalStorageProcess(environment, attacker),
+    ]);
+    const projectResponse = await fetch(`${victimServer.baseUrl}/api/v1/projects`, {
+      body: JSON.stringify({name: "Victim project"}),
+      headers: mutationHeaders(victim.apiToken, `auth-017-f-project-${suffix}`),
+      method: "POST",
+    });
+    expect(projectResponse.status).toBe(201);
+    const victimProject = z.object({project: z.object({id: z.string()})})
+      .parse(await projectResponse.json()).project;
+    const sharedIdempotencyKey = `auth-017-f-shared-${suffix}`;
+    const victimContent = `<h1>victim installation ${suffix}</h1>`;
+    const published = await publishNew(victimServer.baseUrl, victim.apiToken, {
+      content: victimContent,
+      idempotencyKey: sharedIdempotencyKey,
+      name: "Victim artifact",
+      projectId: defaultProjectId,
+    });
+    expect(published.response.status).toBe(201);
+    const victimArtifact = published.body.artifact;
+    const victimVersion = published.body.version;
+    const victimFile = {
+      bytes: new TextEncoder().encode(`<p>victim open upload ${suffix}</p>`),
+      mediaType: "text/html; charset=utf-8",
+      path: "index.html",
+    };
+    const openUpload = await planExternalStorageUpload(
+      victimServer.baseUrl,
+      victim.apiToken,
+      [victimFile],
+      "index.html",
+      defaultProjectId,
+    );
+    const openFile = openUpload.files[0];
+    if (openFile === undefined) throw new Error("The victim upload plan had no file.");
+    const victimCookies = await seedAdministratorSession(environment, victim.installationId);
+    const victimContentHost = new URL(published.body.links.version).host;
+
+    const victimControls = {
+      artifact: await authenticatedFetch(
+        victimServer.baseUrl,
+        victim.apiToken,
+        `/api/v1/artifacts/${victimArtifact.id}?projectId=${defaultProjectId}`,
+      ),
+      content: await fetchContentThroughServer(
+        victimServer.baseUrl,
+        published.body.links.version,
+      ),
+      mcp: await externalStorageMcpRequest(
+        victimServer.baseUrl,
+        victim.apiToken,
+        "tools/call",
+        {
+          arguments: {artifactId: victimArtifact.id, projectId: defaultProjectId},
+          name: "artifact_get",
+        },
+        "artifact_get",
+      ),
+      project: await authenticatedFetch(
+        victimServer.baseUrl,
+        victim.apiToken,
+        `/api/v1/projects/${victimProject.id}`,
+      ),
+      session: await fetch(`${victimServer.baseUrl}/api/v1/session`, {
+        headers: {Cookie: victimCookies.header},
+      }),
+    };
+    expect(victimControls.artifact.status).toBe(200);
+    expect(victimControls.content.status).toBe(200);
+    expect(await victimControls.content.text()).toBe(victimContent);
+    expect(victimControls.mcp.status).toBe(200);
+    expect(mcpToolTextResultSchema.parse(await victimControls.mcp.json()).result.isError)
+      .not.toBe(true);
+    expect(victimControls.project.status).toBe(200);
+    expect(victimControls.session.status).toBe(200);
+    await victimServer.stop();
+
+    const victimRowsBefore = await installationRows(environment, victim.installationId);
+    const victimKeysBefore = await installationObjectKeys(s3Client, victim.installationId);
+    expect(victimRowsBefore["artifacts"]?.count).toBe(1);
+    expect(victimKeysBefore.length).toBeGreaterThan(0);
+
+    const attackerHeaders = (extra: Record<string, string> = {}) => new Headers({
+      Authorization: `Bearer ${attacker.apiToken}`,
+      ...extra,
+    });
+    const forgedHeaders = {
+      Forwarded: `host=${victimContentHost};proto=https`,
+      "X-Artifact-Installation-Id": victim.installationId,
+      "X-Forwarded-Host": victimContentHost,
+      "X-Forwarded-Proto": "https",
+      "X-Installation-Id": victim.installationId,
+      "X-Original-Host": victimContentHost,
+      "X-Tenant-Id": victim.installationId,
+    };
+    const expected: {readonly label: string; readonly status: number}[] = [];
+    const observed: {readonly label: string; readonly status: number}[] = [];
+    const attempt = async (label: string, status: number, response: Promise<Response>) => {
+      const settled = await response;
+      await settled.arrayBuffer();
+      expected.push({label, status});
+      observed.push({label, status: settled.status});
+    };
+
+    await attempt("victim token", 401, authenticatedFetch(
+      attackerServer.baseUrl,
+      victim.apiToken,
+      `/api/v1/artifacts/${victimArtifact.id}`,
+    ));
+    await attempt("victim token with forged installation headers", 401, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts`,
+      {headers: {Authorization: `Bearer ${victim.apiToken}`, ...forgedHeaders}},
+    ));
+    await attempt("victim session cookie", 401, fetch(`${attackerServer.baseUrl}/api/v1/session`, {
+      headers: {Cookie: victimCookies.header, ...forgedHeaders},
+    }));
+    await attempt("victim artifact ID", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts/${victimArtifact.id}`,
+      {headers: attackerHeaders(forgedHeaders)},
+    ));
+    await attempt("victim artifact ID with installation query", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts/${victimArtifact.id}?installationId=${victim.installationId}&installation=${victim.installationId}`,
+      {headers: attackerHeaders()},
+    ));
+    await attempt("victim version ID", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts/${victimArtifact.id}/versions/${victimVersion.id}`,
+      {headers: attackerHeaders(forgedHeaders)},
+    ));
+    await attempt("victim project ID in path", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/projects/${victimProject.id}`,
+      {headers: attackerHeaders(forgedHeaders)},
+    ));
+    await attempt("victim project ID in list query", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts?projectId=${victimProject.id}`,
+      {headers: attackerHeaders(forgedHeaders)},
+    ));
+    await attempt("encoded traversal to the victim artifact", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/projects/${defaultProjectId}/..%2F..%2Fartifacts%2F${victimArtifact.id}`,
+      {headers: attackerHeaders()},
+    ));
+    await attempt("victim content host", 404, fetchContentThroughServer(
+      attackerServer.baseUrl,
+      published.body.links.version,
+      forgedHeaders,
+    ));
+    await attempt("victim content session", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts/${victimArtifact.id}/content-sessions`,
+      {headers: attackerHeaders(forgedHeaders), method: "POST"},
+    ));
+    await attempt("upload plan naming the victim project", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/uploads`,
+      {
+        body: JSON.stringify({
+          entryPath: "index.html",
+          files: [{
+            mediaType: victimFile.mediaType,
+            path: victimFile.path,
+            sha256: sha256(victimFile.bytes),
+            size: victimFile.bytes.byteLength,
+          }],
+          projectId: victimProject.id,
+        }),
+        headers: attackerHeaders({"Content-Type": "application/json", ...forgedHeaders}),
+        method: "POST",
+      },
+    ));
+    await attempt("upload plan with an installation body field", 422, fetch(
+      `${attackerServer.baseUrl}/api/v1/uploads`,
+      {
+        body: JSON.stringify({
+          entryPath: "index.html",
+          files: [{
+            mediaType: victimFile.mediaType,
+            path: victimFile.path,
+            sha256: sha256(victimFile.bytes),
+            size: victimFile.bytes.byteLength,
+          }],
+          installationId: victim.installationId,
+        }),
+        headers: attackerHeaders({"Content-Type": "application/json"}),
+        method: "POST",
+      },
+    ));
+    await attempt("bytes for the victim upload", 404, fetch(
+      replaceOrigin(openFile.uploadUrl, attackerServer.baseUrl),
+      {
+        body: copiedArrayBuffer(victimFile.bytes),
+        headers: attackerHeaders(forgedHeaders),
+        method: "PUT",
+      },
+    ));
+    await attempt("commit of the victim upload", 404, fetch(
+      replaceOrigin(openUpload.commitUrl, attackerServer.baseUrl),
+      {
+        body: JSON.stringify({target: {kind: "new_artifact", name: "Stolen upload", tags: []}}),
+        headers: mutationHeaders(attacker.apiToken, `auth-017-f-steal-${suffix}`),
+        method: "POST",
+      },
+    ));
+    const attackerUpload = await stageExternalStorageFile(
+      attackerServer.baseUrl,
+      attacker.apiToken,
+      `<h1>attacker version ${suffix}</h1>`,
+    );
+    await attempt("new version of the victim artifact", 404, fetch(
+      attackerUpload.commitUrl,
+      {
+        body: JSON.stringify({target: {
+          artifactId: victimArtifact.id,
+          expectedCurrentVersionId: victimVersion.id,
+          kind: "new_version",
+        }}),
+        headers: mutationHeaders(attacker.apiToken, `auth-017-f-version-${suffix}`),
+        method: "POST",
+      },
+    ));
+    await attempt("delete of the victim artifact", 404, fetch(
+      `${attackerServer.baseUrl}/api/v1/artifacts/${victimArtifact.id}`,
+      {
+        body: JSON.stringify({expectedCurrentVersionId: victimVersion.id}),
+        headers: mutationHeaders(attacker.apiToken, `auth-017-f-delete-${suffix}`),
+        method: "DELETE",
+      },
+    ));
+    expect(observed).toEqual(expected);
+
+    const mcpAttempts = [
+      {arguments: {artifactId: victimArtifact.id}, name: "artifact_get"},
+      {arguments: {artifactId: victimArtifact.id, projectId: victimProject.id}, name: "artifact_get"},
+      {arguments: {artifactId: victimArtifact.id}, name: "artifact_version_list"},
+      {
+        arguments: {
+          artifactId: victimArtifact.id,
+          expectedCurrentVersionId: victimVersion.id,
+          idempotencyKey: `auth-017-f-mcp-delete-${suffix}`,
+        },
+        name: "artifact_delete",
+      },
+    ] as const;
+    const mcpResponses = await Promise.all(mcpAttempts.map(async (call) => {
+      const response = await externalStorageMcpRequest(
+        attackerServer.baseUrl,
+        attacker.apiToken,
+        "tools/call",
+        call,
+        call.name,
+      );
+      const body: unknown = await response.json();
+      return {body, call, response};
+    }));
+    for (const {body, call, response} of mcpResponses) {
+      expect({call: call.name, status: response.status}).toEqual({call: call.name, status: 200});
+      const result = mcpToolTextResultSchema.parse(body).result;
+      expect({call: call.name, isError: result.isError}).toEqual({call: call.name, isError: true});
+      expect(JSON.stringify(result.content)).not.toContain(victimContent);
+    }
+    const victimTokenMcp = await externalStorageMcpRequest(
+      attackerServer.baseUrl,
+      victim.apiToken,
+      "tools/call",
+      {arguments: {artifactId: victimArtifact.id}, name: "artifact_get"},
+      "artifact_get",
+    );
+    expect(victimTokenMcp.status).toBe(401);
+    await victimTokenMcp.arrayBuffer();
+
+    const replay = await publishNew(attackerServer.baseUrl, attacker.apiToken, {
+      content: victimContent,
+      idempotencyKey: sharedIdempotencyKey,
+      name: "Victim artifact",
+    });
+    expect(replay.response.status).toBe(201);
+    expect(replay.body.replayed).toBe(false);
+    expect(replay.body.artifact.id).not.toBe(victimArtifact.id);
+    expect(replay.body.version.id).not.toBe(victimVersion.id);
+
+    expect(await installationRows(environment, victim.installationId)).toEqual(victimRowsBefore);
+    expect(await installationObjectKeys(s3Client, victim.installationId)).toEqual(victimKeysBefore);
+    expect(await installationRowsMentioning(
+      environment,
+      attacker.installationId,
+      [victim.installationId, victimArtifact.id, victimVersion.id, victimProject.id, openUpload.uploadId],
+    )).toEqual([]);
+  });
+
   test("external-storage foundation: a local browser login attempt is consumed once through Postgres", async () => {
     const database = await PostgresDatabase.open({
       maxConnections: 2,
@@ -2704,6 +3155,151 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
 
     const stillAlive = await fetch(`${server.baseUrl}/health`);
     expect(stillAlive.status).toBe(200);
+  });
+
+  test("OPS-010-B: SIGTERM withdraws readiness, keeps liveness, refuses new connections, finishes an accepted upload and commit, and exits with the publish durable", async () => {
+    const suffix = randomUUID();
+    const identity = {
+      apiToken: managedTestKey(`ops-010-b-${suffix}`),
+      installationId: `ops-010-b-${suffix}`,
+    };
+    const withdrawalMilliseconds = 1_500;
+    const deadlineMilliseconds = 8_000;
+    const server = await startExternalStorageProcess(environment, identity, {
+      ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: String(withdrawalMilliseconds),
+      ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: String(deadlineMilliseconds),
+    });
+    const committedContent = `<h1>committed while draining ${suffix}</h1>`;
+    const committing = await stageExternalStorageFile(
+      server.baseUrl,
+      identity.apiToken,
+      committedContent,
+    );
+    const uploadedBytes = new TextEncoder().encode(`<p>uploaded while draining ${suffix}</p>`.repeat(2_000));
+    const uploading = await planExternalStorageUpload(server.baseUrl, identity.apiToken, [{
+      bytes: uploadedBytes,
+      mediaType: "text/html; charset=utf-8",
+      path: "index.html",
+    }], "index.html");
+    const uploadingFile = uploading.files[0];
+    if (uploadingFile === undefined) throw new Error("The draining upload plan had no file.");
+
+    const heldCommit = startHeldRequest(
+      replaceOrigin(committing.commitUrl, server.baseUrl),
+      "POST",
+      mutationHeaders(identity.apiToken, `ops-010-b-commit-${suffix}`),
+      Buffer.from(JSON.stringify({target: {
+        accessSetting: "public_link",
+        kind: "new_artifact",
+        name: "Committed while draining",
+        tags: [],
+      }})),
+    );
+    const heldUpload = startHeldRequest(
+      replaceOrigin(uploadingFile.uploadUrl, server.baseUrl),
+      "PUT",
+      bearerHeaders(identity.apiToken),
+      Buffer.from(uploadedBytes),
+    );
+    await Promise.all([heldCommit.accepted, heldUpload.accepted]);
+
+    const exited = childExit(server.child);
+    const signalledAt = Date.now();
+    server.child.kill("SIGTERM");
+    const draining = await waitForFreshResponse(server.baseUrl, "/ready", (response) =>
+      response.status === 503 && response.body.includes('"lifecycle":"draining"'));
+    expect(Date.now() - signalledAt).toBeLessThan(withdrawalMilliseconds);
+    expect(JSON.parse(draining.body)).toMatchObject({lifecycle: "draining", status: "not_ready"});
+    const liveness = await freshRequest(server.baseUrl, "/health");
+    expect(liveness).toEqual({body: '{"status":"ok"}', status: 200});
+
+    const refused = await waitForFreshFailure(server.baseUrl, "/health");
+    expect(refused).toBe("ECONNREFUSED");
+    expect(Date.now() - signalledAt).toBeGreaterThanOrEqual(withdrawalMilliseconds - 100);
+    expect(server.child.exitCode).toBeNull();
+
+    heldUpload.finish();
+    heldCommit.finish();
+    const [uploaded, committed] = await Promise.all([heldUpload.response, heldCommit.response]);
+    expect(uploaded).toMatchObject({status: 200});
+    expect(committed).toMatchObject({status: 201});
+    if (!("body" in committed)) throw new Error("The draining commit had no response.");
+    const publication = publishResponseSchema.parse(JSON.parse(committed.body));
+
+    const exit = await exited;
+    runningProcesses.delete(server.child);
+    expect(exit).toEqual({code: 0, signal: null});
+    expect(Date.now() - signalledAt).toBeLessThan(withdrawalMilliseconds + deadlineMilliseconds);
+
+    const restarted = await startExternalStorageProcess(environment, identity);
+    const details = await authenticatedFetch(
+      restarted.baseUrl,
+      identity.apiToken,
+      `/api/v1/artifacts/${publication.artifact.id}`,
+    );
+    expect(details.status).toBe(200);
+    expect(await details.json()).toMatchObject({
+      artifact: {currentVersionId: publication.version.id, id: publication.artifact.id},
+    });
+    const rendered = await fetchContentThroughServer(restarted.baseUrl, publication.links.version);
+    expect(rendered.status).toBe(200);
+    expect(await rendered.text()).toBe(committedContent);
+  });
+
+  test("OPS-010-F: a draining process stops being ready, refuses new work, cuts a request still open at the deadline, saves nothing for it, and still exits cleanly", async () => {
+    const suffix = randomUUID();
+    const identity = {
+      apiToken: managedTestKey(`ops-010-f-${suffix}`),
+      installationId: `ops-010-f-${suffix}`,
+    };
+    const withdrawalMilliseconds = 500;
+    const deadlineMilliseconds = 1_500;
+    const server = await startExternalStorageProcess(environment, identity, {
+      ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS: String(withdrawalMilliseconds),
+      ARTIFACT_SERVER_SHUTDOWN_DEADLINE_MS: String(deadlineMilliseconds),
+    });
+    const stuck = await stageExternalStorageFile(
+      server.baseUrl,
+      identity.apiToken,
+      `<h1>never committed ${suffix}</h1>`,
+    );
+    const heldCommit = startHeldRequest(
+      replaceOrigin(stuck.commitUrl, server.baseUrl),
+      "POST",
+      mutationHeaders(identity.apiToken, `ops-010-f-commit-${suffix}`),
+      Buffer.from(JSON.stringify({target: {
+        kind: "new_artifact",
+        name: "Never committed",
+        tags: [],
+      }})),
+    );
+    await heldCommit.accepted;
+
+    const exited = childExit(server.child);
+    const signalledAt = Date.now();
+    server.child.kill("SIGTERM");
+    const draining = await waitForFreshResponse(server.baseUrl, "/ready", (response) =>
+      response.status === 503 && response.body.includes('"lifecycle":"draining"'));
+    expect(JSON.parse(draining.body)).toMatchObject({lifecycle: "draining", status: "not_ready"});
+    expect(await waitForFreshFailure(server.baseUrl, "/api/v1/artifacts")).toBe("ECONNREFUSED");
+
+    const exitBound = withdrawalMilliseconds + deadlineMilliseconds + 5_000;
+    const cut = await settledWithin(heldCommit.response, exitBound);
+    const cutAt = Date.now() - signalledAt;
+    expect(cut).toEqual({error: "ECONNRESET"});
+    expect(cutAt).toBeGreaterThanOrEqual(withdrawalMilliseconds + deadlineMilliseconds - 100);
+    const exit = await settledWithin(exited, exitBound);
+    runningProcesses.delete(server.child);
+    expect(exit).toEqual({code: 0, signal: null});
+    expect(Date.now() - signalledAt).toBeLessThan(exitBound);
+
+    const rows = await installationRows(environment, identity.installationId);
+    expect(rows["artifacts"]?.count ?? 0).toBe(0);
+    expect(rows["versions"]?.count ?? 0).toBe(0);
+    expect(rows["staged_uploads"]?.count).toBe(1);
+    const restarted = await startExternalStorageProcess(environment, identity);
+    const listed = await listArtifacts(restarted.baseUrl, identity.apiToken);
+    expect(listed.body.artifacts).toEqual([]);
   });
 
   test("external-storage foundation: Postgres serves the comment lifecycle, paging, and same-instant ledger keys", async () => {
@@ -5359,6 +5955,7 @@ function startExternalStorageProcess(
     readonly sameHost?: boolean;
     readonly storageBucket?: string;
   },
+  environmentOverrides: Readonly<Record<string, string>> = {},
 ): Promise<ExternalStorageProcess> {
   const sameHost = identity.sameHost === true;
   const child = spawn(
@@ -5383,12 +5980,270 @@ function startExternalStorageProcess(
         ARTIFACT_SERVER_S3_FORCE_PATH_STYLE: "true",
         ARTIFACT_SERVER_S3_REGION: region,
         ARTIFACT_SERVER_S3_SECRET_ACCESS_KEY: environment.secretKey,
+        ...environmentOverrides,
       },
       stdio: ["pipe", "pipe", "pipe"],
     },
   );
   runningProcesses.add(child);
   return waitForExternalStorageProcess(child);
+}
+
+interface InstallationTableSnapshot {
+  readonly count: number;
+  readonly digest: string | null;
+}
+
+/** Fingerprint every row any installation-scoped table holds for one installation. */
+async function installationRows(
+  environment: IntegrationEnvironment,
+  scopedInstallationId: string,
+): Promise<Readonly<Record<string, InstallationTableSnapshot>>> {
+  return withInstallationTables(environment, (sql, tables) => Effect.gen(function*() {
+    const snapshot: Record<string, InstallationTableSnapshot> = {};
+    for (const table of tables) {
+      const [row] = yield* sql.unsafe<InstallationTableSnapshot>(
+        `SELECT count(*)::int AS count,
+           md5(string_agg(t::text, ',' ORDER BY t::text)) AS digest
+         FROM "${table}" t WHERE installation_id = $1`,
+        [scopedInstallationId],
+      ).withoutTransform;
+      if (row !== undefined) snapshot[table] = row;
+    }
+    return snapshot;
+  }));
+}
+
+/** Name each installation-scoped table whose rows for one installation mention a foreign value. */
+async function installationRowsMentioning(
+  environment: IntegrationEnvironment,
+  scopedInstallationId: string,
+  foreignValues: readonly string[],
+): Promise<readonly string[]> {
+  return withInstallationTables(environment, (sql, tables) => Effect.gen(function*() {
+    const mentioning: string[] = [];
+    for (const table of tables) {
+      for (const value of foreignValues) {
+        const [row] = yield* sql.unsafe<{readonly count: number}>(
+          `SELECT count(*)::int AS count FROM "${table}" t
+           WHERE installation_id = $1 AND strpos(t::text, $2) > 0`,
+          [scopedInstallationId, value],
+        ).withoutTransform;
+        if ((row?.count ?? 0) > 0) mentioning.push(`${table}: ${value}`);
+      }
+    }
+    return mentioning;
+  }));
+}
+
+async function withInstallationTables<A>(
+  environment: IntegrationEnvironment,
+  read: (
+    sql: SqlClient,
+    tables: readonly string[],
+  ) => Effect.Effect<A, unknown>,
+): Promise<A> {
+  const database = await PostgresDatabase.open({
+    maxConnections: 1,
+    url: Redacted.make(environment.databaseUrl),
+  }, "validate");
+  try {
+    return await database.run(Effect.gen(function*() {
+      const sql = yield* SqlClient;
+      const rows = yield* sql<{readonly table_name: string}>`
+        SELECT DISTINCT table_name FROM information_schema.columns
+        WHERE column_name = 'installation_id'
+          AND table_schema = current_schema()
+        ORDER BY table_name
+      `.withoutTransform;
+      const tables = rows.map(({table_name: table}) => {
+        if (!/^[a-z_]+$/u.test(table)) throw new Error(`Unexpected table name ${table}.`);
+        return table;
+      });
+      return yield* read(sql, tables);
+    }));
+  } finally {
+    await database.close();
+  }
+}
+
+/** List every object key under one installation's derived prefix. */
+async function installationObjectKeys(
+  client: S3Client,
+  scopedInstallationId: string,
+): Promise<readonly string[]> {
+  const namespace = createHash("sha256").update(scopedInstallationId).digest("hex");
+  const listFrom = async (continuationToken?: string): Promise<readonly string[]> => {
+    const page = await client.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      ContinuationToken: continuationToken,
+      Prefix: `installations/${namespace}/`,
+    }));
+    const keys = (page.Contents ?? []).flatMap(({Key}) => Key === undefined ? [] : [Key]);
+    return page.NextContinuationToken === undefined
+      ? keys
+      : [...keys, ...await listFrom(page.NextContinuationToken)];
+  };
+  return (await listFrom()).toSorted();
+}
+
+type HeldRequestResult =
+  | {readonly body: string; readonly status: number}
+  | {readonly error: string};
+
+interface HeldRequest {
+  /** Resolves once the headers and the first half of the body reached the server. */
+  readonly accepted: Promise<void>;
+  /** Send the rest of the body. */
+  finish(): void;
+  readonly response: Promise<HeldRequestResult>;
+}
+
+/** Open a request on its own socket and hold it with half of its declared body sent. */
+function startHeldRequest(
+  url: string,
+  method: string,
+  headers: Headers,
+  body: Buffer,
+): HeldRequest {
+  const target = new URL(url);
+  const half = Math.floor(body.byteLength / 2);
+  const accepted = Promise.withResolvers<void>();
+  let held: ReturnType<typeof request> | undefined;
+  const response = new Promise<HeldRequestResult>((resolve) => {
+    const outgoing = request({
+      agent: false,
+      headers: {
+        ...Object.fromEntries(headers),
+        "Content-Length": String(body.byteLength),
+      },
+      hostname: target.hostname,
+      method,
+      path: `${target.pathname}${target.search}`,
+      port: target.port,
+    }, (incoming) => {
+      const chunks: Uint8Array[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.once("error", (error: NodeJS.ErrnoException) =>
+        resolve({error: error.code ?? error.message}));
+      incoming.once("end", () => resolve({
+        body: Buffer.concat(chunks).toString("utf8"),
+        status: incoming.statusCode ?? 0,
+      }));
+    });
+    outgoing.once("error", (error: NodeJS.ErrnoException) =>
+      resolve({error: error.code ?? error.message}));
+    outgoing.flushHeaders();
+    outgoing.write(body.subarray(0, half), () => {
+      setTimeout(accepted.resolve, 200);
+    });
+    held = outgoing;
+  });
+  return {
+    accepted: accepted.promise,
+    finish: () => {
+      held?.end(body.subarray(half));
+    },
+    response,
+  };
+}
+
+/** Send one GET on a new socket, so a pooled keep-alive socket cannot hide a closed listener. */
+function freshRequest(
+  baseUrl: string,
+  pathname: string,
+): Promise<{readonly body: string; readonly status: number}> {
+  const target = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    const outgoing = request({
+      agent: false,
+      headers: {Connection: "close"},
+      hostname: target.hostname,
+      method: "GET",
+      path: target.pathname,
+      port: target.port,
+    }, (incoming) => {
+      const chunks: Uint8Array[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.once("error", reject);
+      incoming.once("end", () => resolve({
+        body: Buffer.concat(chunks).toString("utf8"),
+        status: incoming.statusCode ?? 0,
+      }));
+    });
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
+}
+
+async function waitForFreshResponse(
+  baseUrl: string,
+  pathname: string,
+  matches: (response: {readonly body: string; readonly status: number}) => boolean,
+): Promise<{readonly body: string; readonly status: number}> {
+  const deadline = Date.now() + 5_000;
+  const attempt = async (): Promise<{readonly body: string; readonly status: number}> => {
+    const response = await freshRequest(baseUrl, pathname);
+    if (matches(response)) return response;
+    if (Date.now() >= deadline) {
+      throw new Error(`${pathname} never returned the expected response.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return attempt();
+  };
+  return attempt();
+}
+
+/** Poll on new sockets until the listener refuses one, and return the refusal code. */
+async function waitForFreshFailure(baseUrl: string, pathname: string): Promise<string> {
+  const deadline = Date.now() + 10_000;
+  const attempt = async (): Promise<string> => {
+    const refusal = await freshConnectionRefusal(baseUrl, pathname);
+    if (refusal !== null) return refusal;
+    if (Date.now() >= deadline) {
+      throw new Error(`${pathname} kept accepting new connections.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return attempt();
+  };
+  return attempt();
+}
+
+/** Resolve with the socket error code of one new-connection GET, or null when it was served. */
+function freshConnectionRefusal(baseUrl: string, pathname: string): Promise<string | null> {
+  const target = new URL(pathname, baseUrl);
+  return new Promise((resolve) => {
+    const outgoing = request({
+      agent: false,
+      headers: {Connection: "close"},
+      hostname: target.hostname,
+      method: "GET",
+      path: target.pathname,
+      port: target.port,
+    }, (incoming) => {
+      incoming.resume();
+      incoming.once("end", () => resolve(null));
+    });
+    outgoing.once("error", (error: NodeJS.ErrnoException) =>
+      resolve(error.code ?? error.message));
+    outgoing.end();
+  });
+}
+
+/** Resolve with the promise's value, or with "timed out" once the bound passes. */
+function settledWithin<T>(promise: Promise<T>, milliseconds: number): Promise<T | "timed out"> {
+  return Promise.race([
+    promise,
+    new Promise<"timed out">((resolve) => setTimeout(() => resolve("timed out"), milliseconds)),
+  ]);
+}
+
+function childExit(
+  child: ChildProcessWithoutNullStreams,
+): Promise<{readonly code: number | null; readonly signal: NodeJS.Signals | null}> {
+  return new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({code, signal}));
+  });
 }
 
 function runExternalCli(
