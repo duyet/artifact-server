@@ -184,6 +184,14 @@ export interface ArtifactManagementRepository {
     projectId: string,
     artifactId: string,
   ) => Effect.Effect<ArtifactRecord | null, ArtifactRepositoryFailure>;
+  readonly findIdempotentAccessChange: (
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ) => Effect.Effect<
+    ArtifactState | null,
+    IdempotencyConflict | ArtifactRepositoryFailure
+  >;
   readonly findArtifactForAdministration: (
     projectId: string,
     artifactId: string,
@@ -580,8 +588,24 @@ function makeArtifactManagementService(
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* authorization.requireArtifactOwnership(command.principal, artifact);
-      yield* authorization.requireAccessSettingAllowed(command.accessSetting);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
+      const inputDigest = managementInputDigest({
+        artifactId: artifact.id,
+        expectedCurrentVersionId: command.expectedCurrentVersionId,
+        operation: "change_access",
+        principalId: command.principal.id,
+        projectId: project.id,
+        value: command.accessSetting,
+      });
+      // A retry of a change stored before an administrator disabled public
+      // links still learns its result; reads stay gated by the policy.
+      const replayed = yield* dependencies.repository.findIdempotentAccessChange(
+        project.id,
+        idempotencyKey,
+        inputDigest,
+      );
+      if (replayed !== null) return replayed;
+      yield* authorization.requireAccessSettingAllowed(command.accessSetting);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.changeAccessSetting({
         accessSetting: command.accessSetting,
@@ -590,14 +614,7 @@ function makeArtifactManagementService(
         createdAt,
         expectedCurrentVersionId: command.expectedCurrentVersionId,
         idempotencyKey,
-        inputDigest: managementInputDigest({
-          artifactId: artifact.id,
-          expectedCurrentVersionId: command.expectedCurrentVersionId,
-          operation: "change_access",
-          principalId: command.principal.id,
-          projectId: project.id,
-          value: command.accessSetting,
-        }),
+        inputDigest,
         principalId: command.principal.id,
         projectId: project.id,
       });

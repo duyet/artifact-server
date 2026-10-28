@@ -361,6 +361,7 @@ export class ArtifactRepositoryFailure extends Schema.TaggedError<ArtifactReposi
       "findRegisteredAgent",
       "findContentSession",
       "findCurrentVersion",
+      "findIdempotentAccessChange",
       "findIdempotentCommentReply",
       "findIdempotentCommentThread",
       "findIdempotentPublication",

@@ -319,7 +319,7 @@ Any other value, such as an `http://` URL, `//host`, or a relative path, stops s
 
 ### Disable public links
 
-A public link is not access control. Anyone who can reach the host can read a public artifact and find it on the home page. To turn public links off for the whole installation, set `ARTIFACT_SERVER_PUBLIC_LINKS=disabled` (Helm: `configuration.publicLinks: disabled`) and restart. `config check` reports the value as `publicLinks`. Any value other than `allowed` or `disabled` stops startup.
+A public link is not access control. Anyone who can reach the host can read a public artifact and find it on the home page. To turn public links off for the whole installation, set `ARTIFACT_SERVER_PUBLIC_LINKS=disabled` (Helm: `configuration.publicLinks: disabled`) and restart. `config check` reports the value as `publicLinks`. Any value other than `allowed` or `disabled` stops startup. Each server process reads the setting when it starts, so during a rolling deploy the old pods keep serving public links until they are replaced.
 
 While it is disabled:
 

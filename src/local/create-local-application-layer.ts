@@ -420,6 +420,19 @@ export function createApplicationLayer(
           try: () => adapters.repository.findArtifact(projectId, artifactId),
           catch: (cause) => repositoryFailure("findArtifact", cause),
         }),
+      findIdempotentAccessChange: (projectId, idempotencyKey, inputDigest) =>
+        Effect.tryPromise({
+          try: () =>
+            adapters.repository.findIdempotentAccessChange(
+              projectId,
+              idempotencyKey,
+              inputDigest,
+            ),
+          catch: (cause) =>
+            cause instanceof IdempotencyConflict
+              ? cause
+              : repositoryFailure("findIdempotentAccessChange", cause),
+        }),
       findArtifactForAdministration: (projectId, artifactId) =>
         Effect.tryPromise({
           try: () =>

@@ -273,7 +273,6 @@ function makePublishArtifactService(
     command: PublishPreparedNewArtifactCommand,
   ): Effect.fn.Return<PublishedVersion, PublishArtifactFailure> {
     yield* authorization.requireArtifactCreation(command.principal);
-    yield* authorization.requireAccessSettingAllowed(command.accessSetting);
     const name = yield* parseArtifactName(command.name);
     const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
     const tags = yield* parseArtifactTags(command.tags ?? []);
@@ -291,7 +290,10 @@ function makePublishArtifactService(
       idempotencyKey,
       inputDigest,
     );
+    // A retry of a create stored before an administrator disabled public
+    // links still learns its artifact ID; reads stay gated by the policy.
     if (replayed !== null) return replayed;
+    yield* authorization.requireAccessSettingAllowed(command.accessSetting);
 
     const sourceCheckTime = DateTime.formatIso(yield* dependencies.clock.now);
     yield* dependencies.repository.assertPublicationSourceReady(

@@ -44,6 +44,11 @@ const errorBodySchema = z.object({
   error: z.object({code: z.string(), message: z.string()}),
 });
 const artifactSchema = z.object({artifact: z.object({accessSetting: z.string()})});
+const replaySchema = z.object({
+  artifact: z.object({accessSetting: z.string(), id: z.string()}),
+  replayed: z.boolean(),
+});
+const mcpOpenSchema = z.object({browserUrl: z.url()});
 const treeSchema = z.object({artifacts: z.array(z.object({name: z.string()}))});
 const toolResultSchema = z.object({
   result: z.object({
@@ -177,10 +182,11 @@ async function changeAccess(
   installation: TestInstallation,
   artifact: {readonly id: string; readonly currentVersionId: string},
   accessSetting: string,
+  idempotencyKey = `auth-006-${randomUUID()}`,
 ): Promise<Response> {
   return fetch(`${server.baseUrl}/api/v1/artifacts/${artifact.id}/access`, {
     body: JSON.stringify({accessSetting, expectedCurrentVersionId: artifact.currentVersionId}),
-    headers: apiHeaders(installation, `auth-006-${randomUUID()}`),
+    headers: apiHeaders(installation, idempotencyKey),
     method: "PATCH",
   });
 }
@@ -290,23 +296,78 @@ describe("administrators can disable public links for an installation", () => {
     expect(restored).toEqual([200, 200, 200, 200]);
   });
 
-  test("AUTH-006-F: MCP, staged HTTP commits, access changes, and member sessions cannot bypass disabled public links, while making links private still works", async () => {
+  test("AUTH-006-F: MCP, staged HTTP commits, access changes, and member sessions cannot bypass disabled public links, retries of work stored before the switch still learn their result, and making links private still works", async () => {
     server = await startTestServer(installation, {browserAccess: noLogin});
     const planned = await createStagedUpload(server, installation, "index.html", [pageFile]);
     await uploadEveryStagedFile(installation, planned.body, [pageFile]);
+    const publicTarget = {
+      accessSetting: "public_link",
+      kind: "new_artifact",
+      name: "Shared before",
+    } as const;
     const published = await commitStagedUpload(
       installation,
       planned.body,
       "auth-006-f-public",
-      {accessSetting: "public_link", kind: "new_artifact", name: "Shared before"},
+      publicTarget,
     );
     expect(published.response.status).toBe(201);
     const privateArtifact = mcpPublishSchema.parse((await commitOverMcp(server, installation, {
       accessSetting: "account_required",
       name: "Private before",
     })).structured).artifact;
+    const switchedArtifact = mcpPublishSchema.parse((await commitOverMcp(server, installation, {
+      accessSetting: "account_required",
+      name: "Made public before",
+    })).structured).artifact;
+    const switched = await changeAccess(
+      server,
+      installation,
+      switchedArtifact,
+      "public_link",
+      "auth-006-f-access",
+    );
+    expect(switched.status).toBe(200);
 
     await restart("disabled", "localhost");
+
+    const replayedPublish = await commitStagedUpload(
+      installation,
+      planned.body,
+      "auth-006-f-public",
+      publicTarget,
+    );
+    expect({
+      body: replaySchema.parse(replayedPublish.body),
+      status: replayedPublish.response.status,
+    }).toEqual({
+      body: {
+        artifact: {accessSetting: "public_link", id: published.body.artifact.id},
+        replayed: true,
+      },
+      status: 200,
+    });
+    const replayedAccess = await changeAccess(
+      server,
+      installation,
+      switchedArtifact,
+      "public_link",
+      "auth-006-f-access",
+    );
+    expect({
+      body: replaySchema.parse(await replayedAccess.json()),
+      status: replayedAccess.status,
+    }).toEqual({
+      body: {
+        artifact: {accessSetting: "public_link", id: switchedArtifact.id},
+        replayed: true,
+      },
+      status: 200,
+    });
+    expect(await errorOf(await commitOverHttp(server, installation, {
+      accessSetting: "public_link",
+      name: "Refused after the switch",
+    }))).toEqual({...refusal, status: 403});
 
     const mcpCreate = await commitOverMcp(server, installation, {
       accessSetting: "public_link",
@@ -329,8 +390,29 @@ describe("administrators can disable public links for an installation", () => {
     expect(await errorOf(await changeAccess(server, installation, privateArtifact, "public_link")))
       .toEqual({...refusal, status: 403});
 
-    const anonymous = await fetchVersion(server, published.body.links.version);
-    expect(anonymous.status).toBe(401);
+    const anonymous = await Promise.all([
+      published.body.links.version,
+      published.body.links.artifact,
+    ].map(async (url) => (await fetchVersion(server, url)).status));
+    expect(anonymous).toEqual([401, 401]);
+
+    const opened = await callMcpTool(server, installation.apiToken, "artifact_open", {
+      artifactId: published.body.artifact.id,
+      versionId: published.body.version.id,
+    });
+    const openedExchange = await fetchVersion(
+      server,
+      mcpOpenSchema.parse(opened.structured).browserUrl,
+    );
+    const openedCookie = openedExchange.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+    const openedRead = await fetchVersion(
+      server,
+      published.body.links.version,
+      "GET",
+      {Cookie: openedCookie},
+    );
+    expect({body: await openedRead.text(), status: openedRead.status})
+      .toEqual({body: page, status: 200});
     const issued = await fetch(
       `${server.baseUrl}/api/v1/artifacts/${published.body.artifact.id}/content-sessions`,
       {headers: {Authorization: `Bearer ${installation.apiToken}`}, method: "POST"},
