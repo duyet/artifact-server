@@ -1,12 +1,13 @@
 import {Effect, Redacted} from "effect";
 
 import type {IssuedApplicationSession} from "../core/installation-identity.js";
-import {accessSettings, type ArtifactRecord} from "../core/model.js";
+import type {ArtifactRecord} from "../core/model.js";
 import {
   oidcFailureReports,
   type OidcSignIn,
   OidcSignInFailed,
 } from "../core/oidc-sign-in.js";
+import {AuthorizationService} from "./authorization.js";
 import {ContentAccessService} from "./content-access.js";
 import {identitySecretsEqual, InstallationAccessService} from "./installation-access.js";
 
@@ -158,7 +159,8 @@ const readableReturnArtifact = Effect.fn("readableReturnArtifact")(
       Redacted.make(issued.token, {label: "application-session"}),
     );
     const artifact = yield* content.resolveReadableArtifact(session.principal, artifactId);
-    return artifact.accessSetting === accessSettings.publicLink ? artifact : null;
+    const authorization = yield* AuthorizationService;
+    return authorization.isPubliclyReadable(artifact.accessSetting) ? artifact : null;
   },
   Effect.tapError((failed) =>
     Effect.logInfo("auth.oidc_sign_in.return_artifact_unreadable").pipe(

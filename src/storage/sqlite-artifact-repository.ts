@@ -1915,6 +1915,21 @@ export class SqliteArtifactRepository implements
     );
   }
 
+  findIdempotentAccessChange(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): Promise<ArtifactState | null> {
+    return Promise.resolve().then(() =>
+      this.#findIdempotentManagementResult(
+        projectId,
+        "change_access",
+        idempotencyKey,
+        inputDigest,
+      ),
+    );
+  }
+
   findVersionContent(
     contentToken: string,
     requestedPath: string,

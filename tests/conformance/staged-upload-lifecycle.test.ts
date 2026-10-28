@@ -57,6 +57,7 @@ describe("staged upload lifecycle", () => {
       installationId: "test-installation",
       localBootstrapCredential: null,
       protectBootstrapAdministrator: false,
+      publicLinks: "allowed",
       repository,
       staging,
     }));
@@ -134,6 +135,7 @@ describe("staged upload lifecycle", () => {
           installationId: "foreign-installation",
           localBootstrapCredential: null,
           protectBootstrapAdministrator: false,
+          publicLinks: "allowed",
           repository: foreignRepository,
           staging: new LocalStagingStore(path.join(dataDirectory, "foreign-staging")),
         }),

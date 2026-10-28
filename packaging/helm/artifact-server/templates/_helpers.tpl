@@ -171,6 +171,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   value: "external"
 - name: ARTIFACT_SERVER_STAGING_CLEANUP_SETTLE_DELAY_MS
   value: {{ .Values.cleanup.settleDelayMilliseconds | quote }}
+{{- with .Values.configuration.publicLinks }}
+- name: ARTIFACT_SERVER_PUBLIC_LINKS
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.configuration.helpUrl }}
 - name: ARTIFACT_SERVER_HELP_URL
   value: {{ . | quote }}

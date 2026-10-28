@@ -9,11 +9,18 @@ import {
   principalKinds,
   type Principal,
 } from "../core/identity.js";
-import type { ArtifactRecord } from "../core/model.js";
+import {
+  type AccessSetting,
+  accessSettings,
+  type ArtifactRecord,
+  isPubliclyReadable,
+  type PublicLinkPolicy,
+} from "../core/model.js";
 
 /** Configuration trusted by standalone authorization policy. */
 export interface AuthorizationDependencies {
   readonly installationId: string;
+  readonly publicLinks: PublicLinkPolicy;
 }
 
 /** Authorization decisions shared by every application operation. */
@@ -48,6 +55,12 @@ export interface AuthorizationOperations {
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireArtifactRead: (
     principal: Principal,
+  ) => Effect.Effect<void, AuthorizationDenied>;
+  /** {@link isPubliclyReadable} under this installation's public-link policy. */
+  readonly isPubliclyReadable: (accessSetting: AccessSetting) => boolean;
+  /** Fail when the public-link policy forbids giving an artifact this setting. */
+  readonly requireAccessSettingAllowed: (
+    accessSetting: AccessSetting,
   ) => Effect.Effect<void, AuthorizationDenied>;
   readonly requireCommentRead: (
     principal: Principal,
@@ -330,9 +343,22 @@ function makeAuthorizationService(
     yield* denied();
   });
 
+  const requireAccessSettingAllowed = (
+    accessSetting: AccessSetting,
+  ): Effect.Effect<void, AuthorizationDenied> =>
+    accessSetting === accessSettings.publicLink &&
+      !isPubliclyReadable(accessSetting, dependencies.publicLinks)
+      ? Effect.fail(new AuthorizationDenied({
+        message: "An administrator has disabled public links on this installation.",
+      }))
+      : Effect.void;
+
   return AuthorizationService.of({
     canManageArtifact: (principal, artifact) =>
       canManageArtifact(principal, artifact, dependencies.installationId),
+    isPubliclyReadable: (accessSetting) =>
+      isPubliclyReadable(accessSetting, dependencies.publicLinks),
+    requireAccessSettingAllowed,
     requireAgentConnection,
     requireDispatchSend,
     requireInstallationAdministration,

@@ -13,6 +13,7 @@ import {
 import type {BearerCredentialVerifier} from "../../src/application/authentication.js";
 import type {AssetQuota} from "../../src/core/asset-policy.js";
 import type {Clock} from "../../src/core/ports.js";
+import type {PublicLinkPolicy} from "../../src/core/model.js";
 import type {ViewerLogo} from "../../src/core/viewer-logo.js";
 import {localOwnerBrowserAccess} from "../../src/core/browser-access.js";
 import type {BrowserAccess} from "../../src/core/browser-access.js";
@@ -90,6 +91,7 @@ export async function startTestServer(
     readonly logo?: ViewerLogo;
     readonly observability?: boolean;
     readonly port?: number;
+    readonly publicLinks?: PublicLinkPolicy;
     readonly webAssetsRoot?: string;
   } = {},
 ): Promise<RunningTestServer> {
@@ -151,6 +153,9 @@ export async function startTestServer(
   }
   if (options.logo !== undefined) {
     config = {...config, logo: options.logo};
+  }
+  if (options.publicLinks !== undefined) {
+    config = {...config, publicLinks: options.publicLinks};
   }
   if (options.webAssetsRoot !== undefined) {
     config = {...config, webAssetsRoot: options.webAssetsRoot};

@@ -92,6 +92,7 @@ The server reads its settings from environment variables. These are the ones tha
 | `ARTIFACT_SERVER_OIDC_CLIENT_SECRET` | required with an issuer | The client secret. |
 | `ARTIFACT_SERVER_OIDC_SCOPES` | `openid email profile` | Space-separated scopes that include `openid`. |
 | `ARTIFACT_SERVER_OIDC_UNKNOWN_USERS` | `reject` | `reject` a verified email that names no member, or `admit` it as a new member. |
+| `ARTIFACT_SERVER_PUBLIC_LINKS` | `allowed` | `disabled` refuses every new public link and stops serving existing ones without an account. See [Disable public links](./docs/fork/RUNBOOK.md#disable-public-links). |
 | `ARTIFACT_SERVER_LOGO` | unset | The viewer bar logo: an `https://` URL, or an absolute path to an image file of at most 256 KiB. |
 | `ARTIFACT_SERVER_LOGO_ALT` | required with a logo | The logo's alternative text, 1 to 100 characters. |
 | `ARTIFACT_SERVER_LOGO_LINK` | unset | Where the logo links: an `https://` URL or a path such as `/`. |
@@ -101,7 +102,7 @@ The server reads its settings from environment variables. These are the ones tha
 
 External-storage mode (Postgres and S3) also reads `ARTIFACT_SERVER_DATABASE_URL`, `ARTIFACT_SERVER_INSTALLATION_ID`, `ARTIFACT_SERVER_API_TOKEN`, `ARTIFACT_SERVER_BOOTSTRAP_ADMIN_EMAIL`, and the `ARTIFACT_SERVER_S3_*` variables. The Helm chart sets those from its values. Each secret also accepts a `_FILE` variant, such as `ARTIFACT_SERVER_OIDC_CLIENT_SECRET_FILE`, that names a file holding the value. Setting both forms fails at startup.
 
-The Helm chart has values for the OIDC, logo, help, and asset quota variables. The OIDC client secret comes from a key of the runtime Secret. The chart accepts only the `https://` URL form of the logo. See the [chart README](./packaging/helm/artifact-server/README.md#oidc-sign-in-logo-help-link-and-asset-quota).
+The Helm chart has values for the OIDC, public link, logo, help, and asset quota variables. The OIDC client secret comes from a key of the runtime Secret. The chart accepts only the `https://` URL form of the logo. See the [chart README](./packaging/helm/artifact-server/README.md#oidc-sign-in-logo-help-link-and-asset-quota).
 
 Run `artifactserver config check` to see the parsed configuration before a rollout. The output names each secret's source and never its value.
 

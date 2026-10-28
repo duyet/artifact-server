@@ -1,4 +1,9 @@
-import {type AccessSetting, accessSettings} from "./model.js";
+import {
+  type AccessSetting,
+  accessSettings,
+  type PublicLinkPolicy,
+  publicLinkPolicies,
+} from "./model.js";
 import type {OidcSignIn} from "./oidc-sign-in.js";
 
 /** Browser access modes selected by an Artifact Server deployment entrypoint. */
@@ -50,9 +55,16 @@ export function oidcSignIn(browserAccess: BrowserAccess): OidcSignIn | null {
   return browserAccess.mode === browserAccessModes.privateTeam ? browserAccess.oidc : null;
 }
 
-/** The access setting a new artifact gets when its publisher names none. */
-export function defaultAccessSetting(browserAccess: BrowserAccess): AccessSetting {
-  return browserAccess.loginKind === browserLoginKinds.none
+/**
+ * The access setting a new artifact gets when its publisher names none:
+ * public with no browser login, unless the installation disables public links.
+ */
+export function defaultAccessSetting(
+  browserAccess: BrowserAccess,
+  publicLinks: PublicLinkPolicy,
+): AccessSetting {
+  return browserAccess.loginKind === browserLoginKinds.none &&
+      publicLinks === publicLinkPolicies.allowed
     ? accessSettings.publicLink
     : accessSettings.accountRequired;
 }

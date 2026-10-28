@@ -16,7 +16,6 @@ import {
 } from "../core/errors.js";
 import type { Principal } from "../core/identity.js";
 import {
-  accessSettings,
   type ArtifactPathMatch,
   type ArtifactRecord,
   type ContentBootstrapRecord,
@@ -386,10 +385,7 @@ function makeContentAccessService(
     );
     if (content === null) return null;
     yield* Effect.annotateCurrentSpan({"artifact.project.id": content.projectId});
-    if (
-      content.accessSetting === accessSettings.publicLink &&
-      content.isCurrent
-    ) {
+    if (authorization.isPubliclyReadable(content.accessSetting) && content.isCurrent) {
       return content;
     }
     if (command.sessionToken === null) {
@@ -440,7 +436,7 @@ function makeContentAccessService(
     yield* Effect.annotateCurrentSpan({
       "artifact.project.id": current.artifact.projectId,
     });
-    if (current.artifact.accessSetting !== accessSettings.publicLink) {
+    if (!authorization.isPubliclyReadable(current.artifact.accessSetting)) {
       return yield* sessionRequired();
     }
     return current;

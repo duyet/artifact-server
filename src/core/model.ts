@@ -9,6 +9,28 @@ export const accessSettings = {
 
 export type AccessSetting = (typeof accessSettings)[keyof typeof accessSettings];
 
+/** Whether an installation lets artifacts be read without an account. */
+export const publicLinkPolicies = {
+  allowed: "allowed",
+  disabled: "disabled",
+} as const;
+
+export type PublicLinkPolicy =
+  (typeof publicLinkPolicies)[keyof typeof publicLinkPolicies];
+
+/**
+ * Whether an artifact with this setting is served to anonymous readers. A
+ * disabled policy keeps the stored setting, so turning it back on restores
+ * every public link the administrator did not make private.
+ */
+export function isPubliclyReadable(
+  accessSetting: AccessSetting,
+  policy: PublicLinkPolicy,
+): boolean {
+  return accessSetting === accessSettings.publicLink &&
+    policy === publicLinkPolicies.allowed;
+}
+
 /** How a folder of the public tree starts when the home page loads. */
 export const folderDefaultStates = {
   collapsed: "collapsed",

@@ -17,6 +17,7 @@ import type {
   CollapsedFolderRepository,
 } from "../core/ports.js";
 import {
+  accessSettings,
   type ArtifactVersionDay,
   type ArtifactViewCounts,
   type ArtifactViewDay,
@@ -124,11 +125,10 @@ function makePublicArtifactCatalogService(
       const now = yield* dependencies.clock.now;
       const viewer = command.viewer;
       const scope = yield* catalogScopeFor(authorization, viewer);
-      const summaries = yield* readSummaries(
-        dependencies.repository,
-        command.limit,
-        scope,
-      );
+      const summaries = scope === catalogScopes.public &&
+          !authorization.isPubliclyReadable(accessSettings.publicLink)
+        ? []
+        : yield* readSummaries(dependencies.repository, command.limit, scope);
       const artifactIds = summaries.map((summary) => summary.id);
       const untilDay = dayOf(now);
       const sinceDay = dayOf(

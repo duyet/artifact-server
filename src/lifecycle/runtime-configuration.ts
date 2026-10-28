@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {Effect, Option, Redacted, Schema} from "effect";
 import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
+import {type PublicLinkPolicy, publicLinkPolicies} from "../core/model.js";
 import {getDomain} from "tldts";
 import {managedApiKeyCredentialPattern} from
   "../core/installation-identity.js";
@@ -120,6 +121,7 @@ export interface CompactRuntimeConfiguration {
   readonly logo: ViewerLogo | null;
   readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
+  readonly publicLinks: PublicLinkPolicy;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
   readonly stagingCleanupPolicy: StagingCleanupPolicy;
@@ -147,6 +149,7 @@ export interface ExternalStorageRuntimeConfiguration {
   readonly objectStorage: ObjectStorageProviderFactory;
   readonly oidcSignIn: OidcSignInConfiguration | null;
   readonly port: number;
+  readonly publicLinks: PublicLinkPolicy;
   readonly postgresMaxConnections: number;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
@@ -183,6 +186,7 @@ export interface RuntimeConfigurationSummary {
   readonly objectStorageProvider: "filesystem" | ObjectStorageProviderKind;
   readonly oidcSignIn: OidcSignInSummary | null;
   readonly port: number;
+  readonly publicLinks: PublicLinkPolicy;
   readonly readinessWithdrawalMilliseconds: number;
   readonly shutdownDeadlineMilliseconds: number;
   readonly stagingCleanup: StagingCleanupPolicy;
@@ -276,6 +280,7 @@ export const parseCompactRuntimeConfiguration = Effect.fn(
     logo: yield* parseViewerLogo(input.environment),
     oidcSignIn: yield* parseOidcSignIn(input.environment, applicationOrigin),
     port: yield* parsePort(input.port),
+    publicLinks: yield* parsePublicLinkPolicy(input.environment),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
       input.environment,
       "ARTIFACT_SERVER_READINESS_WITHDRAWAL_MS",
@@ -360,6 +365,16 @@ function parseChoice<const T extends string>(
     : Effect.succeed(choice);
 }
 
+function parsePublicLinkPolicy(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<PublicLinkPolicy, RuntimeConfigurationError> {
+  return parseChoice(
+    environment,
+    "ARTIFACT_SERVER_PUBLIC_LINKS",
+    [publicLinkPolicies.allowed, publicLinkPolicies.disabled],
+  );
+}
+
 /** Parse external-storage configuration and secret files without connecting. */
 export const parseExternalStorageRuntimeConfiguration = Effect.fn(
   "parseExternalStorageRuntimeConfiguration",
@@ -421,6 +436,7 @@ export const parseExternalStorageRuntimeConfiguration = Effect.fn(
     objectStorage: configuredObjectStorage.factory,
     oidcSignIn: yield* parseOidcSignIn(environment, applicationOrigin),
     port: yield* parsePort(input.port),
+    publicLinks: yield* parsePublicLinkPolicy(input.environment),
     postgresMaxConnections: yield* parsePostgresMaxConnections(environment),
     readinessWithdrawalMilliseconds: yield* parseMilliseconds(
       environment,
@@ -564,6 +580,7 @@ export function summarizeRuntimeConfiguration(
       objectStorageProvider: "filesystem",
       oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
       port: configuration.port,
+      publicLinks: configuration.publicLinks,
       readinessWithdrawalMilliseconds:
         configuration.readinessWithdrawalMilliseconds,
       shutdownDeadlineMilliseconds: configuration.shutdownDeadlineMilliseconds,
@@ -586,6 +603,7 @@ export function summarizeRuntimeConfiguration(
     objectStorageProvider: configuration.objectStorage.kind,
     oidcSignIn: summarizeOidcSignIn(configuration.oidcSignIn),
     port: configuration.port,
+    publicLinks: configuration.publicLinks,
     readinessWithdrawalMilliseconds:
       configuration.readinessWithdrawalMilliseconds,
     shutdownDeadlineMilliseconds: configuration.shutdownDeadlineMilliseconds,

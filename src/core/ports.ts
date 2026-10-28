@@ -646,6 +646,11 @@ export interface ArtifactRepository {
     idempotencyKey: string,
     inputDigest: string,
   ): Promise<PublishedVersion | null>;
+  findIdempotentAccessChange(
+    projectId: string,
+    idempotencyKey: string,
+    inputDigest: string,
+  ): Promise<ArtifactState | null>;
   findVersionContent(
     contentToken: string,
     path: string,

@@ -10,6 +10,7 @@ import {
 import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import type {Clock} from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
+import {type PublicLinkPolicy, publicLinkPolicies} from "../core/model.js";
 import type {ViewerLogo} from "../core/viewer-logo.js";
 import {SystemClock, SystemIdGenerator} from "../core/system.js";
 import {createHttpApp} from "../http/create-http-app.js";
@@ -73,6 +74,8 @@ export interface ExternalStorageRuntimeConfig {
   readonly logo?: ViewerLogo | null;
   readonly objectStorage: ObjectStorageProviderFactory;
   readonly postgresMaxConnections?: number;
+  /** Whether anonymous readers may open public links; absent allows them. */
+  readonly publicLinks?: PublicLinkPolicy;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly serviceVersion?: string;
   readonly stagingCleanupPolicy?: StagingCleanupPolicy;
@@ -142,6 +145,7 @@ export async function createExternalStorageRuntime(
       installationId: config.installationId,
       localBootstrapCredential: null,
       protectBootstrapAdministrator: false,
+      publicLinks: config.publicLinks ?? publicLinkPolicies.allowed,
       repository,
       staging,
       stagingCleanupPolicy,
@@ -180,6 +184,7 @@ export async function createExternalStorageRuntime(
       contentDomain: config.contentDomain,
       helpUrl: config.helpUrl ?? null,
       logo: config.logo ?? null,
+      publicLinks: config.publicLinks ?? publicLinkPolicies.allowed,
       readiness: () => externalStorageReadiness(database, connectedObjectStorage),
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(),

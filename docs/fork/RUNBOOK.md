@@ -317,6 +317,18 @@ The home page header and the bar above a page at its readable URL show **Sign in
 
 Any other value, such as an `http://` URL, `//host`, or a relative path, stops startup with the variable's name, and `config check` refuses it the same way. `config check` reports the value as `helpUrl`. The value is public: `/auth/context` reports it as `helpUrl` to every browser.
 
+### Disable public links
+
+A public link is not access control. Anyone who can reach the host can read a public artifact and find it on the home page. To turn public links off for the whole installation, set `ARTIFACT_SERVER_PUBLIC_LINKS=disabled` (Helm: `configuration.publicLinks: disabled`) and restart. `config check` reports the value as `publicLinks`. Any value other than `allowed` or `disabled` stops startup. Each server process reads the setting when it starts, so during a rolling deploy the old pods keep serving public links until they are replaced.
+
+While it is disabled:
+
+- A publish or access change that asks for `public_link`, over HTTP, MCP, or the CLI and from any key, is refused with `AUTHORIZATION_DENIED` (HTTP 403, or an MCP tool error) and the message "An administrator has disabled public links on this installation."
+- A publish that names no access setting gets `account_required`, even though this fork's servers have no browser login and would otherwise default to `public_link`.
+- Artifacts already set to `public_link` keep that setting but are no longer served without an account. Their path URLs, version links, and `/_blob` assets answer 401, and the anonymous home page is empty. Members still read them after signing in.
+
+Setting the variable back to `allowed` serves those artifacts publicly again. To make them private for good first, list them with `GET /api/v1/administration/public-links` and make them private with `POST /api/v1/administration/public-links/make-private`, or use **Public links** in the web app's settings (`/review/settings/public-links`). Copies already downloaded or kept by an outside cache cannot be recalled.
+
 ## Viewer logo
 
 Review's artifact viewer shows a 40px bar above each artifact with the installation's logo, the artifact name, an info button, and an actions menu. Without configuration, the bar shows the Artifact Server mark. To show your own logo, set these variables on the server and restart it:

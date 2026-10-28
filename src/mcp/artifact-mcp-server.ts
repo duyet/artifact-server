@@ -10,7 +10,7 @@ import {
   type ToolAnnotations,
   type ToolCallback,
 } from "@modelcontextprotocol/server";
-import {type Effect, Redacted} from "effect";
+import {Effect, Redacted} from "effect";
 import {z} from "zod";
 
 import {AgentDispatchService} from "../application/agent-dispatch.js";
@@ -27,6 +27,7 @@ import {
 } from "../application/artifact-comments.js";
 import {ArtifactAssetService} from "../application/artifact-assets.js";
 import {ArtifactManagementService} from "../application/artifact-management.js";
+import {AuthorizationService} from "../application/authorization.js";
 import {CheckArtifactAssetsService} from "../application/check-artifact-assets.js";
 import {CompareArtifactService} from "../application/compare-artifact.js";
 import {ContentAccessService} from "../application/content-access.js";
@@ -2697,13 +2698,19 @@ async function authorizedBrowserUrl(
   saved: ArtifactVersion,
   exactVersion: boolean,
 ): Promise<string> {
-  const details = await runMcpApplicationEffect(
+  const {details, publiclyReadable} = await runMcpApplicationEffect(
     dependencies,
-    ArtifactManagementService.use((management) =>
-      management.getArtifact({artifactId, principal, projectId})
-    ),
+    Effect.gen(function*() {
+      const management = yield* ArtifactManagementService;
+      const authorization = yield* AuthorizationService;
+      const found = yield* management.getArtifact({artifactId, principal, projectId});
+      return {
+        details: found,
+        publiclyReadable: authorization.isPubliclyReadable(found.artifact.accessSetting),
+      };
+    }),
   );
-  if (details.artifact.accessSetting === accessSettings.publicLink) {
+  if (publiclyReadable) {
     return exactVersion
       ? versionBrowserUrl(
         applicationUrl,

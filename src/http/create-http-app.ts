@@ -112,8 +112,10 @@ import {
   type CommentThreadRecord,
   type CommentThreadState,
   dispatchedThreadFilters,
+  isPubliclyReadable,
   type ManifestEntry,
   type PageCursor,
+  type PublicLinkPolicy,
   type PublishedVersion,
   type RegisteredAgentRecord,
   type VersionContent,
@@ -557,6 +559,8 @@ export interface HttpAppDependencies {
   readonly helpUrl: string | null;
   /** The viewer bar's logo, or null to show the product mark. */
   readonly logo: ViewerLogo | null;
+  /** Whether anonymous readers may open public links on this installation. */
+  readonly publicLinks: PublicLinkPolicy;
   readonly readiness?: ReadinessProbe;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly trustedApplicationOrigin: string | null;
@@ -608,7 +612,7 @@ export function createHttpApp(
     applicationOrigin: dependencies.trustedApplicationOrigin,
     applicationRuntime: dependencies.applicationRuntime,
     contentDomain: dependencies.contentDomain,
-    defaultAccessSetting: defaultAccessSetting(dependencies.browserAccess),
+    defaultAccessSetting: defaultAccessSetting(dependencies.browserAccess, dependencies.publicLinks),
     mode: dependencies.trustedApplicationOrigin === null ? "local" : "remote",
   });
   const boundedJsonBody = bodyLimit({
@@ -2681,7 +2685,7 @@ export function createHttpApp(
         ? {
           ...body.target,
           accessSetting: body.target.accessSetting
-            ?? defaultAccessSetting(dependencies.browserAccess),
+            ?? defaultAccessSetting(dependencies.browserAccess, dependencies.publicLinks),
           path: requestedArtifactPath(
             body.target.path,
             dependencies.contentDomain,
@@ -3884,7 +3888,8 @@ async function serveVersionContent(
     // branch because none of them carries the entry document.
     dependencies.artifactViews.record(content.artifactId);
   }
-  const publiclyCacheable = content.accessSetting === accessSettings.publicLink &&
+  const publiclyCacheable =
+    isPubliclyReadable(content.accessSetting, dependencies.publicLinks) &&
     content.isCurrent;
   const served = await serveStoredVersionContent(
     context,

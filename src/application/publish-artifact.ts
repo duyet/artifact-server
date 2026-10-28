@@ -290,7 +290,10 @@ function makePublishArtifactService(
       idempotencyKey,
       inputDigest,
     );
+    // A retry of a create stored before an administrator disabled public
+    // links still learns its artifact ID; reads stay gated by the policy.
     if (replayed !== null) return replayed;
+    yield* authorization.requireAccessSettingAllowed(command.accessSetting);
 
     const sourceCheckTime = DateTime.formatIso(yield* dependencies.clock.now);
     yield* dependencies.repository.assertPublicationSourceReady(
