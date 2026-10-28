@@ -3132,7 +3132,8 @@ requirements:
       behavior: {id: ARC-001-B, description: "Run core service tests with in-memory or fake ports and replace each provider through its documented adapter."}
       failure: {id: ARC-001-F, description: "A dependency-boundary test fails when core product code imports a concrete infrastructure provider or deployment framework."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: "tests/tooling/architecture-boundaries.test.ts holds ARC-001-F. It scans src/core, src/application, src/manifest, src/comparison, and src/asset-check, and allows only imports inside those directories plus effect (no subpath), node:crypto, node:path, parse5, and unicode-case-folding. The scan is a line-anchored import regex, not a parser. No test proves ARC-001-B: no core service test runs on in-memory or fake ports, and no test replaces each provider through its adapter."
     depends_on: []
     evidence: []
 
@@ -3197,7 +3198,8 @@ requirements:
       behavior: {id: ARC-006-B, description: "Execute equivalent list, open, publish, compare, restore, tag, share, and delete operations through every applicable adapter and observe equivalent identities, authorization, idempotency, audit, and result semantics."}
       failure: {id: ARC-006-F, description: "Dependency checks and hostile adapter tests fail when an MCP tool or CLI command duplicates product policy, bypasses application authorization, or claims access to a remote client path."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: "tests/tooling/architecture-boundaries.test.ts holds ARC-006-F for the dependency half only. It follows every relative import from src/http and src/mcp, and no reachable file may live in src/storage, src/local, src/external-storage, or src/cli, or import node:sqlite, pg, @effect/sql-pg, @aws-sdk, or effect/unstable/sql. HTTP content delivery still reads blobs through the BlobStore port without an application service. The check cannot see duplicated product policy inside an adapter, and no hostile adapter test covers a bypassed authorization or a claimed remote client path. CLI is not checked, because its lifecycle and local-server commands compose storage on purpose. No test proves ARC-006-B. Only cmt-012-comment-surface-parity compares adapters, and it covers comments only."
     depends_on: [ARC-001, ARC-002, ARC-005, MCP-009]
     evidence: []
 
