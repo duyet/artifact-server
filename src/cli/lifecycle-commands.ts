@@ -35,6 +35,7 @@ import {
   createLocalRuntime,
   type LocalRuntimeConfig,
 } from "../local/create-local-runtime.js";
+import {acquireDataDirectoryLock} from "../local/data-directory-lock.js";
 import {
   startLocalServer,
 } from "../local/start-local-server.js";
@@ -234,14 +235,19 @@ function configureCompactStart(program: Command, productVersion: string): void {
           port: options.port,
         }),
       );
-      const server = await startCompactServer(configuration, productVersion);
-      console.log(JSON.stringify({
-        deploymentMode: "compact",
-        hostname: server.hostname,
-        port: server.port,
-        status: "ready",
-      }));
-      await waitForProcessSignal(() => server.close());
+      const lock = acquireDataDirectoryLock(configuration.dataDirectory);
+      try {
+        const server = await startCompactServer(configuration, productVersion);
+        console.log(JSON.stringify({
+          deploymentMode: "compact",
+          hostname: server.hostname,
+          port: server.port,
+          status: "ready",
+        }));
+        await waitForProcessSignal(() => server.close());
+      } finally {
+        lock.release();
+      }
     });
 }
 
