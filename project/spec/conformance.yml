@@ -398,7 +398,7 @@ requirements:
       failure: {id: ART-011-F, description: "Reject a cursor from another ordering, preserve the selected Review when filtering hides it, and never reduce filtering or sorting to the artifacts already loaded in the browser."}
     deployments: *all
     status: implementing
-    proof_gap: Local SQLite and browser behavior plus provider-specific D1 and Postgres query paths must pass before this requirement can be marked verified.
+    proof_gap: Local SQLite and browser behavior plus the provider-specific Postgres query path must pass before this requirement can be marked verified.
     depends_on: [ART-002, ART-009, CMT-001]
     evidence: []
 
@@ -2199,7 +2199,7 @@ requirements:
       failure: {id: CMT-020-F, description: "A concurrent dispatch creation and comment deletion on SQLite or Postgres commits exactly one complete outcome: either the dispatch keeps an existing thread or deletion succeeds and dispatch creation is rejected."}
     deployments: *all
     status: behavior_verified
-    proof_gap: SQLite conformance evidence plus Postgres integration and D1 runtime qualification prove the deletion guard and atomic race behavior. Equivalent recorded evidence for every deployed-team target remains unrecorded.
+    proof_gap: SQLite conformance evidence plus Postgres integration prove the deletion guard and atomic race behavior. Equivalent recorded evidence for every deployed-team target remains unrecorded.
     depends_on: [CMT-008, CMT-011, DSP-003, DSP-007, PRS-005]
     evidence:
       - deployment: local
@@ -2739,7 +2739,7 @@ requirements:
       failure: {id: PRS-007-F, description: "A kind that is not a valid slug is refused with a validation failure and registers nothing."}
     deployments: [local]
     status: behavior_verified
-    proof_gap: Slug widening is exercised through HTTP against SQLite; the Postgres and D1 migrations that drop the kind CHECK constraint are covered by their runtime suites' registration paths but no dedicated widening test runs against external storage.
+    proof_gap: Slug widening is exercised through HTTP against SQLite; the Postgres migration that drops the kind CHECK constraint is covered by its runtime suite's registration path but no dedicated widening test runs against external storage.
     depends_on: [DSP-001]
     evidence:
       - deployment: local
@@ -3130,7 +3130,7 @@ requirements:
 
   - id: ARC-003
     kind: constraint
-    behavior: SQLite, D1, and Postgres share product behavior but keep separate migrations, indexes, and provider-appropriate optimized queries.
+    behavior: SQLite and Postgres share product behavior but keep separate migrations, indexes, and provider-appropriate optimized queries.
     owner: database-adapters
     source: {file: artifact-server-product-spec.html, anchor: architecture}
     acceptance:
@@ -3182,7 +3182,7 @@ requirements:
 
   - id: DEP-001
     kind: deployment
-    behavior: The same artifact, version, access, HTTP, and MCP contracts run on a laptop, one server, Kubernetes, Cloudflare, AWS, and GCP; Azure teams use the Kubernetes contract on AKS.
+    behavior: The same artifact, version, access, HTTP, and MCP contracts run on a laptop, one server, and Kubernetes.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
@@ -3195,7 +3195,7 @@ requirements:
 
   - id: DEP-002
     kind: deployment
-    behavior: Official installation surfaces are Artifact Server local commands, Docker Compose, Helm for any supported Kubernetes cluster including AKS, a direct Alchemy Cloudflare project, and direct Pulumi projects for AWS and GCP.
+    behavior: Official installation surfaces are Artifact Server local commands, the release OCI image run with a container runtime, and Helm for any supported Kubernetes cluster.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
@@ -3208,11 +3208,11 @@ requirements:
 
   - id: DEP-003
     kind: deployment
-    behavior: Artifact Server does not wrap infrastructure lifecycle tools; operators use Compose, Helm, Alchemy, or Pulumi directly while every package implements one shared input, output, secret, evidence, and product-probe contract.
+    behavior: Artifact Server does not wrap infrastructure lifecycle tools; operators use the container runtime or Helm directly while every package implements one shared input, output, secret, evidence, and product-probe contract.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
-      behavior: {id: DEP-003-B, description: "Preview, apply, inspect, and customize each complete native project while preserving the shared deployment outputs and product behavior."}
+      behavior: {id: DEP-003-B, description: "Preview, apply, inspect, and customize the release image and the Helm chart while preserving the shared deployment outputs and product behavior."}
       failure: {id: DEP-003-F, description: "The Artifact Server CLI cannot proxy an infrastructure plan, hold infrastructure state, reinterpret provider errors, or require a hidden generated project."}
     deployments: *all
     status: specified
@@ -3234,43 +3234,35 @@ requirements:
 
   - id: DEP-005
     kind: deployment
-    behavior: The one-server Compact Compose target runs exactly one container with SQLite and one persistent data directory, and it preserves complete installation state through restart, replacement, backup, and restore.
+    behavior: The one-server compact target runs the release image as exactly one container with SQLite and one persistent data directory, and it preserves complete installation state through restart, replacement, backup, and restore.
     owner: deployment
     source: {file: phase-6-packaging.md, anchor: compact-compose}
     acceptance:
-      behavior: {id: DEP-005-B, description: "Deploy Compact Compose, publish a file and complete site, restart and replace the container, back up the stopped volume, restore into a clean volume, and preserve all IDs, records, pointers, manifests, action attribution, access settings, and bytes."}
-      failure: {id: DEP-005-F, description: "Compact Compose rejects scaling, an ephemeral or uninitialized data path, bad permissions, missing generated secrets, invalid domain isolation, and incomplete identity-provider configuration without reporting ready."}
+      behavior: {id: DEP-005-B, description: "Run the compact image, publish a file and complete site, restart and replace the container, back up the stopped volume, restore into a clean volume, and preserve all IDs, records, pointers, manifests, action attribution, access settings, and bytes."}
+      failure: {id: DEP-005-F, description: "The compact target rejects scaling beyond one container, an ephemeral or uninitialized data path, bad permissions, missing generated secrets, invalid domain isolation, and incomplete identity-provider configuration without reporting ready."}
     deployments: [single_server]
-    status: behavior_verified
+    status: implementing
+    proof_gap: Its passing evidence came from the deleted Docker Compose suite (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves the image target; the one-container limit in DEP-005-F was enforced by the Compose file and nothing on the start-compact path enforces it now.
     depends_on: [OPS-003]
-    evidence:
-      - deployment: single_server
-        tests: [DEP-005-B, DEP-005-F]
-        result: pass
-        run: project/evidence/compact-compose.json
-        recorded_at: "2026-08-17T03:10:29.404Z"
+    evidence: []
 
   - id: DEP-020
     kind: deployment
-    behavior: External-storage Compose connects the production image to existing Postgres and object storage through a supported adapter, can run more than one application process, and stores no durable state on the application container filesystem.
+    behavior: The external-storage target connects the production image to existing Postgres and object storage through a supported adapter, can run more than one application process, and stores no durable state on the application container filesystem.
     owner: deployment
     source: {file: phase-6-packaging.md, anchor: external-storage-compose}
     acceptance:
-      behavior: {id: DEP-020-B, description: "Deploy External-storage Compose against real Postgres and object storage, replace every application container, and preserve IDs, records, pointers, manifests, action attribution, access settings, and bytes."}
-      failure: {id: DEP-020-F, description: "External-storage Compose rejects incomplete provider configuration, unavailable or incompatible providers, and schema mismatch without reporting ready; the released service contains no application-data mount or container-local fallback."}
+      behavior: {id: DEP-020-B, description: "Run the external-storage image against real Postgres and object storage, replace every application container, and preserve IDs, records, pointers, manifests, action attribution, access settings, and bytes."}
+      failure: {id: DEP-020-F, description: "The external-storage target rejects incomplete provider configuration, unavailable or incompatible providers, and schema mismatch without reporting ready; the released service contains no application-data mount or container-local fallback."}
     deployments: [single_server]
-    status: behavior_verified
+    status: implementing
+    proof_gap: Its passing evidence came from the deleted Docker Compose suite (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves the image target; the external-storage runtime suite covers the processes but not the release image.
     depends_on: [OPS-003, ARC-003]
-    evidence:
-      - deployment: single_server
-        tests: [DEP-020-B, DEP-020-F]
-        result: pass
-        run: project/evidence/external-storage-compose.json
-        recorded_at: "2026-08-17T03:12:03.334Z"
+    evidence: []
 
   - id: DEP-006
     kind: deployment
-    behavior: The Kubernetes target uses stateless application replicas, Postgres, durable native or S3-compatible blob storage, and no artifact data on pod-local filesystems.
+    behavior: The Kubernetes target uses stateless application replicas, Postgres, durable S3-compatible blob storage, and no artifact data on pod-local filesystems.
     owner: deployment
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
@@ -3288,7 +3280,7 @@ requirements:
 
   - id: DEP-011
     kind: constraint
-    behavior: The external runtime consumes one provider-neutral factory with immutable blob, staging, readiness, and shutdown capabilities; supported factories cover S3-compatible storage, native Google Cloud Storage, and Worker R2 without cloud SDK types entering product or protocol code. A native Azure Blob factory is available as preview and does not imply a supported Azure deployment.
+    behavior: The external runtime consumes one provider-neutral factory with immutable blob, staging, readiness, and shutdown capabilities; the supported factory covers S3-compatible storage without cloud SDK types entering product or protocol code.
     owner: blob-storage
     source: {file: artifact-server-product-spec.html, anchor: deployment}
     acceptance:
@@ -3319,7 +3311,7 @@ requirements:
 
   - id: DEP-022
     kind: constraint
-    behavior: The external runtime, lifecycle inspection, and integrity scanner depend only on the object-storage provider factory; AWS, Google, and Cloudflare SDK imports stay inside their provider adapters and deployment packages, while the preview Azure SDK stays inside its storage adapter.
+    behavior: The external runtime, lifecycle inspection, and integrity scanner depend only on the object-storage provider factory; AWS SDK imports stay inside the S3-compatible storage adapter.
     owner: blob-storage
     source: {file: decisions/0017-native-cloud-projects-and-storage-provider-boundary.md, anchor: decision}
     acceptance:
@@ -3358,7 +3350,7 @@ requirements:
       failure: {id: DEP-014-F, description: "A same-site application subdomain, invalid certificate, untrusted forwarded host, or path-only alias cannot be advertised as the supported isolation boundary."}
     deployments: *all
     status: implementing
-    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
+    proof_gap: No recorded run for the fork's deployments is attached.
     depends_on: [CNT-003, CNT-004]
     evidence: []
 
@@ -3381,7 +3373,7 @@ requirements:
     owner: deployment
     source: {file: phase-6-packaging.md, anchor: configuration-and-secrets}
     acceptance:
-      behavior: {id: DEP-016-B, description: "Start Compose and Kubernetes packages with mounted secret files behind a configured TLS proxy and resolve both the application and unique content hosts."}
+      behavior: {id: DEP-016-B, description: "Start the release image on one server and the Helm chart on Kubernetes with mounted secret files behind a configured TLS proxy and resolve both the application and unique content hosts."}
       failure: {id: DEP-016-F, description: "Conflicting direct and file credentials, unreadable secret files, untrusted forwarded hosts, invalid wildcard DNS or certificates, and incomplete provider configuration fail before the process reports ready."}
     deployments: [single_server, kubernetes]
     status: specified
@@ -3428,14 +3420,10 @@ requirements:
       behavior: {id: DEP-019-B, description: "Extract the archive into a clean directory, run its real launcher, publish and open a file, replace the program directory, restart against the same data, restore a stopped backup into an empty directory, and preserve artifact ID, version ID, pointer, and bytes."}
       failure: {id: DEP-019-F, description: "Building and running the extracted package cannot require Docker, pnpm, TypeScript, a source checkout, package-registry access, an external service, a development dependency, or a platform-specific native Node extension."}
     deployments: [local]
-    status: behavior_verified
+    status: not_applicable
+    rationale: Removed in this fork (docs/fork/SIMPLIFY.md, D6); the ID stays reserved. The fork ships no offline Node archive or launcher package; local use runs the CLI from a checkout, and the release ships only the OCI image and the Helm chart.
     depends_on: [DEP-004]
-    evidence:
-      - deployment: local
-        tests: [DEP-019-B, DEP-019-F]
-        result: pass
-        run: project/evidence/local-package.json
-        recorded_at: "2026-08-17T03:08:46.924Z"
+    evidence: []
 
   - id: OPS-001
     kind: behavior
@@ -3477,14 +3465,10 @@ requirements:
       behavior: {id: OPS-003-B, description: "Back up a populated deployment, restore it into a clean supported environment, and compare every required identity, pointer, record, and byte."}
       failure: {id: OPS-003-F, description: "Missing, mismatched, cross-installation, partially restored, or mutable data makes restore fail closed and prevents the target from reporting ready."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: Its passing evidence came from the Docker Compose suites that this fork deleted (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves it; it needs re-proving on the release image.
     depends_on: [ART-001, ART-004, AUD-001]
-    evidence:
-      - deployment: single_server
-        tests: [OPS-003-B, OPS-003-F]
-        result: pass
-        run: project/evidence/compact-compose.json
-        recorded_at: "2026-08-17T03:10:29.404Z"
+    evidence: []
 
   - id: OPS-004
     kind: behavior
@@ -3496,7 +3480,7 @@ requirements:
       failure: {id: OPS-004-F, description: "Detect missing blobs, digest mismatches, invalid paths, orphaned current pointers, and cross-installation references without repairing them silently."}
     deployments: *all
     status: implementing
-    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached. Foundation tests in the compact lifecycle CLI suite and the external-storage suite detect a missing manifest blob and a missing asset blob, but they are not attached under these IDs.
+    proof_gap: No recorded run for the fork's deployments is attached. Foundation tests in the compact lifecycle CLI suite and the external-storage suite detect a missing manifest blob and a missing asset blob, but they are not attached under these IDs.
     depends_on: [MAN-001, MAN-006]
     evidence: []
 
@@ -3510,7 +3494,7 @@ requirements:
       failure: {id: OPS-005-F, description: "A target lacking repeatable backup, restore, integrity, and recovery evidence cannot be marked team-ready or supported."}
     deployments: *external_storage
     status: implementing
-    proof_gap: The only recorded passing runs came from the AWS and GCP deployments, which this fork no longer ships, and no recorded run for the remaining deployments is attached.
+    proof_gap: No recorded run for the fork's deployments is attached.
     depends_on: [OPS-003, OPS-004]
     evidence: []
 
@@ -3583,11 +3567,11 @@ requirements:
     owner: operations
     source: {file: phase-6-packaging.md, anchor: shutdown-and-readiness}
     acceptance:
-      behavior: {id: OPS-010-B, description: "Terminate idle, reading, uploading, and committing containers during Compose and Kubernetes replacement and observe the documented durable result for every request."}
+      behavior: {id: OPS-010-B, description: "Terminate idle, reading, uploading, and committing containers during single-server container and Kubernetes replacement and observe the documented durable result for every request."}
       failure: {id: OPS-010-F, description: "A draining process cannot remain ready, accept unbounded new work, exceed the termination deadline, leak providers, or return a successful publish that disappears after exit."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: The external-storage suite sends SIGTERM to a compiled server process on Postgres and MinIO. OPS-010-B proves that readiness turns to draining while liveness stays up, that new connections are refused after the withdrawal interval, that an upload and a commit already in progress both finish, and that the process exits 0 with the committed version and its bytes served after a restart. OPS-010-F proves that a commit still open at the deadline is reset, saves no artifact or version, and that the process still exits 0 within the bound. Compose and Kubernetes rolling replacement, a real proxy or Service withdrawing the endpoint, idle and reading connections, a commit cut inside its database transaction, and telemetry flushing are not proved. Provider closing is shown only by the process exiting on its own.
+    proof_gap: The external-storage suite sends SIGTERM to a compiled server process on Postgres and MinIO. OPS-010-B proves that readiness turns to draining while liveness stays up, that new connections are refused after the withdrawal interval, that an upload and a commit already in progress both finish, and that the process exits 0 with the committed version and its bytes served after a restart. OPS-010-F proves that a commit still open at the deadline is reset, saves no artifact or version, and that the process still exits 0 within the bound. Single-server container replacement, Kubernetes rolling replacement, a real proxy or Service withdrawing the endpoint, idle and reading connections, a commit cut inside its database transaction, and telemetry flushing are not proved. Provider closing is shown only by the process exiting on its own.
     depends_on: [OPS-001, PUB-003, PUB-004]
     evidence: []
 
@@ -3619,7 +3603,7 @@ requirements:
 
   - id: REL-002
     kind: release_gate
-    behavior: The private-team first-release mode includes Compose, individual browser login, explicit member admission, scoped keys, Postgres and blob drivers, Kubernetes Helm, private multi-file delivery, backup, restore, upgrade, health, and the explicit server-operation route of the Artifact Server skill.
+    behavior: The private-team first-release mode includes the release image on one server, individual browser login, explicit member admission, scoped keys, Postgres and blob drivers, Kubernetes Helm, private multi-file delivery, backup, restore, upgrade, health, and the explicit server-operation route of the Artifact Server skill.
     owner: product-core
     source: {file: artifact-server-product-spec.html, anchor: implementation}
     acceptance:
@@ -3992,7 +3976,7 @@ requirements:
       failure: {id: EDT-001-F, description: "An edit naming a path absent from the base manifest, a missing upload, or an aborted transaction creates no version, and no stored version's bytes ever change."}
     deployments: *all
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server, covering the copied manifest, the replaced bytes, the unchanged base, the edited action, the replay, and absent-path, mismatched, extra-file, unknown-base, and unverified uploads saving nothing. On Postgres and S3, an in-process external-storage server proves the copied manifest, the replaced and unchanged bytes of a multi-file version with a binary file, the unchanged base, the one edited action, the replay, and an unknown base or an unverified upload saving nothing. A direct Postgres repository test calls the version commit that an edit also runs, past the application's readiness check, with one of two staged files verified, and the transaction itself refuses it as UploadIncomplete, saves no version, and leaves the upload open, so a racing commit cannot save a version with missing bytes. The absent-path, mismatched, and extra-file refusals run only on SQLite, that direct test commits an ordinary version rather than an edit, the D1 commit path compiles and passes the existing suites but no test runs an edit on it, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server, covering the copied manifest, the replaced bytes, the unchanged base, the edited action, the replay, and absent-path, mismatched, extra-file, unknown-base, and unverified uploads saving nothing. On Postgres and S3, an in-process external-storage server proves the copied manifest, the replaced and unchanged bytes of a multi-file version with a binary file, the unchanged base, the one edited action, the replay, and an unknown base or an unverified upload saving nothing. A direct Postgres repository test calls the version commit that an edit also runs, past the application's readiness check, with one of two staged files verified, and the transaction itself refuses it as UploadIncomplete, saves no version, and leaves the upload open, so a racing commit cannot save a version with missing bytes. The absent-path, mismatched, and extra-file refusals run only on SQLite, that direct test commits an ordinary version rather than an edit, and no deployed run exists.
     depends_on: [PUB-001, PUB-006, VER-001]
     evidence: []
 
@@ -4006,7 +3990,7 @@ requirements:
       failure: {id: EDT-002-F, description: "A save whose expected current version is stale returns the publish conflict shape with the actual current version and writes nothing; it never silently overwrites newer work."}
     deployments: *all
     status: implementing
-    proof_gap: The server half is proved locally against SQLite. Committed bytes keep a byte order mark and CRLF endings exactly, and a stale save is the 409 publish conflict naming the actual current version with nothing saved. That the web editor preserves the mark and line endings when it builds the bytes is the client helper's job in apps/web/src/artifact-actions and is not proved by this ID. On Postgres and S3, an in-process external-storage server proves the same server half, with the mark and CRLF endings kept exactly and the stale save refused with nothing saved. D1 and deployed runs are unproved.
+    proof_gap: The server half is proved locally against SQLite. Committed bytes keep a byte order mark and CRLF endings exactly, and a stale save is the 409 publish conflict naming the actual current version with nothing saved. That the web editor preserves the mark and line endings when it builds the bytes is the client helper's job in apps/web/src/artifact-actions and is not proved by this ID. On Postgres and S3, an in-process external-storage server proves the same server half, with the mark and CRLF endings kept exactly and the stale save refused with nothing saved. Deployed runs are unproved.
     depends_on: [EDT-001]
     evidence: []
 
@@ -4020,7 +4004,7 @@ requirements:
       failure: {id: EDT-003-F, description: "An edit of a binary media type or an oversize text entry is rejected, and no MCP tool accepts edited file contents as an argument."}
     deployments: *all
     status: implementing
-    proof_gap: Proved locally against SQLite. Markdown, plain text at exactly the 1 MiB bound, and JSON commit with hash-matching bytes; binary, text over binary, and one byte over the bound are 422; MCP capabilities advertise the bound with no edit tool and artifact_commit_upload refuses an edit target against a real staged upload. Postgres, D1, and deployed runs are unproved.
+    proof_gap: Proved locally against SQLite. Markdown, plain text at exactly the 1 MiB bound, and JSON commit with hash-matching bytes; binary, text over binary, and one byte over the bound are 422; MCP capabilities advertise the bound with no edit tool and artifact_commit_upload refuses an edit target against a real staged upload. Postgres and deployed runs are unproved.
     depends_on: [EDT-001, MAN-001]
     evidence: []
 
@@ -4237,7 +4221,7 @@ requirements:
       failure: {id: FRK-008-F, description: "HEAD, an asset, a 404, a readable-path miss that cannot fall back, a Review lease, and the home shell at / add nothing, a private artifact is never counted, one entry GET lands exactly one row, a burst larger than one drain chunk lands exactly once per artifact, and the stored row carries only artifact id, day, and count."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server with temporary disk storage, including the buffered drain, the day boundary, a burst larger than one chunk, an SPA client-route fallback counting as one view, the home shell at / never counting, and every request shape that must not count. The Postgres migration 0013 and the D1 table run only in CI with Docker, the browser captures run only in CI, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server with temporary disk storage, including the buffered drain, the day boundary, a burst larger than one chunk, an SPA client-route fallback counting as one view, the home shell at / never counting, and every request shape that must not count. The Postgres migration 0013 runs only in CI with Docker, the browser captures run only in CI, and no deployed run exists.
     depends_on: [CNT-001]
     evidence: []
 
@@ -4265,7 +4249,7 @@ requirements:
       failure: {id: FRK-010-F, description: "An unknown owner scope is 422, a principal who only published a later version owns nothing, and a schema-14 database upgrades with each owner taken from its first version's publisher and a null name rather than a guessed one."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server, including the schema-14 upgrade. The Postgres migration 0015 and its owner filter run only in CI with Docker, the D1 columns and filter compile and pass the existing Cloudflare runtime suite but no D1 test asserts the owner or the backfill, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server, including the schema-14 upgrade. The Postgres migration 0015 and its owner filter run only in CI with Docker, and no deployed run exists.
     depends_on: [FRK-008, PUB-001]
     evidence: []
 
@@ -4349,7 +4333,7 @@ requirements:
       failure: {id: FRK-011-F, description: "A deleted artifact leaves every total, the series, and the ranking, its own report is 404, an artifact read through another project is 404, an empty project reports zeros, and a key without artifact read access is 403 on both reports."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server. The external-storage suite now runs the Postgres aggregate queries through a pinned-clock in-process server and reads the same totals, sparse series, today counts, average, ranking, one artifact's windows, a deleted artifact leaving every count, and its 404. That suite runs only in CI with Docker, and it does not run the foreign-project 404, the empty project, or the 403 key on Postgres. The D1 aggregate queries compile and lint but no test executes them, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server. The external-storage suite now runs the Postgres aggregate queries through a pinned-clock in-process server and reads the same totals, sparse series, today counts, average, ranking, one artifact's windows, a deleted artifact leaving every count, and its 404. That suite runs only in CI with Docker, and it does not run the foreign-project 404, the empty project, or the 403 key on Postgres. No deployed run exists.
     depends_on: [FRK-008, FRK-010]
     evidence: []
 
@@ -4363,7 +4347,7 @@ requirements:
       failure: {id: FRK-012-F, description: "A stale expected version is 409 ARTIFACT_MUTATION_CONFLICT, a reused key with another name is 409 IDEMPOTENCY_CONFLICT, a blank name and a missing key are 422, a deleted artifact is 404, and none of them changes the name or records an action."}
     deployments: [local, single_server, kubernetes]
     status: implementing
-    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The external-storage suite now runs a rename on Postgres after migration 0016, over HTTP with surrounding spaces and over MCP, so search finds the new name and not the old one, the current version is unchanged, two renamed actions are recorded newest first, and the first key replays the name it set with replayed true; a stale expected version is 409 ARTIFACT_MUTATION_CONFLICT and a reused key with another name is 409 IDEMPOTENCY_CONFLICT, and neither changes the name or records an action. It runs only in CI with Docker and does not cover a blank name, a missing key, or a deleted artifact on Postgres. The D1 table rebuilds and rename compile and pass the existing suites but no test runs a rename on them, and no deployed run exists.
+    proof_gap: Proved locally against SQLite over a real server and the MCP endpoint, including rebuilding an idempotency table from before renames with its records and triggers. The external-storage suite now runs a rename on Postgres after migration 0016, over HTTP with surrounding spaces and over MCP, so search finds the new name and not the old one, the current version is unchanged, two renamed actions are recorded newest first, and the first key replays the name it set with replayed true; a stale expected version is 409 ARTIFACT_MUTATION_CONFLICT and a reused key with another name is 409 IDEMPOTENCY_CONFLICT, and neither changes the name or records an action. It runs only in CI with Docker and does not cover a blank name, a missing key, or a deleted artifact on Postgres. No deployed run exists.
     depends_on: [FRK-010, ARC-006]
     evidence: []
 

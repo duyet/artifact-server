@@ -20,7 +20,7 @@ This repository is a fork of [plannotator/artifact-server](https://github.com/pl
 - **Review app changes.** Rename, duplicate, and edit one text file of an artifact, read project analytics, search with a command palette, and switch between light, dark, and system themes.
 - **Releases on GHCR.** A `vX.Y.Z` tag publishes the container image and the Helm chart. See [the runbook](./docs/fork/RUNBOOK.md#release).
 
-The fork also removes upstream parts that it does not run: the Cloudflare and Pulumi deployments, the Azure Blob and Google Cloud Storage adapters, upstream's hosted sign-in, Git history, linked artifacts, the Docker Compose and npm launcher packages, and the docs site. [SIMPLIFY.md](./docs/fork/SIMPLIFY.md) proposes more deletions. Nothing in it is done yet.
+The fork also removes upstream parts that it does not run: the Cloudflare and Pulumi deployments, the Azure Blob and Google Cloud Storage adapters, upstream's hosted sign-in, Git history, linked artifacts, the Docker Compose and npm launcher packages, and the docs site. [SIMPLIFY.md](./docs/fork/SIMPLIFY.md) records the plan for those deletions.
 
 ## Quick start
 
