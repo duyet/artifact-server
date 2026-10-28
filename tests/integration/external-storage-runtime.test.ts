@@ -33,7 +33,7 @@ import type {IssueOperatorKeyCommand} from
 import {createExternalStorageRuntime} from
   "../../src/external-storage/create-external-storage-runtime.js";
 import {checkExternalStorageIntegrity} from
-  "../../src/lifecycle/integrity-check.js";
+  "../../src/external-storage/check-external-storage-integrity.js";
 import {defaultStagingCleanupPolicy} from
   "../../src/lifecycle/staging-cleanup.js";
 import type {ArtifactViewDrainReport} from
