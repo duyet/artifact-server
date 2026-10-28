@@ -54,6 +54,7 @@ import {
   sha256,
 } from "../support/assets.js";
 import {MutableClock} from "../support/agent-dispatch.js";
+import {defineArtifactRepositoryContract} from "../support/artifact-repository-contract.js";
 import {
   type FakeOidcPerson,
   startFakeOidcProvider,
@@ -559,6 +560,21 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       await database.close();
     }
   });
+
+  defineArtifactRepositoryContract(
+    "external-storage foundation: Postgres repository contract",
+    async () => {
+      const database = await PostgresDatabase.open({
+        maxConnections: 2,
+        url: Redacted.make(environment.databaseUrl),
+      }, "validate");
+      const repository = await PostgresArtifactRepository.open(
+        database,
+        `repository-contract-${randomUUID()}`,
+      );
+      return {repository, close: () => database.close()};
+    },
+  );
 
   test("a populated Postgres v1 installation migrates without changing identity or bytes", async () => {
     const databaseName = `artifactserver_project_migration_${randomUUID().replaceAll("-", "")}`;
