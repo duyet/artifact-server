@@ -1141,8 +1141,9 @@ requirements:
       behavior: {id: AUTH-007-B, description: "Change a public artifact to account required and verify origin denial, configured purge, and the product warning."}
       failure: {id: AUTH-007-F, description: "A stale public cache key cannot obtain a fresh origin response after the change, and the interface never promises recall of external copies."}
     deployments: *all
-    status: specified
+    status: implementing
     depends_on: [AUTH-003]
+    proof_gap: "The tests run against a local SQLite server only. They prove the access-change warning text and that, after the change, the version link, the path URL, their files, and the /_blob asset answer anonymous GET, HEAD, conditional (exact, weak, and * ETag), and range requests with 401 and no public cache header. There is no purge: src has no cache-purge code and the fork ships no CDN configuration, so the configured-purge clause is unproved. Current public page bytes are sent as public, no-cache, must-revalidate, so a shared cache that honors the header revalidates instead of needing a purge; no real CDN sits in the test path. /_blob assets are sent as public, max-age=31536000, immutable, and docs/fork/ASSETS.md says a cached copy keeps working after a visibility change, so a shared cache can keep serving asset bytes without asking the origin. The web warnings (apps/web/src/review/review-share.tsx, apps/web/src/review/settings-public-links.tsx) and the MCP access tool's warning are not asserted here; AUTH-018 asserts the administrator bulk route's warning."
     evidence: []
 
   - id: AUTH-008
