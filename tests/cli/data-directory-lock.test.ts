@@ -151,13 +151,16 @@ describe("a maintenance command alongside a running server", () => {
     expect((await runCli([
       "init", "--admin-email", "admin@example.test", "--data", dataDirectory,
     ])).exitCode).toBe(0);
-    const port = await availablePort();
-    const server = startCli(compactStart(dataDirectory, port), compactEnvironment);
-    await waitForOutput(server, '"status":"ready"');
     const issueKey = (name: string) => runCli([
       "admin", "issue-key", "--email", `${name}@example.test`, "--name", name,
       "--data", dataDirectory,
     ], compactEnvironment);
+    expect((await issueKey("before-start")).exitCode).toBe(0);
+    expect(schemaVersion(databasePath)).toBe(requiredSqliteSchemaVersion);
+
+    const port = await availablePort();
+    const server = startCli(compactStart(dataDirectory, port), compactEnvironment);
+    await waitForOutput(server, '"status":"ready"');
 
     const alongsideCurrent = await issueKey("alongside");
     expect(alongsideCurrent.exitCode).toBe(0);
