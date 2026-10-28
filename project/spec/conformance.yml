@@ -580,7 +580,8 @@ requirements:
       behavior: {id: PUB-005-B, description: "Commit a publish and observe all database records and the current pointer together after every blob exists."}
       failure: {id: PUB-005-F, description: "Inject failures before and during the transaction and confirm that no partial visible version or dangling current pointer exists."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: "tests/conformance/pub-005-atomic-publish.test.ts proves PUB-005-B and PUB-005-F on local SQLite through real HTTP. One publish adds exactly one row to artifacts, artifact_tags, versions, manifest_entries, actions, idempotency_records, and staged_uploads, joined on the current pointer and the sealed upload. A trigger refuses, one at a time, the artifact insert, tag insert, version insert, manifest-entry insert, current-pointer update, action insert, idempotency insert, and upload seal, for a new artifact and (minus the artifact and tag inserts) a new version. Each refused commit returns 500 and leaves every row of those tables unchanged, so no orphan version, entry, action, idempotency result, pointer move, path claim, or seal survives. The same key on the same upload then commits once as a fresh publish with the next version number, and replays its IDs. A stale expectedCurrentVersionId returns 409 and changes nothing. An external-storage foundation test in tests/integration/external-storage-runtime.test.ts runs the same refusals and the stale case against real Postgres. Mutations checked: SQLite ROLLBACK changed to COMMIT, and Postgres commitNewArtifact or commitVersion run without withTransaction, each turn the tests red. Gaps: refusals are statement-level errors only, with no process kill or connection loss inside the transaction. The edit path shares commitVersion but has no refusal case of its own. Failures before the transaction are covered for the blob write only (see ARC-004)."
     depends_on: [PUB-004, MAN-001, AUD-001]
     evidence: []
 
@@ -3173,7 +3174,8 @@ requirements:
       behavior: {id: ARC-004-B, description: "Inject a failure after every publish step and recover to either no committed version or one complete immutable version."}
       failure: {id: ARC-004-F, description: "No failure point may expose a committed version with a missing or mutable referenced blob."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: "tests/conformance/pub-005-atomic-publish.test.ts proves ARC-004-B and ARC-004-F on local SQLite and local disk through real HTTP. A regular file placed where a blob's shard directory belongs makes the blob write fail for a new artifact and a new version. Both commits fail with no artifact, version, entry, action, idempotency, pointer, or seal row, and the same keys commit once the shard is freed. A transaction refused after the blob write leaves only the content-addressed blob and no manifest entry names it. After every successful step, each manifest entry names a blob on disk whose bytes hash to its sha256 and match its size. Publishing identical bytes under a new key leaves the committed blob's inode, mtime, and bytes unchanged. Mutations checked: moving the blob write after the record commit fails the blob-failure case, and replacing link with rename in LocalBlobStore.put fails the inode check. Gaps: the staging and verify steps are not failed separately here (PUB-001 and the staged-upload tests cover them). No case kills the process between the blob write and the transaction or during a blob write. The S3 blob adapter and Postgres records have no blob-failure or ordering case; the Postgres foundation test covers transaction refusals only."
     depends_on: [PUB-001, PUB-005]
     evidence: []
 
