@@ -1294,8 +1294,9 @@ requirements:
       behavior: {id: AUTH-016-B, description: "Inspect cache behavior for private and public fixtures and observe private no-store or private handling and immutable public keys."}
       failure: {id: AUTH-016-F, description: "An unauthenticated viewer cannot receive private bytes from a shared cache populated by another viewer."}
     deployments: *external_storage
-    status: specified
+    status: implementing
     depends_on: [AUTH-015]
+    proof_gap: "The tests run against a local SQLite server, not single_server or kubernetes. The headers come from the shared createHttpApp (src/http/create-http-app.ts contentHeaders), which the external-storage runtime also builds (src/external-storage/create-external-storage-runtime.ts), but no Postgres and MinIO run exists. No real CDN sits in the path: the shared cache is an in-test model of the RFC 9111 storage, freshness, and revalidation rules. The current public version is sent as public, no-cache, must-revalidate rather than immutable, so a shared cache revalidates every reuse; only the version URL and the ETag (the file's SHA-256) are immutable. File download, media preview, and archive headers are asserted by CMT-013, PRV-003, and CMT-021, not here."
     evidence: []
 
   - id: AUTH-017
