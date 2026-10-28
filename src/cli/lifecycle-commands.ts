@@ -33,9 +33,13 @@ import {
 } from "../lifecycle/support-manifest.js";
 import {
   createLocalRuntime,
+  type LocalRuntime,
   type LocalRuntimeConfig,
 } from "../local/create-local-runtime.js";
-import {acquireDataDirectoryLock} from "../local/data-directory-lock.js";
+import {
+  acquireDataDirectoryLock,
+  DataDirectoryInUseError,
+} from "../local/data-directory-lock.js";
 import {
   startLocalServer,
 } from "../local/start-local-server.js";
@@ -43,6 +47,7 @@ import {membershipRoles, type MembershipRole} from "../core/identity.js";
 import type {OidcSignIn} from "../core/oidc-sign-in.js";
 import {createOidcProvider} from "../identity/oidc-provider.js";
 import {PostgresDatabase} from "../storage/postgres-database.js";
+import {readSqliteMigrationStatus} from "../storage/sqlite-schema.js";
 import {runCliEffect} from "./run-cli-effect.js";
 import {waitForProcessSignal} from "./wait-for-process-signal.js";
 import {
@@ -120,7 +125,7 @@ function configureMaintenance(program: Command): void {
     .action(async (options: CleanupStagingOptions) => {
       const configuration = await lifecycleConfiguration(options);
       const runtime = configuration.deploymentMode === "compact"
-        ? await createLocalRuntime(compactMaintenanceConfig(configuration))
+        ? await openCompactMaintenanceRuntime(configuration)
         : await createExternalStorageRuntime(
           externalMaintenanceConfig(configuration),
         );
@@ -167,7 +172,7 @@ function configureAdministration(program: Command): void {
     .action(async (options: IssueOperatorKeyOptions) => {
       const configuration = await lifecycleConfiguration(options);
       const runtime = configuration.deploymentMode === "compact"
-        ? await createLocalRuntime(compactMaintenanceConfig(configuration))
+        ? await openCompactMaintenanceRuntime(configuration)
         : await createExternalStorageRuntime(
           externalMaintenanceConfig(configuration),
         );
@@ -461,6 +466,50 @@ async function lifecycleConfiguration(
       port: options.port,
     }))
     : parseExternalConfiguration(options.host, options.port);
+}
+
+// Opening the runtime migrates SQLite. A current schema opens alongside a
+// running server; an older one is raised only while this process holds the
+// data-directory lock, so a newer CLI never strands an older running server.
+async function openCompactMaintenanceRuntime(
+  configuration: CompactRuntimeConfiguration,
+): Promise<LocalRuntime> {
+  const config = compactMaintenanceConfig(configuration);
+  const {compatibility} = readSqliteMigrationStatus(
+    path.join(configuration.dataDirectory, "artifact-server.db"),
+  );
+  if (compatibility === "current" || compatibility === "newer") {
+    return createLocalRuntime(config);
+  }
+  const lock = acquireMigrationLock(configuration.dataDirectory);
+  try {
+    const runtime = await createLocalRuntime(config);
+    return {
+      ...runtime,
+      close: async () => {
+        try {
+          await runtime.close();
+        } finally {
+          lock.release();
+        }
+      },
+    };
+  } catch (error) {
+    lock.release();
+    throw error;
+  }
+}
+
+function acquireMigrationLock(dataDirectory: string) {
+  try {
+    return acquireDataDirectoryLock(dataDirectory);
+  } catch (error) {
+    if (!(error instanceof DataDirectoryInUseError)) throw error;
+    throw new Error(
+      `A running Artifact Server is using ${dataDirectory} with an older schema. Stop it before running this newer command; nothing was changed.`,
+      {cause: error},
+    );
+  }
 }
 
 function compactMaintenanceConfig(

@@ -13,6 +13,9 @@ export interface DataDirectoryLock {
   release(): void;
 }
 
+/** Another process already holds the data-directory lock. */
+export class DataDirectoryInUseError extends Error {}
+
 /**
  * Hold an exclusive lock on the data directory for this server process.
  *
@@ -33,7 +36,7 @@ export function acquireDataDirectoryLock(dataDirectory: string): DataDirectoryLo
     database.close();
     const parsed = sqliteErrorSchema.safeParse(error);
     if (parsed.success && parsed.data.errcode === sqliteBusyCode) {
-      throw new Error(
+      throw new DataDirectoryInUseError(
         `Another Artifact Server process is already serving ${resolved}. Stop it before starting a new one; this process changed nothing.`,
         {cause: error},
       );
