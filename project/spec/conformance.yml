@@ -3893,7 +3893,8 @@ requirements:
       behavior: {id: KAN-001-B, description: "Read a fresh project's board and receive the four fixed columns empty; the same board answers every subsequent read."}
       failure: {id: KAN-001-F, description: "A card naming an unknown column is rejected, and no operation can create a second board or a new column."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [PRJ-002]
     evidence: []
 
@@ -3906,7 +3907,8 @@ requirements:
       behavior: {id: KAN-002-B, description: "Create and edit cards at every documented bound and read each stored field back unchanged."}
       failure: {id: KAN-002-F, description: "An oversize title or description, a ninth label, a duplicate case-folded label, paused outside in-progress, and a fifty-first attachment are each rejected without a partial write."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [KAN-001]
     evidence: []
 
@@ -3919,7 +3921,8 @@ requirements:
       behavior: {id: KAN-003-B, description: "Edit two different cards from two clients concurrently and observe both succeed; edit one card twice from the same revision and observe the second receive a conflict carrying the current card."}
       failure: {id: KAN-003-F, description: "A mutation without the expected revision or with a stale revision cannot change the card, and a conflicting update leaves exactly one winner recorded."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [KAN-001]
     evidence: []
 
@@ -3932,7 +3935,8 @@ requirements:
       behavior: {id: KAN-004-B, description: "Move cards within and across columns using before-card targets and read back dense, unique positions in every column."}
       failure: {id: KAN-004-F, description: "A move naming a before-card in a different column or an unknown card is rejected, and concurrent moves never leave duplicate or gapped positions."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [KAN-001]
     evidence: []
 
@@ -3945,7 +3949,8 @@ requirements:
       behavior: {id: KAN-005-B, description: "Attach artifacts to a card, delete one artifact, and read the card back valid with that attachment marked unavailable."}
       failure: {id: KAN-005-F, description: "Attaching an artifact from another project or installation is rejected as not found, and deleting a card never deletes or alters an artifact."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [KAN-001, ART-004]
     evidence: []
 
@@ -3958,7 +3963,8 @@ requirements:
       behavior: {id: KAN-006-B, description: "Read and mutate the board as an admitted member and as a board-write service key, and inspect action records naming the responsible principal and card."}
       failure: {id: KAN-006-F, description: "Anonymous and public-link callers are denied all board access, a read-only key is denied every mutation, and identifiers from another project answer not found without disclosure."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [KAN-001, AUTH-008, AUD-001]
     evidence: []
 
@@ -3971,7 +3977,8 @@ requirements:
       behavior: {id: KAN-007-B, description: "Drive equivalent board operations through HTTP and MCP, replay a create with its client-supplied card ID and identical fields to receive the original card, and poll changes with a since time."}
       failure: {id: KAN-007-F, description: "MCP and HTTP cannot answer differently for the same principal, a replayed create ID with different fields is a conflict, and a poll resuming from its previous start time cannot miss a change."}
     deployments: *all
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. The board comes from the upstream local-workspace spec, no code for it exists here, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The ID stays reserved and is not reused.
     depends_on: [KAN-001, ARC-006]
     evidence: []
 
