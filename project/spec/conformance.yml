@@ -3146,7 +3146,8 @@ requirements:
       behavior: {id: ARC-002-B, description: "Exercise each port through provider-neutral product inputs and outputs across at least two adapter implementations."}
       failure: {id: ARC-002-F, description: "Contract checks reject an adapter or caller that requires provider-specific types, credentials, or query syntax outside the adapter."}
     deployments: *all
-    status: specified
+    status: implementing
+    proof_gap: "tests/tooling/architecture-boundaries.test.ts holds ARC-002-F for provider SDKs and SQLite raw SQL only. Outside src/storage, no file under src may import node:sqlite, pg, @effect/sql-pg, @aws-sdk, or effect/unstable/sql, or call .prepare(. src/local/data-directory-lock.ts may import node:sqlite and nothing else from that list, because it opens an empty SQLite file only as a kernel file lock. The scan is a line-anchored regex, not a parser, so it cannot see a provider handle passed in by value. Composition code still constructs concrete adapters outside src/storage, and that is allowed. src/cli/lifecycle-commands.ts calls PostgresDatabase.inspect and PostgresDatabase.open and reads readSqliteMigrationStatus. src/lifecycle/runtime-inspection.ts imports PostgresDatabase. The check does not cover bucket names, cookie APIs, or credentials. No test proves ARC-002-B: no port runs one shared contract suite across two adapter implementations."
     depends_on: [ARC-001]
     evidence: []
 
