@@ -3241,14 +3241,10 @@ requirements:
       behavior: {id: DEP-005-B, description: "Run the compact image, publish a file and complete site, restart and replace the container, back up the stopped volume, restore into a clean volume, and preserve all IDs, records, pointers, manifests, action attribution, access settings, and bytes."}
       failure: {id: DEP-005-F, description: "The compact target rejects scaling beyond one container, an ephemeral or uninitialized data path, bad permissions, missing generated secrets, invalid domain isolation, and incomplete identity-provider configuration without reporting ready."}
     deployments: [single_server]
-    status: behavior_verified
+    status: implementing
+    proof_gap: Its passing evidence came from the deleted Docker Compose suite (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves the image target; the one-container limit in DEP-005-F was enforced by the Compose file and nothing on the start-compact path enforces it now.
     depends_on: [OPS-003]
-    evidence:
-      - deployment: single_server
-        tests: [DEP-005-B, DEP-005-F]
-        result: pass
-        run: project/evidence/compact-compose.json
-        recorded_at: "2026-08-17T03:10:29.404Z"
+    evidence: []
 
   - id: DEP-020
     kind: deployment
@@ -3259,14 +3255,10 @@ requirements:
       behavior: {id: DEP-020-B, description: "Run the external-storage image against real Postgres and object storage, replace every application container, and preserve IDs, records, pointers, manifests, action attribution, access settings, and bytes."}
       failure: {id: DEP-020-F, description: "The external-storage target rejects incomplete provider configuration, unavailable or incompatible providers, and schema mismatch without reporting ready; the released service contains no application-data mount or container-local fallback."}
     deployments: [single_server]
-    status: behavior_verified
+    status: implementing
+    proof_gap: Its passing evidence came from the deleted Docker Compose suite (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves the image target; the external-storage runtime suite covers the processes but not the release image.
     depends_on: [OPS-003, ARC-003]
-    evidence:
-      - deployment: single_server
-        tests: [DEP-020-B, DEP-020-F]
-        result: pass
-        run: project/evidence/external-storage-compose.json
-        recorded_at: "2026-08-17T03:12:03.334Z"
+    evidence: []
 
   - id: DEP-006
     kind: deployment
@@ -3473,14 +3465,10 @@ requirements:
       behavior: {id: OPS-003-B, description: "Back up a populated deployment, restore it into a clean supported environment, and compare every required identity, pointer, record, and byte."}
       failure: {id: OPS-003-F, description: "Missing, mismatched, cross-installation, partially restored, or mutable data makes restore fail closed and prevents the target from reporting ready."}
     deployments: *all
-    status: behavior_verified
+    status: implementing
+    proof_gap: Its passing evidence came from the Docker Compose suites that this fork deleted (docs/fork/SIMPLIFY.md, D5), so no test that still exists proves it; it needs re-proving on the release image.
     depends_on: [ART-001, ART-004, AUD-001]
-    evidence:
-      - deployment: single_server
-        tests: [OPS-003-B, OPS-003-F]
-        result: pass
-        run: project/evidence/compact-compose.json
-        recorded_at: "2026-08-17T03:10:29.404Z"
+    evidence: []
 
   - id: OPS-004
     kind: behavior
