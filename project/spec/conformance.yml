@@ -1129,8 +1129,9 @@ requirements:
       behavior: {id: AUTH-006-B, description: "Disable public links and confirm that new and existing artifacts cannot be made or remain publicly readable under server policy."}
       failure: {id: AUTH-006-F, description: "Members, agents, API keys, and Plannotator cannot bypass the administrator's public-link policy."}
     deployments: *all
-    status: specified
+    status: implementing
     depends_on: [AUTH-003]
+    proof_gap: "ARTIFACT_SERVER_PUBLIC_LINKS=disabled is proved against local SQLite servers restarted on one data directory. The tests prove that config parsing defaults to allowed and refuses other values; that existing public artifacts keep their stored public_link setting but their path URL, version link, nested file, /_blob asset, and anonymous tree entry stop answering anonymous readers, and come back when the policy is allowed again; that HTTP staged commits, MCP commits, the HTTP access route, and the MCP visibility tool refuse public_link with 403 AUTHORIZATION_DENIED; that the no-login default becomes account_required over HTTP and MCP; that a member content session still reads the artifact with private, no-store; and that making a link private still works. The CLI is not driven here; it publishes through the same HTTP commit. Every request uses the bootstrap API key; no member session key or narrower managed key is tried. Plannotator has no publishing surface in this server, so there is nothing of it to bypass. The web UI still offers the public option and shows the refusal, and HTTP and MCP responses may still name a public URL in links.artifact for an artifact that is no longer served. The Helm value is checked by verify-helm-chart.sh only. No Postgres or deployed run exists."
     evidence: []
 
   - id: AUTH-007
@@ -4197,7 +4198,7 @@ requirements:
 
   - id: FRK-005
     kind: behavior
-    behavior: When the browser login kind is none, new artifacts published over HTTP, MCP, or the CLI without an access setting default to public_link; with login on, the default stays account_required.
+    behavior: When the browser login kind is none, new artifacts published over HTTP, MCP, or the CLI without an access setting default to public_link unless the administrator has disabled public links (AUTH-006); with login on, or with public links disabled, the default stays account_required.
     owner: publishing
     source: {file: ../../docs/fork/DESIGN.md, anchor: no-login-mode}
     acceptance:

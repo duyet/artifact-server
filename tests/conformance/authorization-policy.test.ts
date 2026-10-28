@@ -16,7 +16,10 @@ describe("authorization policy", () => {
 
   beforeEach(async () => {
     runtime = ManagedRuntime.make(Layer.mergeAll(
-      AuthorizationService.layer({installationId: "installation-a"}),
+      AuthorizationService.layer({
+        installationId: "installation-a",
+        publicLinks: "allowed",
+      }),
     ));
     await runtime.context();
   });

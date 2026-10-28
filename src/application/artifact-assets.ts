@@ -27,7 +27,6 @@ import {
 } from "../core/errors.js";
 import type { Principal } from "../core/identity.js";
 import {
-  accessSettings,
   type ArtifactRecord,
   type AssetRecord,
   type AssetUsage,
@@ -495,7 +494,7 @@ function makeArtifactAssetService(
       if (served === null) {
         return yield* new AssetNotFound({message: "The asset does not exist."});
       }
-      if (served.accessSetting !== accessSettings.publicLink) {
+      if (!authorization.isPubliclyReadable(served.accessSetting)) {
         return yield* new ContentSessionRequired({
           message: "The asset belongs to an artifact that is not public.",
         });

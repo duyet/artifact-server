@@ -51,6 +51,7 @@ describe("content access lifecycle", () => {
       installationId: "test-installation",
       localBootstrapCredential: null,
       protectBootstrapAdministrator: false,
+      publicLinks: "allowed",
       repository,
       staging: new LocalStagingStore(path.join(dataDirectory, "staging")),
     }));

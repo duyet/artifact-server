@@ -580,6 +580,7 @@ function makeArtifactManagementService(
       );
       const artifact = yield* requireArtifact(project.id, command.artifactId);
       yield* authorization.requireArtifactOwnership(command.principal, artifact);
+      yield* authorization.requireAccessSettingAllowed(command.accessSetting);
       const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
       const createdAt = DateTime.formatIso(yield* dependencies.clock.now);
       return yield* dependencies.repository.changeAccessSetting({

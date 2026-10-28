@@ -12,6 +12,7 @@ import {
 import {type AssetQuota, defaultAssetQuota} from "../core/asset-policy.js";
 import type { Clock } from "../core/ports.js";
 import type {BrowserAccess} from "../core/browser-access.js";
+import {type PublicLinkPolicy, publicLinkPolicies} from "../core/model.js";
 import type {ViewerLogo} from "../core/viewer-logo.js";
 import { SystemClock, SystemIdGenerator } from "../core/system.js";
 import { createHttpApp } from "../http/create-http-app.js";
@@ -74,6 +75,8 @@ export interface LocalRuntimeConfig {
   /** The viewer bar's logo; absent or null shows the product mark. */
   readonly logo?: ViewerLogo | null;
   readonly observability?: boolean;
+  /** Whether anonymous readers may open public links; absent allows them. */
+  readonly publicLinks?: PublicLinkPolicy;
   readonly runtimeLifecycle?: RuntimeLifecycle;
   readonly installationId?: string;
   readonly serviceVersion?: string;
@@ -101,6 +104,7 @@ export async function createLocalRuntime(
   const staging = new LocalStagingStore(path.join(config.dataDirectory, "staging"));
   const databasePath = path.join(config.dataDirectory, "artifact-server.db");
   const installationId = config.installationId ?? "local";
+  const publicLinks = config.publicLinks ?? publicLinkPolicies.allowed;
   const runtimeClock = config.clock ?? new SystemClock();
   const stagingCleanupPolicy = config.stagingCleanupPolicy ??
     defaultStagingCleanupPolicy;
@@ -157,6 +161,7 @@ export async function createLocalRuntime(
       }),
     protectBootstrapAdministrator:
       config.browserAccess.mode === browserAccessModes.localOwner,
+    publicLinks,
     repository,
     staging,
     stagingCleanupPolicy,
@@ -186,6 +191,7 @@ export async function createLocalRuntime(
       contentDomain: config.contentDomain,
       helpUrl: config.helpUrl ?? null,
       logo: config.logo ?? null,
+      publicLinks,
       trustedApplicationOrigin: config.applicationOrigin ?? null,
       webAssets: createNodeWebAssetStore(config.webAssetsRoot),
     };

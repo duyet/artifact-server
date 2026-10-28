@@ -121,7 +121,7 @@ import type {
 } from "../core/ports.js";
 import type {IdentityRepository} from "../core/identity-ports.js";
 import type {AssetQuota} from "../core/asset-policy.js";
-import type { ManifestEntry } from "../core/model.js";
+import type { ManifestEntry, PublicLinkPolicy } from "../core/model.js";
 import {randomBase64Url} from "../core/random.js";
 import { FileVerificationError } from "../storage/verified-file.js";
 import {defaultStagingCleanupPolicy} from
@@ -144,6 +144,7 @@ export interface ApplicationAdapters {
   readonly ids: IdGenerator;
   readonly identityRepository: IdentityRepository;
   readonly installationId: string;
+  readonly publicLinks: PublicLinkPolicy;
   readonly localBootstrapCredential: Redacted.Redacted | null;
   readonly protectBootstrapAdministrator: boolean;
   readonly repository: ArtifactRepository &
@@ -896,6 +897,7 @@ export function createApplicationLayer(
   ).pipe(Layer.provideMerge(identityLayer));
   const authorizationLayer = AuthorizationService.layer({
     installationId: adapters.installationId,
+    publicLinks: adapters.publicLinks,
   });
   const projectLayer = ProjectManagementService.layer(projectDependencies).pipe(
     Layer.provideMerge(authorizationLayer),

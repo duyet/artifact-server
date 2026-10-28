@@ -273,6 +273,7 @@ function makePublishArtifactService(
     command: PublishPreparedNewArtifactCommand,
   ): Effect.fn.Return<PublishedVersion, PublishArtifactFailure> {
     yield* authorization.requireArtifactCreation(command.principal);
+    yield* authorization.requireAccessSettingAllowed(command.accessSetting);
     const name = yield* parseArtifactName(command.name);
     const idempotencyKey = yield* parseIdempotencyKey(command.idempotencyKey);
     const tags = yield* parseArtifactTags(command.tags ?? []);

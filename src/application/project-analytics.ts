@@ -17,7 +17,6 @@ import {
 } from "../core/errors.js";
 import type {Principal} from "../core/identity.js";
 import {
-  accessSettings,
   type ArtifactRecord,
   type ArtifactViewCounts,
   type ArtifactViewDay,
@@ -232,7 +231,7 @@ function makeProjectAnalyticsService(
   const readPublicArtifactActivity = Effect.fn(
     "ProjectAnalyticsService.readPublicArtifactActivity",
   )(function*(artifact: ArtifactRecord) {
-    if (artifact.accessSetting !== accessSettings.publicLink) {
+    if (!authorization.isPubliclyReadable(artifact.accessSetting)) {
       return yield* new ArtifactNotFound({message: "The artifact does not exist."});
     }
     return yield* readViews(artifact.id);
