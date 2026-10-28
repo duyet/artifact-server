@@ -413,6 +413,7 @@ describe.sequential("production OCI image", () => {
   test("DEP-005-F: the compact image refuses a second container, ephemeral or uninitialized data, bad permissions, missing secrets, and invalid configuration", async () => {
     const runtime = amd64Runtime(ociEnvironment());
     const nameSuffix = resourceSuffix();
+    const uninitialized = "The compact installation could not be read.";
     const network = await createNetwork(`artifact-server-oci-refusal-${nameSuffix}`);
     const volume = await createVolume(`artifact-server-oci-refusal-${nameSuffix}`);
     await initializeCompactVolume(runtime, volume);
@@ -424,13 +425,13 @@ describe.sequential("production OCI image", () => {
       runtime,
       volume,
     });
-    const secondContainer = await expectStartRefused({
+    await expectStartRefused({
       arguments: compactStartArguments(runtime, volume),
       containerName: `artifact-server-oci-refusal-second-${nameSuffix}`,
       network,
+      reason: "Another Artifact Server process is already serving",
       runtime,
     });
-    expect(secondContainer).toContain("Another Artifact Server process is already serving");
     expect(await isReady(firstPort)).toBe(true);
     await docker(["kill", firstName]);
     await removeContainer(firstName);
@@ -458,6 +459,7 @@ describe.sequential("production OCI image", () => {
       ],
       containerName: `artifact-server-oci-refusal-ephemeral-${nameSuffix}`,
       network,
+      reason: uninitialized,
       runtime,
     });
     const uninitializedVolume = await createVolume(
@@ -467,6 +469,7 @@ describe.sequential("production OCI image", () => {
       arguments: compactStartArguments(runtime, uninitializedVolume),
       containerName: `artifact-server-oci-refusal-uninitialized-${nameSuffix}`,
       network,
+      reason: uninitialized,
       runtime,
     });
 
@@ -475,6 +478,7 @@ describe.sequential("production OCI image", () => {
       containerName: `artifact-server-oci-refusal-domain-${nameSuffix}`,
       environment: {ARTIFACT_SERVER_CONTENT_DOMAIN: "content.example.com"},
       network,
+      reason: "The application and published content must use different registrable domains.",
       runtime,
     });
     await expectStartRefused({
@@ -482,6 +486,7 @@ describe.sequential("production OCI image", () => {
       containerName: `artifact-server-oci-refusal-identity-${nameSuffix}`,
       environment: {ARTIFACT_SERVER_OIDC_ISSUER: "https://identity.example.test"},
       network,
+      reason: "ARTIFACT_SERVER_OIDC_CLIENT_ID is required.",
       runtime,
     });
 
@@ -496,6 +501,7 @@ describe.sequential("production OCI image", () => {
       arguments: compactStartArguments(runtime, secretVolume),
       containerName: `artifact-server-oci-refusal-secret-${nameSuffix}`,
       network,
+      reason: "The generated secret file for ARTIFACT_SERVER_API_TOKEN cannot be read.",
       runtime,
     });
 
@@ -506,6 +512,7 @@ describe.sequential("production OCI image", () => {
       arguments: compactStartArguments(runtime, deniedVolume),
       containerName: `artifact-server-oci-refusal-denied-${nameSuffix}`,
       network,
+      reason: uninitialized,
       runtime,
     });
   });
@@ -513,6 +520,7 @@ describe.sequential("production OCI image", () => {
   test("OPS-003-F: a compact restore that is unfinished, missing bytes, or holding changed bytes never reports ready", async () => {
     const runtime = amd64Runtime(ociEnvironment());
     const nameSuffix = resourceSuffix();
+    const incompleteRestore = "The compact data directory contains an incomplete restore.";
     const network = await createNetwork(`artifact-server-oci-restore-${nameSuffix}`);
     const sourceVolume = await createVolume(`artifact-server-oci-restore-source-${nameSuffix}`);
     await initializeCompactVolume(runtime, sourceVolume);
@@ -539,13 +547,13 @@ describe.sequential("production OCI image", () => {
       `artifact-server-oci-restore-unfinished-${nameSuffix}`,
     );
     await restoreCompactVolume(runtime, backupDirectory, unfinishedVolume);
-    const unfinished = await expectStartRefused({
+    await expectStartRefused({
       arguments: compactStartArguments(runtime, unfinishedVolume),
       containerName: `artifact-server-oci-restore-unfinished-${nameSuffix}`,
       network,
+      reason: incompleteRestore,
       runtime,
     });
-    expect(unfinished).toContain("incomplete restore");
 
     const missingVolume = await createVolume(`artifact-server-oci-restore-missing-${nameSuffix}`);
     await restoreCompactVolume(runtime, backupDirectory, missingVolume);
@@ -564,6 +572,7 @@ describe.sequential("production OCI image", () => {
       arguments: compactStartArguments(runtime, missingVolume),
       containerName: `artifact-server-oci-restore-missing-${nameSuffix}`,
       network,
+      reason: incompleteRestore,
       runtime,
     });
 
@@ -581,6 +590,7 @@ describe.sequential("production OCI image", () => {
       arguments: compactStartArguments(runtime, changedVolume),
       containerName: `artifact-server-oci-restore-changed-${nameSuffix}`,
       network,
+      reason: incompleteRestore,
       runtime,
     });
   });
@@ -690,8 +700,9 @@ async function expectStartRefused(input: {
   readonly containerName: string;
   readonly environment?: Readonly<Record<string, string>>;
   readonly network: string;
+  readonly reason: string;
   readonly runtime: ImageRuntime;
-}): Promise<string> {
+}): Promise<void> {
   await startContainer({
     architecture: input.runtime.architecture,
     arguments: input.arguments,
@@ -705,7 +716,7 @@ async function expectStartRefused(input: {
   await removeContainer(input.containerName);
   expect({exitCode: state.exitCode, output}).not.toMatchObject({exitCode: 0});
   expect(output).not.toContain('"status":"ready"');
-  return output;
+  expect(output).toContain(input.reason);
 }
 
 async function waitForExit(
