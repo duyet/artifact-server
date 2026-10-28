@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import {readFile, rm, stat, writeFile} from "node:fs/promises";
+import {readdir, readFile, rm, stat, writeFile} from "node:fs/promises";
 import path from "node:path";
 import {DatabaseSync} from "node:sqlite";
 
@@ -234,6 +234,7 @@ describe("atomic publication and its blob-before-record order", () => {
 
     await rm(shard);
     await rm(versionShard);
+    await expectOnlyContentAddressedBlobs();
     const recovered = await publishBody(
       await commit(blockedUpload, "order-blocked-create", blockedTarget),
     );
@@ -260,6 +261,7 @@ describe("atomic publication and its blob-before-record order", () => {
     expect(orphaned.status).toBe(500);
     await orphaned.arrayBuffer();
     expect(snapshot()).toEqual(beforeOrphan);
+    await expectOnlyContentAddressedBlobs();
     expect(await readFile(blobPath(orphanContent), "utf8")).toBe(orphanContent);
     expect(readRows(
       "SELECT count(*) AS count FROM manifest_entries WHERE sha256 = ?",
@@ -315,6 +317,20 @@ describe("atomic publication and its blob-before-record order", () => {
   function blobPath(content: string): string {
     const digest = sha256(content);
     return path.join(installation.dataDirectory, "blobs", digest.slice(0, 2), digest);
+  }
+
+  /** Every file under the blob root sits at its own digest, with no partial write left. */
+  async function expectOnlyContentAddressedBlobs(): Promise<void> {
+    const root = path.join(installation.dataDirectory, "blobs");
+    const files = await readdir(root, {recursive: true, withFileTypes: true});
+    const blobs = files.filter((entry) => !entry.isDirectory());
+    expect(blobs.length).toBeGreaterThan(0);
+    await Promise.all(blobs.map(async (entry) => {
+      const relative = path.relative(root, path.join(entry.parentPath, entry.name));
+      const bytes = await readFile(path.join(root, relative));
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      expect(relative).toBe(path.join(digest.slice(0, 2), digest));
+    }));
   }
 
   async function expectEveryEntryHasItsBlob(): Promise<void> {
