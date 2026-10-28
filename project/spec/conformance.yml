@@ -2890,7 +2890,8 @@ requirements:
       behavior: {id: PLN-001-B, description: "An Artifact Server administrator opens Plannotator, signs in, selects one organization, approves, and sees a healthy connection in both products."}
       failure: {id: PLN-001-F, description: "A second organization, non-administrator, replayed callback, wrong server, and connection-claim race cannot create or take over the connection."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [AUTH-001]
     evidence: []
 
@@ -2903,7 +2904,8 @@ requirements:
       behavior: {id: PLN-002-B, description: "Trace pairing and managed operations and observe only connection identity and short-lived signed requests at Artifact Server."}
       failure: {id: PLN-002-F, description: "Credential scanning finds no Plannotator or WorkOS user credential in Artifact Server records, logs, storage, or content."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-001]
     evidence: []
 
@@ -2916,7 +2918,8 @@ requirements:
       behavior: {id: PLN-003-B, description: "Complete a managed publish and review and confirm that each record, including each product's own comments, is stored only by its owning system with stable cross-references."}
       failure: {id: PLN-003-F, description: "Artifact Server does not create a second organization, workspace, workspace membership, workspace comment, notification, or review-state record."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-001, ART-001, VER-001]
     evidence: []
 
@@ -2929,7 +2932,8 @@ requirements:
       behavior: {id: PLN-004-B, description: "Pair one organization and two projects, publish through Artifact Server and Plannotator, and observe one stable installation and project identity for each paired project."}
       failure: {id: PLN-004-F, description: "Another organization, installation, connection, project, guessed ID, stale binding, and conflicting existing-project binding cannot claim, cross, or duplicate the paired project."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PRJ-002, PLN-003]
     evidence: []
 
@@ -2942,7 +2946,8 @@ requirements:
       behavior: {id: PLN-005-B, description: "Reference and review a project artifact from two workspaces and retain stable installation, project, artifact, exact version, workspace, and actor references."}
       failure: {id: PLN-005-F, description: "Moving, unfiling, deleting, or changing visibility of a workspace cannot move, delete, or retarget the project artifact or version."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-004]
     evidence: []
 
@@ -2955,7 +2960,8 @@ requirements:
       behavior: {id: PLN-006-B, description: "Authorize project publish, list, read, compare, visibility, and exact workspace-reference reads with minimum claims and five-minute-or-shorter expiry."}
       failure: {id: PLN-006-F, description: "Reject wrong signature, issuer, audience, connection, installation, project, workspace context, actor, operation, artifact, version, time, and replayed request ID."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-001, PLN-005]
     evidence: []
 
@@ -2968,7 +2974,8 @@ requirements:
       behavior: {id: PLN-007-B, description: "Execute each delegated mutation and observe the connection, project, optional referring workspace, external actor, artifact, version, operation, and outcome in audit evidence."}
       failure: {id: PLN-007-F, description: "A Plannotator-signed request cannot bypass installation or project policy, operation scope, or action logging."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-006, AUD-001, AUTH-008]
     evidence: []
 
@@ -2981,7 +2988,8 @@ requirements:
       behavior: {id: PLN-008-B, description: "Authorize in Plannotator, consume the one-use URL as a top-level page, remove it from the clean URL, and load all exact-version assets."}
       failure: {id: PLN-008-F, description: "Replay, expiration, another user, project, workspace context, artifact, version, host, or iframe-only cookie path cannot gain access."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-006, AUTH-014, AUTH-015]
     evidence: []
 
@@ -2994,7 +3002,8 @@ requirements:
       behavior: {id: PLN-009-B, description: "Compare stored bytes, normal responses, downloads, manifests, and explicit review responses and observe the bridge only in review HTML."}
       failure: {id: PLN-009-F, description: "Review mode cannot alter stored bytes, fingerprints, exact-version identity, normal caching, non-HTML files, or later normal requests."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-008, ART-004]
     evidence: []
 
@@ -3007,7 +3016,8 @@ requirements:
       behavior: {id: PLN-010-B, description: "Identify route, selected text, and selected element and exchange the allowed message schema within one review session."}
       failure: {id: PLN-010-F, description: "Hostile artifact JavaScript, wrong origin, wrong session, malformed message, replay, service worker, CSP, and expired session cannot impersonate the bridge or obtain authority."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-009, SEC-001]
     evidence: []
 
@@ -3020,7 +3030,8 @@ requirements:
       behavior: {id: PLN-011-B, description: "Comment on version 12, publish version 13, and reopen the comment against unchanged version 12 with its route and anchor."}
       failure: {id: PLN-011-F, description: "Current-version movement, restore, rename, disconnect, or later publication cannot silently retarget the comment to different bytes."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-010, VER-001]
     evidence: []
 
@@ -3033,7 +3044,8 @@ requirements:
       behavior: {id: PLN-012-B, description: "Rotate keys without interrupting valid in-flight work, disconnect, and observe new operations and renewals stop with complete audit records."}
       failure: {id: PLN-012-F, description: "Old keys after overlap, revoked connection, wrong organization or project, stale connection state, and replayed approval cannot authorize work."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-001, PLN-006, AUD-001]
     evidence: []
 
@@ -3046,7 +3058,8 @@ requirements:
       behavior: {id: PLN-013-B, description: "Connect a server with existing projects and artifacts, confirm no changes, then explicitly pair one existing project while preserving every ID and link."}
       failure: {id: PLN-013-F, description: "Connection, reconnect, disconnect, workspace changes, name conflicts, and failed pairing cannot silently expose, duplicate, move, retarget, archive, or lose a project artifact."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-004, PLN-005]
     evidence: []
 
@@ -3059,7 +3072,8 @@ requirements:
       behavior: {id: PLN-017-B, description: "Open one referenced artifact version from private, organization-gated, link-view, and link-edit workspaces through the approved narrow session without exposing the project list."}
       failure: {id: PLN-017-F, description: "Workspace access, including public and link-edit access, cannot list the project library or publish, restore, change visibility, delete, or open an unreferenced artifact or version."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-005, PLN-006, PLN-008]
     evidence: []
 
@@ -3072,7 +3086,8 @@ requirements:
       behavior: {id: PLN-014-B, description: "Connect through direct reachability and the selected private route while exposing only the paired Artifact Server service."}
       failure: {id: PLN-014-F, description: "Pairing never changes firewall rules, creates a general network proxy, exposes another service, or makes an account-required artifact public."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-001, SEC-002]
     evidence: []
 
@@ -3085,7 +3100,8 @@ requirements:
       behavior: {id: PLN-015-B, description: "Interrupt each component, observe explicit connection state, retain artifact references, and recover without re-pairing when allowed."}
       failure: {id: PLN-015-F, description: "Outage, reconnect, duplicate delivery, and stale health cannot create unauthorized operations, silent secondary copies, or lost IDs."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-012, PLN-014]
     evidence: []
 
@@ -3098,7 +3114,8 @@ requirements:
       behavior: {id: PLN-016-B, description: "Record the bridge decision with conformance evidence or pass the same review suite through the browser-extension fallback."}
       failure: {id: PLN-016-F, description: "The product never falls back to placing a reusable Plannotator or Artifact Server credential in artifact JavaScript."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-010]
     evidence: []
 
@@ -3623,7 +3640,8 @@ requirements:
       behavior: {id: REL-005-B, description: "Run the integration acceptance and hostile matrices on every advertised connected deployment and record both products' evidence."}
       failure: {id: REL-005-F, description: "A partial pairing, unavailable private route, failed review surface, or missing cross-product audit evidence cannot be advertised as one-click supported integration."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-015, PLN-016, REL-006]
     evidence: []
 
@@ -3799,7 +3817,8 @@ requirements:
       behavior: {id: GATE-010-B, description: "Exercise dependency failure, backup, point-in-time recovery, region or node loss, and operator response against each proposed reliability target."}
       failure: {id: GATE-010-F, description: "A recovery or availability promise cannot exceed measured end-to-end evidence or omit database, blob, DNS, identity, and integration dependencies."}
     deployments: *external_storage
-    status: specified
+    status: not_applicable
+    rationale: This fork is self-hosted only, so it makes no hosted-service promise. Operators who run it set their own availability, backup, and data-handling commitments. The ID stays reserved and is not reused.
     depends_on: [OPS-003, OPS-005]
     evidence: []
 
@@ -3812,7 +3831,8 @@ requirements:
       behavior: {id: GATE-011-B, description: "Trace each enterprise control through configuration, enforcement, storage, backup, export, deletion, monitoring, and customer-visible evidence."}
       failure: {id: GATE-011-F, description: "Backups, replicas, CDN copies, logs, or integration references cannot be omitted from a claimed regional, hold, encryption, export, or deletion boundary."}
     deployments: *external_storage
-    status: specified
+    status: not_applicable
+    rationale: This fork is self-hosted only, so it makes no hosted-service promise. Operators who run it set their own availability, backup, and data-handling commitments. The ID stays reserved and is not reused.
     depends_on: [OPS-003, AUD-001]
     evidence: []
 
@@ -3838,7 +3858,8 @@ requirements:
       behavior: {id: GATE-013-B, description: "Run the review security and compatibility matrix and record the supported bridge or extension decision."}
       failure: {id: GATE-013-F, description: "Any reusable credential exposure, stored-byte mutation, origin confusion, service-worker control, anchor corruption, or unsupported-browser silent failure blocks that review surface."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-009, PLN-010, PLN-016]
     evidence: []
 
@@ -3851,7 +3872,8 @@ requirements:
       behavior: {id: GATE-014-B, description: "Record the chosen semantics and pass authorization, identity, failure, recovery, and disconnect tests for an explicit attachment."}
       failure: {id: GATE-014-F, description: "Pairing alone, a failed action, retry, or disconnect cannot silently move, copy, expose, duplicate, or orphan existing artifacts."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-013]
     evidence: []
 
@@ -3864,7 +3886,8 @@ requirements:
       behavior: {id: GATE-015-B, description: "Qualify customer networking, Cloudflare Tunnel, or the product connector with a published install-to-recovery test matrix."}
       failure: {id: GATE-015-F, description: "A route that exposes another service, grants inbound general network access, hides failure, loses pairing state, or lacks a responsible support team cannot be called one-click."}
     deployments: *plannotator_capable
-    status: specified
+    status: not_applicable
+    rationale: Not built in this fork. Pairing an installation with a hosted Plannotator organization needs upstream's hosted sign-in, which this fork removed, and the fork aims for a smaller codebase without upstream parity (docs/fork/SIMPLIFY.md). The agent integrations under integrations/ are separate and unaffected. The ID stays reserved and is not reused.
     depends_on: [PLN-014, PLN-015]
     evidence: []
 
