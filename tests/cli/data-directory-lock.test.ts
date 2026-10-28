@@ -116,6 +116,28 @@ describe("one server per data directory", () => {
     ));
     expect((await fetch(new URL("/health", recovered.origin))).status).toBe(200);
   }, 60_000);
+
+  test("open names the server that already holds the directory instead of waiting for a start that can only fail", async () => {
+    const parent = await temporaryDirectory();
+    const dataDirectory = path.join(parent, "data");
+    const initialized = await runCli([
+      "init", "--admin-email", "admin@example.test", "--data", dataDirectory,
+    ]);
+    expect(initialized.exitCode).toBe(0);
+    const port = await availablePort();
+    const holder = startCli(compactStart(dataDirectory, port), compactEnvironment);
+    await waitForOutput(holder, '"status":"ready"');
+
+    const startedAt = Date.now();
+    const opened = await runCli(["open", "--data", dataDirectory], {
+      ARTIFACT_SERVER_BROWSER_COMMAND: "/bin/true",
+    });
+    expect(opened.exitCode).not.toBe(0);
+    expect(opened.output).toContain(lockRefusal);
+    // The managed start would have waited out its 15 second health timeout.
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(await isReady(port)).toBe(true);
+  }, 60_000);
 });
 
 function compactStart(dataDirectory: string, port: number): string[] {
