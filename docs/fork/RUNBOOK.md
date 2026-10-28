@@ -422,7 +422,17 @@ docker run --rm --volume artifact-restored:/var/lib/artifact-server \
   integrity check --mode compact --data /var/lib/artifact-server/data
 ```
 
-The integrity check must exit 0 and report `"status": "healthy"`. It exits 2 when a referenced blob is missing or its bytes changed. Run it on a writable volume: SQLite must create a shared-memory file to read the database, so the check fails on a read-only mount. Only after a healthy report, remove the marker and start the server on the restored volume:
+The integrity check must exit 0 and report `"status": "healthy"`. It exits 2 when a referenced blob is missing or its bytes changed. Run it on a writable volume: SQLite must create a shared-memory file to read the database, so the check fails on a read-only mount.
+
+Then check that the archive came from the installation you meant to restore. `installation.json` in the data directory holds the installation ID, the first administrator's email, and timestamps, and no secret. Compare the restored copy with the source's, from `artifact-data` or from when you took the backup, and stop if the IDs differ.
+
+```sh
+docker run --rm --volume artifact-restored:/var/lib/artifact-server \
+  --entrypoint /bin/sh ghcr.io/duyet/artifact-server:<version> \
+  -c 'cat /var/lib/artifact-server/data/installation.json'
+```
+
+Only after both checks pass, remove the marker and start the server on the restored volume:
 
 ```sh
 docker run --rm --volume artifact-restored:/var/lib/artifact-server \
@@ -430,7 +440,7 @@ docker run --rm --volume artifact-restored:/var/lib/artifact-server \
   -c 'rm /var/lib/artifact-server/data/.restore-incomplete'
 ```
 
-The backup carries the installation ID, so the restored server answers as the same installation with the same artifact, version, and action IDs. Restore into a new volume: `mkdir` stops the restore if a `data` directory is already there. Nothing checks that the archive came from the expected installation; the deleted Compose scripts did, and nothing replaces that check yet.
+The backup carries the installation ID, so the restored server answers as the same installation with the same artifact, version, and action IDs. Restore into a new volume: `mkdir` stops the restore if a `data` directory is already there.
 
 ## Contract test against the real gateway
 
