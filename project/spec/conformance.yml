@@ -4206,7 +4206,7 @@ requirements:
       failure: {id: FRK-005-F, description: "The same publishes against a server with login on produce account_required, and an explicit setting always wins."}
     deployments: [single_server, kubernetes]
     status: implementing
-    proof_gap: Tests are not written yet; no deployed run exists.
+    proof_gap: tests/conformance/frk-005-public-default.test.ts runs FRK-005-B and FRK-005-F against a local SQLite server over HTTP, MCP, and the CLI. The account_required default while public links are disabled is proved by AUTH-006. No Postgres or deployed run exists, and no evidence report is attached.
     depends_on: [AUTH-002, FRK-004]
     evidence: []
 
