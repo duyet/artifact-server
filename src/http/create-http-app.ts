@@ -3931,8 +3931,9 @@ async function serveAssetBlob(
   const filename = portableDownloadFilename(asset.name.split("/").at(-1) ?? asset.name);
   const headers = new Headers({
     "Accept-Ranges": "bytes",
-    // One asset ID always names the same bytes.
-    "Cache-Control": "public, max-age=31536000, immutable",
+    // One asset ID always names the same bytes, but its artifact can turn
+    // private, so a shared cache must ask again, like it does for pages.
+    "Cache-Control": "public, no-cache, must-revalidate",
     "Content-Disposition": policy?.inline === true
       ? `inline; filename*=UTF-8''${encodeDispositionFilename(filename)}`
       : attachmentContentDisposition(filename),

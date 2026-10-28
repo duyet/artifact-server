@@ -133,7 +133,7 @@ describe("per-artifact asset store", () => {
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(chart.bytes);
     expect(served.headers.get("content-type")).toBe("image/png");
     expect(served.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(served.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(served.headers.get("cache-control")).toBe("public, no-cache, must-revalidate");
     expect(served.headers.get("etag")).toBe(`"${sha256(chart.bytes)}"`);
     expect(served.headers.get("content-disposition")).toMatch(/^inline;/u);
     expect(served.headers.get("access-control-allow-origin")).toBe("*");

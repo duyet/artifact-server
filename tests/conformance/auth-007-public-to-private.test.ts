@@ -139,10 +139,10 @@ describe("changing public content to account required", () => {
         status: 200,
         url,
       })),
-      // An asset may be reused without asking (docs/fork/ASSETS.md); the
-      // origin still refuses it once the artifact is private.
+      // An asset revalidates like a page, so a cache asks again and is
+      // refused once the artifact is private.
       {
-        cacheControl: "public, max-age=31536000, immutable",
+        cacheControl: "public, no-cache, must-revalidate",
         etag: expect.stringMatching(/^"[a-f0-9]{64}"$/u),
         revalidatedStatus: 304,
         status: 200,
