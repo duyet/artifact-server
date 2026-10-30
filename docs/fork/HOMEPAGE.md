@@ -253,7 +253,14 @@ The grouping is a pure function on the client, because it is display order and d
 5. Order sibling folders by the newest `updatedAt` anywhere beneath them, descending, then `label`. A folder with no artifacts cannot occur, because a folder exists only when an artifact creates it.
 6. Label a folder with its last segment, so `2026/10` reads `10` under `2026`, as issue 5's `2026` › `10` requires.
 
-Prefix-free paths (section 11) make step 3 unambiguous: no folder path is also an artifact path, so no node is both a leaf and a branch.
+A path may also be a folder that holds other artifacts (issue 93). That artifact is the folder's index page, so it does not render as a leaf: the folder row carries it as `index`. The row splits in two. The chevron opens and closes the children, and the folder name links to the index page. A folder with no artifact keeps the single toggle row. A lone one-segment path with nothing below it still renders as a group holding its one artifact.
+
+The server keeps every listed folder page reachable:
+
+- **Routing.** The longest live artifact path wins. With `docs/team` and `docs/team/runbook` both live, `/docs/team/runbook/` serves the runbook and `/docs/team/` and every other `/docs/team/<file>` serve the folder artifact.
+- **Path claim.** Nested paths are allowed and an exact duplicate is still `409 ARTIFACT_PATH_TAKEN`.
+- **Hidden files.** A commit is refused with `409 ARTIFACT_PATH_TAKEN` when a file could never be reached: a new folder version or folder artifact whose file sits at or below a live child path, or a new child whose path covers a file in the folder's current version. The message names the file and both paths, for example `The file "runbook/index.html" in the artifact path "docs/team" would be hidden by the artifact path "docs/team/runbook".` The code is reused so clients that already handle a taken path need no change. Restoring an older folder version does not run this check.
+- **Races.** SQLite runs each commit inside `BEGIN IMMEDIATE`. Postgres takes the installation's artifact-path advisory lock for every create with a path and every new version of an artifact with a path, and a unique index still rejects equal live paths.
 
 The tree builder lives at `apps/web/src/home/home-tree.ts` and exports `buildPublicArtifactTree` and `densifyDailySeries`. Both are pure and are tested from `tests/web/home-tree.test.ts`, which imports them directly — the vitest root includes only `tests/**/*.test.ts`.
 
