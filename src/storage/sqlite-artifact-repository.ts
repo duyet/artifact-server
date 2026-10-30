@@ -164,7 +164,14 @@ import {
   insertSqliteInstallationAction,
 } from "./sqlite-installation-actions.js";
 import {refuseNewerSqliteSchema, requiredSqliteSchemaVersion} from "./sqlite-schema.js";
-import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
+import {
+  artifactPathClaim,
+  artifactPathShadowed,
+  artifactPathTaken,
+  firstShadowedFile,
+  manifestPaths,
+  shadowedPrefix,
+} from "./artifact-path-claim.js";
 import {
   artifactOwnerColumns,
   ownerFilterParameters,
@@ -682,7 +689,9 @@ export class SqliteArtifactRepository implements
       command.manifest.digest,
       command.createdAt,
     );
-    if (command.path !== null) this.#assertArtifactPathFree(command.path);
+    if (command.path !== null) {
+      this.#assertArtifactPathFree(command.path, manifestPaths(command.manifest));
+    }
 
     this.#database
       .prepare(
@@ -744,20 +753,45 @@ export class SqliteArtifactRepository implements
   }
 
   // The caller's BEGIN IMMEDIATE transaction holds the only writer, so no
-  // other claim can land between this check and the insert.
-  #assertArtifactPathFree(path: string): void {
-    const claim = artifactPathClaim(path);
-    const placeholders = claim.lineage.map(() => "?").join(", ");
-    const row = this.#database
+  // other claim or commit can land between these checks and the insert.
+  #assertArtifactPathFree(path: string, files: readonly string[]): void {
+    const taken = this.#database
+      .prepare("SELECT 1 AS taken FROM artifacts WHERE path = ? AND deleted_at IS NULL")
+      .get(path);
+    if (taken !== undefined) throw artifactPathTaken(path);
+    for (const ancestor of artifactPathClaim(path).ancestors) {
+      const prefix = shadowedPrefix(ancestor, path);
+      const row = this.#database
+        .prepare(
+          `SELECT manifest_entries.path AS file
+           FROM artifacts
+           JOIN manifest_entries ON manifest_entries.version_id = artifacts.current_version_id
+           WHERE artifacts.path = ? AND artifacts.deleted_at IS NULL
+             AND (manifest_entries.path = ?
+               OR (manifest_entries.path >= ? AND manifest_entries.path < ?))
+           LIMIT 1`,
+        )
+        .get(ancestor, prefix, `${prefix}/`, `${prefix}0`);
+      const hidden = z.object({file: z.string()}).nullable().parse(row ?? null);
+      if (hidden !== null) throw artifactPathShadowed(ancestor, hidden.file, path);
+    }
+    this.#assertNoShadowedFiles(path, files);
+  }
+
+  /** Refuse files at `path` that a live artifact nested below it would hide. */
+  #assertNoShadowedFiles(path: string, files: readonly string[]): void {
+    const {descendants} = artifactPathClaim(path);
+    const rows = this.#database
       .prepare(
         `SELECT path FROM artifacts
-         WHERE path IS NOT NULL AND deleted_at IS NULL
-           AND (path IN (${placeholders}) OR (path >= ? AND path < ?))
-         LIMIT 1`,
+         WHERE path >= ? AND path < ? AND deleted_at IS NULL
+         ORDER BY path`,
       )
-      .get(...claim.lineage, claim.descendants.from, claim.descendants.to);
-    const existing = z.object({path: z.string()}).nullable().parse(row ?? null);
-    if (existing !== null) throw artifactPathTaken(path, existing.path);
+      .all(descendants.from, descendants.to);
+    for (const {path: child} of z.array(z.object({path: z.string()})).parse(rows)) {
+      const file = firstShadowedFile(shadowedPrefix(path, child), files);
+      if (file !== null) throw artifactPathShadowed(path, file, child);
+    }
   }
 
   #applyVersionCommit(command: CommitArtifactVersion): PublishedVersion {
@@ -776,13 +810,13 @@ export class SqliteArtifactRepository implements
 
     const currentRow = this.#database
       .prepare(
-        `SELECT current_version_id AS currentVersionId
+        `SELECT current_version_id AS currentVersionId, path
          FROM artifacts
          WHERE project_id = ? AND id = ? AND deleted_at IS NULL`,
       )
       .get(command.projectId, command.artifactId);
     const current = z
-      .object({currentVersionId: z.string()})
+      .object({currentVersionId: z.string(), path: z.string().nullable()})
       .nullable()
       .parse(currentRow ?? null);
     if (current === null) {
@@ -792,6 +826,9 @@ export class SqliteArtifactRepository implements
       throw new PublishConflict({
         message: `The artifact moved to version ${current.currentVersionId}.`,
       });
+    }
+    if (current.path !== null) {
+      this.#assertNoShadowedFiles(current.path, manifestPaths(command.manifest));
     }
 
     const numberRow = this.#database
@@ -1294,7 +1331,9 @@ export class SqliteArtifactRepository implements
       const row = this.#database
         .prepare(
           `SELECT id, path FROM artifacts
-           WHERE path IN (${placeholders}) AND deleted_at IS NULL`,
+           WHERE path IN (${placeholders}) AND deleted_at IS NULL
+           ORDER BY length(path) DESC
+           LIMIT 1`,
         )
         .get(...candidates);
       return artifactPathMatchSchema.nullable().parse(row ?? null);

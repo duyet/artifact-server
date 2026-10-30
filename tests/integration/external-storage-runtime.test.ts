@@ -5284,7 +5284,7 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       .toEqual(["team/archive/2025", "team/private"]);
   });
 
-  test("external-storage foundation: Postgres refuses an equal, ancestor, or descendant artifact path, and a deleted artifact frees its path", async () => {
+  test("external-storage foundation: Postgres refuses an equal artifact path, lets paths nest with the longest serving, and a deleted artifact frees its path", async () => {
     const identity = {
       apiToken: managedTestKey("artifact-paths"),
       installationId: `artifact-paths-${randomUUID()}`,
@@ -5323,23 +5323,20 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
     const holder = publishResponseSchema.parse(held.body);
     expect(holder.artifact.path).toBe("2026/10/agent-console");
 
-    // Each message names the live path the overlap query found, so a refusal
-    // proves that query and not some other conflict.
     expect(refusal(await claim("2026/10/agent-console"))).toEqual({
       code: "ARTIFACT_PATH_TAKEN",
       message: 'The path "2026/10/agent-console" already belongs to another artifact.',
       status: 409,
     });
-    expect(refusal(await claim("2026/10"))).toEqual({
-      code: "ARTIFACT_PATH_TAKEN",
-      message: 'The path "2026/10" overlaps the existing artifact path "2026/10/agent-console".',
-      status: 409,
-    });
-    expect(refusal(await claim("2026/10/agent-console/shots"))).toEqual({
-      code: "ARTIFACT_PATH_TAKEN",
-      message: 'The path "2026/10/agent-console/shots" overlaps the existing artifact path "2026/10/agent-console".',
-      status: 409,
-    });
+    // A folder above or below a live path may hold its own artifact, and the
+    // longest live path serves each URL.
+    const folder = await claim("2026/10");
+    expect(folder.status).toBe(201);
+    expect((await claim("2026/10/agent-console/shots")).status).toBe(201);
+    const folderUrl = publishResponseSchema.parse(folder.body).links.artifact;
+    const pages = await Promise.all([folderUrl, `${folderUrl}agent-console/`].map(async (url) =>
+      (await fetchContentThroughServer(server.baseUrl, url)).text()));
+    expect(pages).toEqual(["<h1>2026/10</h1>", "<h1>2026/10/agent-console</h1>"]);
 
     const deleted = await mutateArtifact(
       server.baseUrl,

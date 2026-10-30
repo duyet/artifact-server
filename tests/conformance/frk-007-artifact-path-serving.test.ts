@@ -168,6 +168,46 @@ describe("artifacts served at their readable paths", () => {
     })));
   });
 
+  test("FRK-007-B: a folder path serves its own artifact and the longest artifact path wins, in either publish order", async () => {
+    const folderPage = "<!doctype html><title>Folder index</title>";
+    const childPage = "<!doctype html><title>Child page</title>";
+    const publishAt = (artifactPath: string, entry: string) =>
+      publishSite(server, installation, {
+        accessSetting: "public_link",
+        entry,
+        name: `Nested ${artifactPath}`,
+        path: artifactPath,
+      });
+    const readPages = (folder: string) =>
+      Promise.all([
+        `${folder}/`,
+        `${folder}/assets/a.css`,
+        `${folder}/b/`,
+        `${folder}/b/docs/nested/page.html`,
+      ].map(async (readable) => (await fetch(`${server.baseUrl}/${readable}`)).text()));
+
+    await publishAt("a", folderPage);
+    await publishAt("a/b", childPage);
+    await publishAt("c/b", childPage);
+    await publishAt("c", folderPage);
+    const expected = [folderPage, stylesheet, childPage, nestedHtml];
+    expect(await readPages("a")).toEqual(expected);
+    expect(await readPages("c")).toEqual(expected);
+
+    // A folder whose files a child would hide is refused, so no file is
+    // published that can never be reached.
+    await publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Hiding child",
+      path: "guide/docs",
+    });
+    await expect(publishSite(server, installation, {
+      accessSetting: "public_link",
+      name: "Hidden folder",
+      path: "guide",
+    })).rejects.toThrow("HTTP 409");
+  });
+
   test("FRK-007-F: private, unknown, deleted, and write requests are refused, a missing slash redirects, and the API stays unsandboxed", async () => {
     const priv = await publishSite(server, installation, {
       accessSetting: "account_required",
