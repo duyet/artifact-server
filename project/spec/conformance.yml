@@ -4237,7 +4237,7 @@ requirements:
     owner: content-delivery
     source: {file: ../../docs/fork/DESIGN.md, anchor: readable-artifact-paths}
     acceptance:
-      behavior: {id: FRK-007-B, description: "Open an artifact at its path, read its nested files and SPA fallback, publish a new version at the same URL, and follow links.artifact and /artifacts/<id> to the path; with a folder path and a path below it both live, in either publish order, the longest artifact path serves each URL."}
+      behavior: {id: FRK-007-B, description: "Open an artifact at its path, read its nested files and SPA fallback, publish a new version at the same URL, and follow links.artifact and /artifacts/<id> to the path."}
       failure: {id: FRK-007-F, description: "A private artifact is 401, a missing slash is 308 with its query, an unknown or deleted path is 404 NOT_FOUND, POST is 405, and API routes carry no sandbox header."}
     deployments: [single_server, kubernetes]
     status: implementing

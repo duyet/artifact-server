@@ -168,7 +168,7 @@ describe("artifacts served at their readable paths", () => {
     })));
   });
 
-  test("FRK-007-B: a folder path serves its own artifact and the longest artifact path wins, in either publish order", async () => {
+  test("a folder path serves its own artifact and the longest artifact path wins, in either publish order", async () => {
     const folderPage = "<!doctype html><title>Folder index</title>";
     const childPage = "<!doctype html><title>Child page</title>";
     const publishAt = (artifactPath: string, entry: string) =>

@@ -1955,8 +1955,9 @@ describe.sequential("external-storage Postgres and S3 runtime", () => {
       status: 200,
     })));
 
+    // A folder above the raced path may hold its own artifact on the other process.
     const ancestor = await commitWithPath(second, "2026/10", `path-ancestor-${raceKey}`);
-    expect(ancestor.status).toBe(409);
+    expect(ancestor.status).toBe(201);
     await ancestor.arrayBuffer();
     const sibling = await commitWithPath(first, "2026/10/raced-v2", `path-sibling-${raceKey}`);
     expect(sibling.status).toBe(201);
