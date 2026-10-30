@@ -174,7 +174,14 @@ import {
   publicLinkInventoryRowSchema,
   publicLinkPageFromRows,
 } from "./public-link-inventory-row.js";
-import {artifactPathClaim, artifactPathTaken} from "./artifact-path-claim.js";
+import {
+  artifactPathClaim,
+  artifactPathShadowed,
+  artifactPathTaken,
+  firstShadowedFile,
+  manifestPaths,
+  shadowedPrefix,
+} from "./artifact-path-claim.js";
 
 const accessSettingSchema = z.enum([
   accessSettings.accountRequired,
@@ -710,7 +717,7 @@ export class PostgresArtifactRepository implements
         );
         if (command.path !== null) {
           yield* lockArtifactPaths(sql, installationId);
-          yield* this.#assertArtifactPathFree(command.path);
+          yield* this.#assertArtifactPathFree(command.path, manifestPaths(command.manifest));
         }
         yield* sql`INSERT INTO artifacts (
           installation_id, project_id, id, name, search_name, access_setting,
@@ -783,15 +790,16 @@ export class PostgresArtifactRepository implements
           command.edit?.stagedManifestDigest ?? command.manifest.digest,
           command.createdAt,
         );
-        const currentRows = yield* sql.unsafe<{currentVersionId: string}>(
-          `SELECT current_version_id AS "currentVersionId"
+        const currentRows = yield* sql.unsafe<object>(
+          `SELECT current_version_id AS "currentVersionId", path
            FROM artifacts
            WHERE installation_id = $1 AND project_id = $2
              AND id = $3 AND deleted_at IS NULL
            FOR UPDATE`,
           [installationId, command.projectId, command.artifactId],
         );
-        const current = z.object({currentVersionId: z.string()}).nullable()
+        const current = z.object({currentVersionId: z.string(), path: z.string().nullable()})
+          .nullable()
           .parse(currentRows[0] ?? null);
         if (current === null) {
           return yield* new ArtifactNotFound({message: "The artifact does not exist."});
@@ -800,6 +808,10 @@ export class PostgresArtifactRepository implements
           return yield* new PublishConflict({
             message: `The artifact moved to version ${current.currentVersionId}.`,
           });
+        }
+        if (current.path !== null) {
+          yield* lockArtifactPaths(sql, installationId);
+          yield* this.#assertNoShadowedFiles(current.path, manifestPaths(command.manifest));
         }
         const numberRows = yield* sql.unsafe<{nextNumber: number}>(
           `SELECT COALESCE(MAX(number), 0) + 1 AS "nextNumber"
@@ -1318,7 +1330,9 @@ export class PostgresArtifactRepository implements
       const rows = yield* sql.unsafe<object>(
         `SELECT id, path FROM artifacts
          WHERE installation_id = $1 AND path = ANY($2::text[])
-           AND deleted_at IS NULL`,
+           AND deleted_at IS NULL
+         ORDER BY length(path) DESC
+         LIMIT 1`,
         [installationId, candidates],
       );
       return artifactPathMatchSchema.nullable().parse(rows[0] ?? null);
@@ -3472,26 +3486,57 @@ export class PostgresArtifactRepository implements
     });
   }
 
-  #assertArtifactPathFree(path: string) {
+  // Callers hold the installation's artifact-path lock, so no other claim or
+  // commit at a related path can land between these checks and their write.
+  #assertArtifactPathFree(path: string, files: readonly string[]) {
+    const installationId = this.#installationId;
+    return Effect.gen({self: this}, function*() {
+      const sql = yield* SqlClient;
+      const taken = yield* sql.unsafe<object>(
+        `SELECT 1 AS taken FROM artifacts
+         WHERE installation_id = $1 AND path = $2 AND deleted_at IS NULL`,
+        [installationId, path],
+      );
+      if (taken.length > 0) yield* artifactPathTaken(path);
+      for (const ancestor of artifactPathClaim(path).ancestors) {
+        const prefix = shadowedPrefix(ancestor, path);
+        const rows = yield* sql.unsafe<object>(
+          `SELECT manifest_entries.path AS file
+           FROM artifacts
+           JOIN manifest_entries
+             ON manifest_entries.installation_id = artifacts.installation_id
+             AND manifest_entries.version_id = artifacts.current_version_id
+           WHERE artifacts.installation_id = $1
+             AND artifacts.path = $2 AND artifacts.deleted_at IS NULL
+             AND (manifest_entries.path = $3
+               OR starts_with(manifest_entries.path, $4))
+           LIMIT 1`,
+          [installationId, ancestor, prefix, `${prefix}/`],
+        );
+        const hidden = z.object({file: z.string()}).nullable().parse(rows[0] ?? null);
+        if (hidden !== null) yield* artifactPathShadowed(ancestor, hidden.file, path);
+      }
+      yield* this.#assertNoShadowedFiles(path, files);
+    });
+  }
+
+  /** Refuse files at `path` that a live artifact nested below it would hide. */
+  #assertNoShadowedFiles(path: string, files: readonly string[]) {
     const installationId = this.#installationId;
     return Effect.gen(function*() {
       const sql = yield* SqlClient;
-      const claim = artifactPathClaim(path);
+      const {descendants} = artifactPathClaim(path);
       const rows = yield* sql.unsafe<object>(
         `SELECT path FROM artifacts
-         WHERE installation_id = $1
-           AND path IS NOT NULL AND deleted_at IS NULL
-           AND (path = ANY($2::text[]) OR (path >= $3 AND path < $4))
-         LIMIT 1`,
-        [
-          installationId,
-          claim.lineage,
-          claim.descendants.from,
-          claim.descendants.to,
-        ],
+         WHERE installation_id = $1 AND deleted_at IS NULL
+           AND path >= $2 AND path < $3
+         ORDER BY path`,
+        [installationId, descendants.from, descendants.to],
       );
-      const existing = z.object({path: z.string()}).nullable().parse(rows[0] ?? null);
-      if (existing !== null) yield* artifactPathTaken(path, existing.path);
+      for (const {path: child} of z.array(z.object({path: z.string()})).parse(rows)) {
+        const file = firstShadowedFile(shadowedPrefix(path, child), files);
+        if (file !== null) yield* artifactPathShadowed(path, file, child);
+      }
     });
   }
 
@@ -4903,8 +4948,8 @@ function lockAgentClaim(
   )`;
 }
 
-// Paths are prefix-free across the installation, so every create that
-// claims one serializes on a single lock while it checks and inserts.
+// A path claim and a commit that could hide or be hidden by a nested path both
+// read other artifacts' paths and files, so they serialize on a single lock.
 function lockArtifactPaths(
   sql: SqlClient,
   installationId: string,

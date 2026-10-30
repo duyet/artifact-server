@@ -43,16 +43,17 @@ async function stageContent(
   repository: ContractRepository,
   content: string,
   createdAt: string,
+  extraPaths: readonly string[] = [],
 ): Promise<{readonly manifest: CommitNewArtifact["manifest"]; readonly source: PublicationSource}> {
   const bytes = new TextEncoder().encode(content);
   const manifest = createManifest({
     entryPath: "index.html",
-    files: [{
+    files: ["index.html", ...extraPaths].map((filePath) => ({
       mediaType: "text/html; charset=utf-8",
-      path: "index.html",
+      path: filePath,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       size: bytes.byteLength,
-    }],
+    })),
     routingMode: "static",
   });
   const uploadId = ids.uploadId();
@@ -83,13 +84,20 @@ async function newArtifactCommand(
   repository: ContractRepository,
   input: {
     readonly createdAt: string;
+    /** Files beside `index.html`, all holding the same page. */
+    readonly extraPaths?: readonly string[];
     readonly idempotencyKey: string;
     readonly name: string;
     readonly path?: string;
     readonly tags?: readonly string[];
   },
 ): Promise<CommitNewArtifact> {
-  const staged = await stageContent(repository, `<h1>${input.name}</h1>`, input.createdAt);
+  const staged = await stageContent(
+    repository,
+    `<h1>${input.name}</h1>`,
+    input.createdAt,
+    input.extraPaths,
+  );
   return {
     accessSetting: "account_required",
     artifactId: ids.artifactId(),
@@ -120,9 +128,14 @@ async function publishArtifact(
 async function versionCommand(
   repository: ContractRepository,
   published: PublishedVersion,
-  input: {readonly content: string; readonly createdAt: string; readonly idempotencyKey: string},
+  input: {
+    readonly content: string;
+    readonly createdAt: string;
+    readonly extraPaths?: readonly string[];
+    readonly idempotencyKey: string;
+  },
 ): Promise<CommitArtifactVersion> {
-  const staged = await stageContent(repository, input.content, input.createdAt);
+  const staged = await stageContent(repository, input.content, input.createdAt, input.extraPaths);
   return {
     artifactId: published.artifact.id,
     authorizedByPrincipalId: null,
@@ -372,6 +385,96 @@ export const artifactRepositoryContract: readonly ArtifactRepositoryContractCase
       await expect(listedIds(repository, {tags: ["design-review"]}))
         .resolves.toEqual([published.artifact.id]);
       await expect(listedIds(repository, {tags: ["old"]})).resolves.toEqual([]);
+    },
+  },
+  {
+    name: "a folder path holds its own artifact, the longest path routes, and a hidden file is refused",
+    async check(repository) {
+      const child = await publishArtifact(repository, {
+        createdAt: at(0),
+        idempotencyKey: "contract-nest-child",
+        name: "Runbook",
+        path: "docs/team/runbook",
+      });
+      const folder = await publishArtifact(repository, {
+        createdAt: at(1),
+        idempotencyKey: "contract-nest-folder",
+        name: "Team",
+        path: "docs/team",
+      });
+      await expect(publishArtifact(repository, {
+        createdAt: at(2),
+        idempotencyKey: "contract-nest-equal",
+        name: "Team Again",
+        path: "docs/team",
+      })).rejects.toMatchObject({
+        _tag: "ArtifactPathTaken",
+        message: 'The path "docs/team" already belongs to another artifact.',
+      });
+      // Candidates arrive in any order; the deepest live path wins.
+      await expect(repository.findArtifactByPath(["docs", "docs/team", "docs/team/runbook"]))
+        .resolves.toEqual({id: child.artifact.id, path: "docs/team/runbook"});
+      await expect(repository.findArtifactByPath(["docs/team/notes", "docs/team", "docs"]))
+        .resolves.toEqual({id: folder.artifact.id, path: "docs/team"});
+
+      // A new folder version may not carry a file the child hides.
+      await expect(repository.commitVersion(await versionCommand(repository, folder, {
+        content: "<h1>Team v2</h1>",
+        createdAt: at(3),
+        extraPaths: ["runbook/index.html"],
+        idempotencyKey: "contract-nest-hidden-version",
+      }))).rejects.toMatchObject({
+        _tag: "ArtifactPathTaken",
+        message: 'The file "runbook/index.html" in the artifact path "docs/team" would be hidden by the artifact path "docs/team/runbook".',
+      });
+      await expect(repository.commitVersion(await versionCommand(repository, folder, {
+        content: "<h1>Team v2</h1>",
+        createdAt: at(4),
+        extraPaths: ["runbook-old/index.html"],
+        idempotencyKey: "contract-nest-sibling-version",
+      }))).resolves.toMatchObject({version: {number: 2}});
+
+      // A new folder artifact may not carry a file an existing child hides.
+      await publishArtifact(repository, {
+        createdAt: at(5),
+        idempotencyKey: "contract-nest-guide-page",
+        name: "Setup",
+        path: "guides/setup",
+      });
+      await expect(publishArtifact(repository, {
+        createdAt: at(6),
+        extraPaths: ["setup"],
+        idempotencyKey: "contract-nest-hidden-folder",
+        name: "Guides",
+        path: "guides",
+      })).rejects.toMatchObject({
+        _tag: "ArtifactPathTaken",
+        message: 'The file "setup" in the artifact path "guides" would be hidden by the artifact path "guides/setup".',
+      });
+
+      // A new child may not hide a file the folder already serves.
+      await publishArtifact(repository, {
+        createdAt: at(7),
+        extraPaths: ["intro/index.html"],
+        idempotencyKey: "contract-nest-handbook",
+        name: "Handbook",
+        path: "handbook",
+      });
+      await expect(publishArtifact(repository, {
+        createdAt: at(8),
+        idempotencyKey: "contract-nest-hiding-child",
+        name: "Intro",
+        path: "handbook/intro",
+      })).rejects.toMatchObject({
+        _tag: "ArtifactPathTaken",
+        message: 'The file "intro/index.html" in the artifact path "handbook" would be hidden by the artifact path "handbook/intro".',
+      });
+      await expect(publishArtifact(repository, {
+        createdAt: at(9),
+        idempotencyKey: "contract-nest-sibling-child",
+        name: "Introduction",
+        path: "handbook/introduction",
+      })).resolves.toMatchObject({artifact: {path: "handbook/introduction"}});
     },
   },
   {

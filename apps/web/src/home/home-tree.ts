@@ -45,6 +45,8 @@ export interface PublicArtifactTreeEntry {
 export interface PublicArtifactTreeFolder {
   readonly artifacts: readonly PublicArtifactTreeEntry[];
   readonly folders: readonly PublicArtifactTreeFolder[];
+  /** The artifact whose path is this folder, opened from the folder name. */
+  readonly index: PublicArtifactTreeEntry | null;
   readonly label: string;
   readonly path: string;
 }
@@ -58,6 +60,7 @@ export interface PublicArtifactTree {
 interface MutableFolder {
   readonly artifacts: PublicArtifactTreeEntry[];
   readonly children: Map<string, MutableFolder>;
+  index: PublicArtifactTreeEntry | null;
   readonly label: string;
   readonly path: string;
 }
@@ -65,10 +68,10 @@ interface MutableFolder {
 /**
  * Group public artifacts by their readable paths.
  *
- * Paths are prefix-free, so a folder path is never also an artifact path and
- * every node is unambiguously a branch, a leaf, or both groups' parent. An
- * artifact with no path has no folder to nest under, so it collects in its own
- * list and the page renders that last.
+ * An artifact whose path is also a folder above other listed artifacts is that
+ * folder's index page: the folder row carries it, so it never repeats as a
+ * leaf. An artifact with no path has no folder to nest under, so it collects
+ * in its own list and the page renders that last.
  */
 export function buildPublicArtifactTree(
   entries: readonly PublicArtifactTreeEntry[],
@@ -76,16 +79,20 @@ export function buildPublicArtifactTree(
 ): PublicArtifactTree {
   const roots = new Map<string, MutableFolder>();
   const ungrouped: PublicArtifactTreeEntry[] = [];
+  const folderPaths = new Set(entries.flatMap((entry) => ancestorPaths(entry.path)));
 
   for (const entry of entries) {
     const segments = entry.path?.split("/").filter((s) => s !== "") ?? [];
+    if (entry.path !== null && folderPaths.has(entry.path)) {
+      segmentFolder(roots, segments).index = entry;
+      continue;
+    }
     const leaf = segments.pop();
     if (leaf === undefined) {
       ungrouped.push(entry);
       continue;
     }
-    // A one-segment path has no parent folder. Because paths are prefix-free,
-    // nothing else can live under that segment, so it becomes a group that
+    // A one-segment path has no parent folder, so it becomes a group that
     // holds exactly this artifact.
     const holder = segmentFolder(roots, segments.length === 0 ? [leaf] : segments);
     holder.artifacts.push(entry);
@@ -95,6 +102,12 @@ export function buildPublicArtifactTree(
     folders: sortFolders(roots.values(), sort),
     ungrouped: ungrouped.toSorted(treeSortOrders[sort].entries),
   };
+}
+
+/** Every folder path above `path`, outermost first. */
+function ancestorPaths(path: string | null): readonly string[] {
+  const segments = path?.split("/").filter((s) => s !== "") ?? [];
+  return segments.slice(1).map((_, index) => segments.slice(0, index + 1).join("/"));
 }
 
 /** The folder at `segments`, creating every missing ancestor along the way. */
@@ -109,7 +122,7 @@ function segmentFolder(
     prefix = prefix === "" ? segment : `${prefix}/${segment}`;
     folder = siblings.get(prefix);
     if (folder === undefined) {
-      folder = {artifacts: [], children: new Map(), label: segment, path: prefix};
+      folder = {artifacts: [], children: new Map(), index: null, label: segment, path: prefix};
       siblings.set(prefix, folder);
     }
     siblings = folder.children;
@@ -223,6 +236,7 @@ function sortFolders(
     .map((folder): PublicArtifactTreeFolder => ({
       artifacts: folder.artifacts.toSorted(treeSortOrders[sort].entries),
       folders: sortFolders(folder.children.values(), sort),
+      index: folder.index,
       label: folder.label,
       path: folder.path,
     }))
@@ -231,7 +245,11 @@ function sortFolders(
 
 /** Every artifact anywhere beneath a folder. */
 function entriesBeneath(folder: PublicArtifactTreeFolder): readonly PublicArtifactTreeEntry[] {
-  return [...folder.artifacts, ...folder.folders.flatMap(entriesBeneath)];
+  return [
+    ...(folder.index === null ? [] : [folder.index]),
+    ...folder.artifacts,
+    ...folder.folders.flatMap(entriesBeneath),
+  ];
 }
 
 function newestUpdatedAt(folder: PublicArtifactTreeFolder): string {

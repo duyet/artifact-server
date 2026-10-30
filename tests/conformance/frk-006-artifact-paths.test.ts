@@ -290,34 +290,24 @@ describe("readable artifact paths at creation", () => {
       .toBe("2026/10/cli-report");
   });
 
-  test("FRK-006-F: overlapping, malformed, version-scoped, and host-mode paths are refused, and a deleted artifact frees its path", async () => {
+  test("FRK-006-F: duplicate, malformed, version-scoped, and host-mode paths are refused, and a deleted artifact frees its path", async () => {
     const held = await commit(server, installation, newArtifact("2026/10/agent-console"));
     expect(held.status).toBe(201);
     const holder = publishedSchema.parse(held.body);
 
-    const overlaps = await Promise.all([
-      "2026/10/agent-console",
-      "2026/10",
-      "2026/10/agent-console/shots",
-    ].map(async (artifactPath) =>
-      refusal(await commit(server, installation, newArtifact(artifactPath)))));
-    expect(overlaps).toEqual([
-      {
+    expect(refusal(await commit(server, installation, newArtifact("2026/10/agent-console"))))
+      .toEqual({
         code: "ARTIFACT_PATH_TAKEN",
         message: 'The path "2026/10/agent-console" already belongs to another artifact.',
         status: 409,
-      },
-      {
-        code: "ARTIFACT_PATH_TAKEN",
-        message: 'The path "2026/10" overlaps the existing artifact path "2026/10/agent-console".',
-        status: 409,
-      },
-      {
-        code: "ARTIFACT_PATH_TAKEN",
-        message: 'The path "2026/10/agent-console/shots" overlaps the existing artifact path "2026/10/agent-console".',
-        status: 409,
-      },
-    ]);
+      });
+    // A folder above or below a live path may hold its own artifact.
+    const nested = await Promise.all([
+      "2026/10",
+      "2026/10/agent-console/shots",
+    ].map(async (artifactPath) =>
+      (await commit(server, installation, newArtifact(artifactPath))).status));
+    expect(nested).toEqual([201, 201]);
 
     const raced = await Promise.all([
       commit(server, installation, newArtifact("2026/11/raced")),

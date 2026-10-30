@@ -4219,12 +4219,12 @@ requirements:
 
   - id: FRK-006
     kind: behavior
-    behavior: A new artifact may claim one readable path when it is created; live paths are prefix-free within an installation, a new version keeps the path, and a deleted artifact frees it.
+    behavior: A new artifact may claim one readable path when it is created; live paths are unique within an installation and may nest, so a folder path can hold its own index artifact, a commit that would hide a file behind a nested path is refused, a new version keeps the path, and a deleted artifact frees it.
     owner: publishing
     source: {file: ../../docs/fork/DESIGN.md, anchor: readable-artifact-paths}
     acceptance:
       behavior: {id: FRK-006-B, description: "Create artifacts with a path over HTTP, MCP, and the CLI, publish a new version, retry the create, and observe the stored normalized path each time."}
-      failure: {id: FRK-006-F, description: "An equal, ancestor, or descendant path is 409, a concurrent claim of one path admits one create, malformed paths over HTTP or MCP and a path on a new version are refused, the CLI refuses --path with --artifact, a host-mode server answers CapabilityUnavailable, and a deleted artifact frees its path."}
+      failure: {id: FRK-006-F, description: "An equal path is 409 while an ancestor or descendant path is accepted, a commit whose file a nested path would hide is 409 naming both paths, a concurrent claim of one path admits one create, malformed paths over HTTP or MCP and a path on a new version are refused, the CLI refuses --path with --artifact, a host-mode server answers CapabilityUnavailable, and a deleted artifact frees its path."}
     deployments: [single_server, kubernetes]
     status: implementing
     proof_gap: Proved locally against SQLite. The external-storage suite now runs the Postgres overlap check, so two server processes racing for one path admit one create and both serve it, and on one server an equal, ancestor, or descendant path is 409 ARTIFACT_PATH_TAKEN naming the live path it overlaps, and deleting the holder frees the path for a new artifact that then holds it the same way; it runs only in CI with Docker and does not cover MCP or CLI creates, a retried create, malformed paths, a path on a new version, or host mode on Postgres. No deployed run exists.
