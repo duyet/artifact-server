@@ -77,13 +77,35 @@ describe("public artifact tree", () => {
     expect(october?.folders[0]?.artifacts.map((a) => a.name)).toEqual(["Plan"]);
   });
 
-  test("a one-segment path becomes a group, because nothing can live under it", () => {
+  test("a lone one-segment path becomes a group that holds it", () => {
     const tree = buildPublicArtifactTree([
       entry("Index", "2026", "2026-10-01T00:00:00.000Z"),
     ]);
     expect(tree.folders.map((folder) => folder.label)).toEqual(["2026"]);
     expect(tree.folders[0]?.artifacts.map((a) => a.name)).toEqual(["Index"]);
     expect(tree.ungrouped).toEqual([]);
+  });
+
+  test("an artifact at a folder path is that folder's index page, not a second leaf", () => {
+    const tree = buildPublicArtifactTree([
+      entry("Runbook", "docs/team/runbook", "2026-10-01T00:00:00.000Z"),
+      entry("Team", "docs/team", "2026-10-02T00:00:00.000Z"),
+      entry("Docs", "docs", "2026-10-03T00:00:00.000Z"),
+      entry("Plan", "plan", "2026-10-04T00:00:00.000Z"),
+    ]);
+
+    expect(tree.folders.map((folder) => folder.path)).toEqual(["plan", "docs"]);
+    const [plan, docs] = tree.folders;
+    // A lone one-segment path keeps today's shape: a group holding its artifact.
+    expect(plan?.index).toBeNull();
+    expect(plan?.artifacts.map((a) => a.name)).toEqual(["Plan"]);
+    expect(docs?.index?.name).toBe("Docs");
+    expect(docs?.artifacts).toEqual([]);
+    const team = docs?.folders[0];
+    expect(team?.path).toBe("docs/team");
+    expect(team?.index?.url).toBe("https://artifacts.example.internal/docs/team/");
+    expect(team?.artifacts.map((a) => a.name)).toEqual(["Runbook"]);
+    expect(team?.folders).toEqual([]);
   });
 
   test("a pathless artifact collects in its own list and never becomes a folder", () => {

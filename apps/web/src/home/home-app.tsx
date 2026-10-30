@@ -658,42 +658,79 @@ function focusDayButton(chart: HTMLElement | null, day: string): void {
 
 /**
  * A folder row in the file-tree pattern: a Collapsible whose trigger is a
- * Button. The row is a heading so a reader can jump between folders.
+ * Button. The row is a heading so a reader can jump between folders. A folder
+ * with an index page splits the row: the chevron still toggles the children
+ * and the name opens the page.
  */
 function TreeFolder({
   children,
   defaultOpen = true,
+  href = null,
   id,
   name,
   prefix = "",
 }: {
   readonly children: React.ReactNode;
   readonly defaultOpen?: boolean;
+  /** The folder's own artifact page, or null when no artifact claims the folder. */
+  readonly href?: string | null;
   readonly id: string;
   readonly name: string;
   /** The path above `name`, spoken but not drawn: the indent already shows it. */
   readonly prefix?: string;
 }) {
+  const chevron = (
+    <IconChevronRight className="transition-transform group-data-panel-open/button:rotate-90" />
+  );
   return (
     <Collapsible defaultOpen={defaultOpen}>
-      <h2 id={id}>
-        <CollapsibleTrigger
-          // One name for the whole path: a visually hidden prefix element
-          // would be read as a separate word ("2026/ 10").
-          aria-label={prefix + name}
-          render={
-            <Button
-              className="w-full justify-start font-normal aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+      {href === null
+        ? (
+          <h2 id={id}>
+            <CollapsibleTrigger
+              // One name for the whole path: a visually hidden prefix element
+              // would be read as a separate word ("2026/ 10").
+              aria-label={prefix + name}
+              render={
+                <Button
+                  className="w-full justify-start font-normal aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+                  size="sm"
+                  variant="ghost"
+                />
+              }
+            >
+              {chevron}
+              <IconFolder />
+              {name}
+            </CollapsibleTrigger>
+          </h2>
+        )
+        : (
+          <h2 className="flex items-center" id={id}>
+            <CollapsibleTrigger
+              aria-label={`Show or hide ${prefix + name}`}
+              render={
+                <Button
+                  className="shrink-0 aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              {chevron}
+            </CollapsibleTrigger>
+            <ButtonLink
+              aria-label={prefix + name}
+              className="min-w-0 flex-1 justify-start font-normal"
+              href={href}
               size="sm"
               variant="ghost"
-            />
-          }
-        >
-          <IconChevronRight className="transition-transform group-data-panel-open/button:rotate-90" />
-          <IconFolder />
-          {name}
-        </CollapsibleTrigger>
-      </h2>
+            >
+              <IconFolder />
+              <span className="truncate">{name}</span>
+            </ButtonLink>
+          </h2>
+        )}
       <CollapsibleContent>
         <div className="ml-4 flex flex-col border-l pl-1">{children}</div>
       </CollapsibleContent>
@@ -713,6 +750,7 @@ function FolderNode({
   return (
     <TreeFolder
       defaultOpen={!collapsed.has(folder.path)}
+      href={folder.index?.url ?? null}
       id={`folder-${folder.path}`}
       name={folder.label}
       prefix={folder.path.slice(0, folder.path.length - folder.label.length)}
